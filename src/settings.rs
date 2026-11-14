@@ -1530,6 +1530,7 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "~~文字~~ 空格" => "~~text~~ Space",
         "$$文字$$" => "$$text$$",
         "--- 或 ***" => "--- or ***",
+        "阅读模式" => "Reading mode",
         "已切换为阅读模式" => "Switched to reading mode",
         "已切换为编辑模式" => "Switched to editing mode",
         "编辑" => "Edit",
