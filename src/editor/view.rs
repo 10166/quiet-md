@@ -1968,7 +1968,9 @@ impl Editor {
         } else if let Some(d) = internal {
             self.core.paste_blocks(d.blocks);
         } else if let Some(b) = html.filter(|b| !b.is_empty() && !restates(b) && !(image.is_some() && b.iter().all(|b| matches!(b.kind, BlockKind::Image { .. })))) {
+            let remote = super::image::pasted_remote(&b);
             self.core.paste_blocks(b);
+            self.adopt_pasted(remote, cx);
         } else if let Some(images) = image.filter(|_| rich_target) {
             let mut blocks = Vec::new();
             for img in images {
