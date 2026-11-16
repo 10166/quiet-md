@@ -6,6 +6,7 @@ pub(crate) const APP_ID: &str = "com.s1dashu.quietmd";
 mod app;
 #[cfg(unix)]
 mod big_alloc;
+mod board;
 #[cfg(unix)]
 #[global_allocator]
 static ALLOC: big_alloc::Alloc = big_alloc::Alloc;
@@ -68,7 +69,7 @@ mod tree;
 mod ui;
 mod update;
 
-use fdl_core::{docxml, lang, markdown, model, palette, paste, store, time};
+use fdl_core::{docxml, lang, markdown, model, palette, paste, store, time, whiteboard};
 
 use gpui::*;
 
@@ -190,10 +191,12 @@ fn main() {
         #[cfg(target_os = "macos")]
         set_app_icon();
         editor::math::load_fonts(cx);
+        board::fonts::load(cx);
         editor::image::init_pictures(cx);
         input::bind_keys(cx);
         editor::keymap::bind_keys(cx);
         editor::image::bind_keys(cx);
+        board::bind_keys(cx);
         app::bind_keys(cx);
         settings::load();
         settings::apply_appearance(&settings::prefs().appearance);

@@ -292,9 +292,35 @@ pub fn picture(path: &Path, long: f32) -> Img {
     match PICTURES.with(|p| p.get().cloned()) { Some(e) => im.image_cache(&e).load_visible_only(), None => im }
 }
 
+/// A board's image file (`board::render`), painted by hand: the pixels
+/// straight from the picture cache, decoded for a long edge of `long`
+/// logical pixels; None until they arrive (the view being painted is
+/// notified then).
+pub fn board_picture(path: &Path, long: f32, window: &mut Window, cx: &mut App) -> Option<Arc<RenderImage>> {
+    let cap = cap(long * window.scale_factor());
+    let uri = SharedUri::from(format!("docpic:{cap}:{}", path.display()));
+    KEYS.with(|k| { k.borrow_mut().entry(uri.clone()).or_insert_with(|| (Arc::from(path), cap)); });
+    let e = PICTURES.with(|p| p.get().cloned())?;
+    e.update(cx, |c, cx| c.load(&Resource::Uri(uri), window, cx))?.ok()
+}
+
 /// Decodes `path` with its long edge at most `cap` pixels (0: as is). The
 /// shrunken image keeps the file's size for layout through its scale factor.
 fn decode(path: &Path, cap: u32) -> Decoded {
+    let (im, w, _) = shrunk(path, cap)?;
+    let mut rgba = im.into_rgba8();
+    for px in rgba.as_chunks_mut::<4>().0 { px.swap(0, 2); }
+    let scale = rgba.width() as f32 / w.max(1) as f32;
+    Ok(Arc::new(RenderImage::new(vec![image::Frame::new(rgba)]).with_scale_factor(scale)))
+}
+
+/// `path`'s pixels as straight RGBA, the long edge at most `cap` (0: as
+/// is), shrunk while decoding as `decode` does (board image sources).
+pub fn decode_rgba(path: &Path, cap: u32) -> Option<image::RgbaImage> { shrunk(path, cap).ok().map(|(im, _, _)| im.into_rgba8()) }
+
+/// `path` decoded with its long edge at most `cap` (0: as is), with the
+/// file's own size.
+fn shrunk(path: &Path, cap: u32) -> Result<(image::DynamicImage, u32, u32), ImageCacheError> {
     // A PNG streams from the file, never read whole.
     let (im, w, h) = match if cap > 0 { decode_png(path, cap) } else { None } {
         Some(p) => p,
@@ -318,10 +344,7 @@ fn decode(path: &Path, cap: u32) -> Decoded {
         drop(im);
         small
     } else { im };
-    let mut rgba = im.into_rgba8();
-    for px in rgba.as_chunks_mut::<4>().0 { px.swap(0, 2); }
-    let scale = rgba.width() as f32 / w.max(1) as f32;
-    Ok(Arc::new(RenderImage::new(vec![image::Frame::new(rgba)]).with_scale_factor(scale)))
+    Ok((im, w, h))
 }
 
 /// A PNG shrunk row by row as it decodes (box filter, alpha-weighted), so only
@@ -2279,7 +2302,7 @@ pub(super) fn image_block_from(bytes: &[u8], ext: &str) -> Result<Block, &'stati
 
 /// macOS screenshots may only offer TIFF. Store those as lossless PNG;
 /// other clipboard formats keep their original bytes (including animation).
-pub(super) fn clipboard_image_data(img: &gpui::Image) -> Result<(std::borrow::Cow<'_, [u8]>, &'static str), &'static str> {
+pub(crate) fn clipboard_image_data(img: &gpui::Image) -> Result<(std::borrow::Cow<'_, [u8]>, &'static str), &'static str> {
     if img.bytes.len() as u64 > MAX_BYTES { return Err(TOO_BIG); }
     let ext = match img.format {
         ImageFormat::Png => "png",
@@ -2311,12 +2334,12 @@ fn image_block_named(bytes: &[u8], ext: &str, name: Option<&str>) -> Result<Bloc
 }
 
 /// Checks picked or pasted image bytes and copies them into the assets folder.
-pub(super) fn store_image(bytes: &[u8], ext: &str) -> Result<PathBuf, &'static str> { store_image_named(bytes, ext, None) }
+pub(crate) fn store_image(bytes: &[u8], ext: &str) -> Result<PathBuf, &'static str> { store_image_named(bytes, ext, None) }
 
 /// `store_image`; an image with a `name` (a picked or dropped file) is kept
 /// as `<8 hex>-<name>.<ext>`, so its name survives in the library and in the
 /// copy beside a Markdown file. A pasted one is just `<uuid>.<ext>`.
-fn store_image_named(bytes: &[u8], ext: &str, name: Option<&str>) -> Result<PathBuf, &'static str> {
+pub(crate) fn store_image_named(bytes: &[u8], ext: &str, name: Option<&str>) -> Result<PathBuf, &'static str> {
     let ext = ext.to_ascii_lowercase();
     if !FORMATS.contains(&ext.as_str()) {
         return Err(BAD_FORMAT);

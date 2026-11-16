@@ -268,6 +268,12 @@ impl Workspace {
             let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
             let mut missing = out.missing;
             let written = std::fs::write(&path, &out.text).and_then(|_| {
+                // a 画板's SVG and .excalidraw
+                for (rel, text) in &out.generated {
+                    let to = dir.join(rel);
+                    if let Some(p) = to.parent() { std::fs::create_dir_all(p)?; }
+                    std::fs::write(&to, text)?;
+                }
                 for (src, rel) in &out.files {
                     let to = dir.join(rel);
                     if let Some(p) = to.parent() {
