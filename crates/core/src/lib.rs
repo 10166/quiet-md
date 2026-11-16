@@ -2,6 +2,7 @@
 //! reading and writing, the editing core with undo, the library on disk,
 //! and Markdown / HTML import plus Markdown export.
 
+pub mod board;
 pub mod data_images;
 pub mod docxml;
 pub mod editor;
@@ -13,3 +14,4 @@ pub mod palette;
 pub mod paste;
 pub mod store;
 pub mod time;
+pub mod whiteboard;

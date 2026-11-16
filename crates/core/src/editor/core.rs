@@ -340,6 +340,11 @@ fn doc_bytes(doc: &Document) -> usize {
         if let BlockKind::Raw { xml, .. } = &b.kind {
             n += xml.len();
         }
+        // A board is shared between snapshots until it changes; counted once
+        // per snapshot all the same (a rough budget).
+        if let BlockKind::Board(bd) = &b.kind {
+            n += bd.elements.len() * std::mem::size_of::<crate::board::types::Element>();
+        }
     });
     n
 }
@@ -1074,6 +1079,28 @@ impl Core {
         if let Some(BlockKind::File(f)) = self.block_mut(id).map(|b| &mut b.kind) {
             f.view = view;
         }
+    }
+
+    /// 画板: block `id`'s scene replaced (the full-window board closed with
+    /// changes), as one undo step. False when nothing changed.
+    /// `join`: the open board saving as it's edited — every change after
+    /// the session's first joins its undo step.
+    pub fn set_board(&mut self, id: BlockId, bd: crate::whiteboard::Board, join: bool) -> bool {
+        if !matches!(self.kind_of(id), Some(BlockKind::Board(b)) if **b != bd) {
+            return false;
+        }
+        if join {
+            self.generation += 1;
+            self.redo.clear();
+            self.dirty = true;
+        } else {
+            self.checkpoint(EditKind::Other);
+            self.break_coalescing();
+        }
+        if let Some(b) = self.block_mut(id) {
+            b.kind = BlockKind::Board(std::sync::Arc::new(bd));
+        }
+        true
     }
 
     /// 文本视图: the block becomes a paragraph holding the attachment

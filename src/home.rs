@@ -249,6 +249,12 @@ fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote:
             for child in &b.children { node = node.child(div().py(px(9. * s)).px(px(6. * s)).flex().items_start().gap(px(6. * s)).child(icon("doc", 16. * s, Theme::icon())).child(div().flex_1().min_w_0().font_weight(FontWeight::MEDIUM).child(child.text.text.clone()))); }
             return node.into_any_element();
         }
+        // a 画板 block: its board fit into the block's box (painters cached by board version)
+        BlockKind::Board(bd) => {
+            let board = bd.clone();
+            return node.h(px(bd.height * s)).rounded(px(8. * s)).border(px(s)).border_color(Theme::line_border()).bg(crate::board::render::canvas_color(bd)).overflow_hidden()
+                .child(canvas(|_, _, _| {}, move |bounds, _, window, cx| crate::board::render::paint_card(&board, bounds, window, cx)).size_full()).into_any_element();
+        }
         BlockKind::Raw { tag, .. } => return node.p(px(8. * s)).rounded(px(8. * s)).bg(Theme::bg_overlay()).text_color(Theme::text_caption()).child(crate::localized_format!("<{tag}> 已保留的内容", "<{tag}> Preserved content")).into_any_element(),
         _ => {}
     }
@@ -409,7 +415,7 @@ fn weight3(mut d: Div) -> Div {
 fn entry_icon(e: &Entry) -> AnyElement {
     if e.meta.folder.is_some() { return icon("folder", 22., Theme::icon()).mr(px(13.)).into_any_element(); }
     match &e.icon {
-        _ if e.meta.markdown => crate::search::doc_icon_named("doc-md").mr(px(12.)).into_any_element(),
+        _ if e.meta.named_by_file() => crate::search::doc_icon_named(crate::search::file_glyph(&e.meta)).mr(px(12.)).into_any_element(),
         Some(em) => div().size(px(24.)).mr(px(12.)).flex_none().flex().items_center().justify_center().text_size(px(18.)).child(em.clone()).into_any_element(),
         None => doc_icon().mr(px(12.)).into_any_element(),
     }
@@ -899,6 +905,11 @@ impl Workspace {
                 p = p.child(div().flex_none().flex().items_start().gap(px(6.)).mb(px(8.))
                     .when_some(e.icon.as_ref(), |d, emoji| d.child(div().flex_none().text_size(px(14.)).line_height(px(20.)).child(emoji.clone())))
                     .child(div().min_w_0().text_size(px(14.)).line_height(px(20.)).font_weight(FontWeight::BOLD).child(e.title.clone())));
+                // A 画板: its board, drawn to fit the rest of the card.
+                if e.meta.kind == crate::store::DocKind::Board {
+                    let board = thumb.blocks.iter().find_map(|b| match &b.kind { BlockKind::Board(bd) => Some(bd.clone()), _ => None }).unwrap_or_default();
+                    return p.child(canvas(|_, _, _| {}, move |bounds, _, window, cx| crate::board::render::paint_card(&board, bounds, window, cx)).flex_1().w_full());
+                }
                 for (i, block) in thumb.blocks.iter().enumerate() {
                     let (mt, _) = bs::gap(&block.kind);
                     let prev = if i == 0 { 0. } else { bs::gap(&thumb.blocks[i - 1].kind).1 };

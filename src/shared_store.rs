@@ -43,6 +43,7 @@ impl SharedStore {
     pub fn is_markdown(&self, id: &str) -> bool { self.0.borrow().is_markdown(id) }
     pub fn create_markdown(&mut self, doc: &Document, front: &str) -> Result<String> { self.0.borrow_mut().create_markdown(doc, front) }
     pub fn create_from_in(&mut self, doc: &Document, parent: Option<&str>) -> Result<String> { self.0.borrow_mut().create_from_in(doc, parent) }
+    pub fn create_board_in(&mut self, title: &str, board: &crate::whiteboard::Board, parent: Option<&str>) -> Result<String> { self.0.borrow_mut().create_board_in(title, board, parent) }
     pub fn import_into(&mut self, path: &std::path::Path, parent: Option<&str>) -> Result<String> { self.0.borrow_mut().import_into(path, parent) }
     /// One write for many (导入文件夹, deleting a big folder): each
     /// `begin_batch` that succeeded needs its `end_batch`.

@@ -2475,7 +2475,8 @@ impl Window {
         result
     }
 
-    pub(crate) fn with_element_opacity<R>(
+    /// quiet.md: public, for the board's translucent images.
+    pub fn with_element_opacity<R>(
         &mut self,
         opacity: Option<f32>,
         f: impl FnOnce(&mut Self) -> R,

@@ -40,6 +40,8 @@ pub enum EditorEvent {
     Toast,
     /// A 创建副本 button was clicked.
     Duplicate,
+    /// A standalone 画板 was closed (退出 / Esc): go back to where it is.
+    Leave,
 }
 
 /// A child page shown by 子页面列表 blocks.
@@ -231,6 +233,7 @@ pub struct Editor {
     pub(super) captions: HashMap<BlockId, (Entity<TextField>, Vec<Subscription>)>,
     pub(super) img: super::image::ImageUi,
     pub(super) cd: super::countdown::CdUi,
+    pub(super) boards: super::board::BoardUi,
     pub(super) btn: super::button::BtnUi,
     pub(super) rm: super::reminder::RmUi,
     pub(super) file: super::file::FileUi,
@@ -247,6 +250,9 @@ pub struct Editor {
     /// A Markdown file: only what Markdown can hold is offered (no colors,
     /// alignment, callouts, columns, add-on blocks, icon or cover).
     pub markdown: bool,
+    /// A standalone 画板 (`.excalidraw`): its one board is open over the
+    /// window, and leaving it leaves the file.
+    pub board_file: bool,
     pub(super) ro_doc: Option<crate::model::Document>,
     /// The 文档信息 row under the title.
     pub info: crate::store::InfoRow,
@@ -458,10 +464,12 @@ impl Editor {
             created: modified,
             read_only: false,
             markdown: false,
+            board_file: false,
             ro_doc: None,
             info: Default::default(),
             restore_top: None,
             cd,
+            boards: Default::default(),
             btn,
             rm,
             _subs: subs,
@@ -935,6 +943,14 @@ impl Editor {
                 self.core.sel = Selection::caret(Pos::new(p, 0));
                 self.changed(window, cx);
                 return self.open_countdown(nid, window, cx);
+            }
+            // an empty board, opened over the window at once
+            SlashKind::Board => {
+                let nid = self.core.insert_block(Block::new(BlockKind::Board(std::sync::Arc::default()), RichText::default()));
+                let p = self.core.ensure_paragraph_after(nid);
+                self.core.sel = Selection::caret(Pos::new(p, 0));
+                self.changed(window, cx);
+                return self.open_board(nid, window, cx);
             }
             SlashKind::Table => {
                 let (rows, cols) = size.unwrap_or((3, 3));

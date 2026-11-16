@@ -99,6 +99,7 @@ A 120 Hz display gives each frame 8.3 ms. Even at P95 on a million-character doc
 ## Features
 
 - **Editing**: headings, ordered and bulleted lists, to-dos, quotes, code blocks with syntax highlighting, LaTeX math, tables (with merged cells), callouts, columns, images, attachments and covers. Markdown shortcuts such as `#`, `-`, `[]` and `>`, plus a `/` slash menu.
+- **Boards**: a whiteboard ported from Excalidraw — shapes, arrows that stay bound, freehand, text, sticky notes, frames and images — as a block in a note or a standalone `.excalidraw` file that excalidraw.com opens.
 - **Organizing**: a document tree, pinning, favorites, full-text search and a trash.
 - **Import and export**: import Markdown folders (Obsidian picture embeds and callouts included) and Feishu (Lark) DocxXML; export Markdown and PDF, or print directly. Drag files from Finder onto Home or straight into a sidebar folder. Pasting from Feishu or a web page keeps the structure.
 - **Shortcuts**: press `⌘ /` (`Ctrl+/` on Windows) to see them all. Every one can be rebound. On Windows, Ctrl stands in for ⌘ and Alt for ⌥; the app and the Getting started guides show the keys for your system.

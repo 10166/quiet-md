@@ -49,6 +49,14 @@ diff -ru $R/taffy-0.9.0/src vendor/taffy/src
 | 27 | `platform.rs`、`platform/mac/window.rs`、`platform/windows/window.rs`、`window.rs` | `Window::set_window_min_size`：创建后改窗口最小内容尺寸（macOS `setContentMinSize`，Windows 改 `WM_GETMINMAXINFO` 用的 `min_size`；其他平台不变） | 最小宽度 = 文档区最小宽度 + 侧栏宽度，随侧栏开合和拖宽变化 |
 | 28 | `platform.rs`、`platform/mac/window.rs`、`window.rs` | `Window::present_next_frame_in_transaction`：下一帧走 `PlatformWindow::draw_in_transaction`，macOS 上这一帧 `presentsWithTransaction`，和渲染期间改的原生视图在同一个 Core Animation 事务里上屏；其他平台照常 `draw` | 侧栏玻璃（`NSGlassEffectView`）大小或显隐变化的那一帧和 GPUI 画面同时出现；原来画面异步上屏、晚一个刷新，开关侧栏时玻璃先没（先出来），看着像顿了一下 |
 | 29 | `scene.rs` | `insert_primitive` 判断阴影是否落在裁剪区外时，按着色器实际画到的范围（四周各多 3 倍模糊半径）算，原来只看阴影本身的矩形 | 阴影的模糊部分落进裁剪区、矩形本身在区外时不再被丢掉（主页拖入文件时，按连续圆角逐行裁剪的内侧光晕） |
+| 30 | `scene.rs`、`window.rs`、`path_builder.rs` | `Path::transformed(scale, offset)`：把已经三角化的路径整体缩放、平移成一条新路径；`Window::with_element_opacity` 改为 `pub`；再导出 lyon 的 `LineCap`、`LineJoin` | 画板按元素缓存三角化结果，平移和小幅缩放时直接搬用，不重新三角化；画板里半透明的图片 |
+| 31 | `scene.rs` | `Path::triangles()`：读出路径三角化后的三角形 | 画板按旋转、圆角的框架裁剪路径，并在箭头标签处挖空（`src/board/render_geom.rs` 逐个三角形裁） |
+| 32 | `platform/mac/metal_renderer.rs`、`platform/mac/shaders.metal` | BGRA surface：`kCVPixelFormatType_32BGRA` 的 `CVPixelBuffer` 走新管线 `surfaces_bgra`（`surface_bgra_fragment`，最近邻 1:1 采样），`draw_surfaces` 按像素格式分支；原来只接受 YUV420（视频）。来自 `spike/vello-gpui/gpui-bgra-surface.patch` | 画板的 vello_cpu 后端把画面写进 IOSurface 像素缓冲，用 `Window::paint_surface` 显示（`src/board/render_vello.rs`） |
+| 33 | `platform.rs`、`text_system.rs`、`platform/mac/text_system.rs` | `WindowTextSystem::glyph_outline(font_id, glyph_id)` 和 `GlyphOutlineCmd`：字形轮廓（字体单位、y 向上）。`PlatformTextSystem::glyph_outline` 默认 None，只有 macOS 实现（font-kit / CoreText `create_path_for_glyph`，合成斜体同样错切 14°） | vello 后端用 GPUI 排好的字形（含 CJK 回退字体）按轮廓画文字 |
+| 34 | `platform.rs`、`platform/mac.rs`、`platform/mac/text_system.rs`、`platform/linux/text_system.rs` | `load_family` 不再拒绝没有 `m` 字形的 Xiaolai（macOS 同 KaTeX 的例外，Linux 按 PostScript 名 `XiaolaiSC`）；`test_text_system()`（macOS，`#[doc(hidden)]`）：不建窗口、不起应用，直接拿一个 CoreText 的 `WindowTextSystem` | 画板的 CJK 手写字体 Xiaolai 只有 CJK 字符；画板字体的测试在 `cargo test` 里注册内置字体、量字宽（`src/board/fonts.rs`） |
+| 35 | `text_system.rs` | `WindowTextSystem::layout_line`（`shape_line` 也走它）合并相邻 run 时比较字体，同 `shape_text`；原来只要颜色、下划线相同就并进上一个 run 的字体 | 画板一行文字按字体分 run（Excalifont 后接 Xiaolai），后面的 run 原来被排成前一个字体，CJK 落到系统回退字体 |
+| 36 | `platform/mac/metal_renderer.rs` | 路径光栅化的顶点直接写进 instance buffer（先算总数、超出缓冲区照旧返回 false）；原来先在一个从空开始逐个扩容的 `Vec` 里攒好再整块拷过去 | 画板每帧大量路径顶点；原来每帧在这里反复 realloc 和拷贝，约占 Metal 提交一帧的四分之三（3 万元素场景拖动时每帧约 0.8ms，现在约 0.2ms） |
+| 37 | `elements/div.rs` | 有 `active` 样式的元素总是监听松开（capture 阶段，按下过才清掉并刷新）；原来只有「画的时候已是按下状态」的那一帧才注册松开监听 | 按下和松开在同一帧之前到达（触控板轻点、脚本点击）时，按钮的按下样式一直留着，直到下一次松开 |
 
 ## taffy 0.9.0
 

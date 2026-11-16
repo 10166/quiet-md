@@ -36,6 +36,11 @@ pub static RENDER_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU6
 static POINTER: Mutex<(f32, f32)> = Mutex::new((640., 400.));
 static CURSOR_LOG: Mutex<Option<(Instant, std::fs::File)>> = Mutex::new(None);
 static PICK: Mutex<Option<Vec<std::path::PathBuf>>> = Mutex::new(None);
+/// Inside a `bench` step: the window is borrowed, so native NSEvents sent to
+/// the view would be dropped; pointer moves go to `Window::dispatch_event`.
+static BENCHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Where the scripted drag is (`down`, `dragto`, `dragby`).
+static DRAG_AT: Mutex<(f32, f32)> = Mutex::new((0., 0.));
 
 /// The scripted answer to the next open / save dialog, if any.
 /// Files a script is dragging over the window (`filedrag`), as the Finder would.
@@ -135,10 +140,16 @@ pub fn start(window: &mut Window, cx: &mut App) {
                 let (scmd, srest) = step.split_once(' ').unwrap_or((step, ""));
                 let mut samples = vec![];
                 for _ in 0..n.parse().unwrap_or(20) {
+                    // the step, then (its effects and observers through, as
+                    // after a real event) the frame
+                    let t0 = Instant::now();
                     let _ = handle.update(cx, |_, window, cx| {
-                        let t0 = Instant::now();
+                        BENCHING.store(true, std::sync::atomic::Ordering::Relaxed);
                         run(scmd, srest, window, cx);
-                        let t1 = Instant::now();
+                        BENCHING.store(false, std::sync::atomic::Ordering::Relaxed);
+                    });
+                    let t1 = Instant::now();
+                    let _ = handle.update(cx, |_, window, cx| {
                         RENDER_NS.store(0, std::sync::atomic::Ordering::Relaxed);
                         window.draw(cx).clear();
                         let render = RENDER_NS.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e6;
@@ -258,6 +269,14 @@ pub fn start(window: &mut Window, cx: &mut App) {
                 let drop = cmd == "filedrop";
                 cx.update(|cx| {
                     let handle = cx.windows().into_iter().find_map(|w| w.downcast::<crate::app::Workspace>()).unwrap();
+                    // an open 画板 takes the drop itself (its canvas `on_drop`)
+                    let board = handle.update(cx, |ws, _, cx| ws.editor.as_ref().and_then(|e| e.read(cx).board_view())).ok().flatten();
+                    if let (Some(b), Some(p), true) = (board.as_ref(), paths.as_ref(), drop) {
+                        FILE_DRAG.lock().unwrap().take();
+                        let p = p.clone();
+                        handle.update(cx, |_, window, cx| b.update(cx, |me, cx| { me.pointer = at; crate::board::tools::image::drop_files(me, p, window, cx) })).unwrap();
+                        return;
+                    }
                     handle.update(cx, |ws, window, cx| match paths {
                         // Over the sidebar the tree takes it; otherwise the page.
                         Some(p) if drop => { FILE_DRAG.lock().unwrap().take(); if ws.sidebar_drop_at(at, false, cx) { ws.sidebar_files_dropped(p, cx); } else { ws.file_drag_at(at, p.clone(), cx); ws.file_drop_paths(p, window, cx); } }
@@ -554,10 +573,17 @@ fn mouse_step(view: usize, cmd: &str, n: &[f32]) -> bool {
         // optional third number is the click count ("down x y 2": a double
         // click's second press, with frames in between).
         "down" if n.len() >= 2 => {
+            *DRAG_AT.lock().unwrap() = (n[0], n[1]);
             send(view, MOVED, n[0], n[1], 0);
             send(view, LEFT_DOWN, n[0], n[1], n.get(2).map_or(1, |c| *c as i64));
         }
-        "dragto" if n.len() >= 2 => send(view, LEFT_DRAGGED, n[0], n[1], 1),
+        "dragto" if n.len() >= 2 => { *DRAG_AT.lock().unwrap() = (n[0], n[1]); send(view, LEFT_DRAGGED, n[0], n[1], 1) }
+        // `dragby dx dy`: one drag step from the last `down` / `dragto` /
+        // `dragby` point (so `bench 30 dragby 3 0` times a moving drag).
+        "dragby" if n.len() >= 2 => {
+            let (x, y) = { let mut d = DRAG_AT.lock().unwrap(); d.0 += n[0]; d.1 += n[1]; *d };
+            send(view, LEFT_DRAGGED, x, y, 1)
+        }
         // `place x y`: the window's top-left at screen point (x, y) of the main
         // display, floating (for desktop shots; see tools/harness/README.md).
         "place" if n.len() >= 2 => place_top_left(view, n[0] as f64, n[1] as f64),
@@ -569,6 +595,18 @@ fn mouse_step(view: usize, cmd: &str, n: &[f32]) -> bool {
 
 fn run(cmd: &str, rest: &str, window: &mut Window, cx: &mut App) {
     match cmd {
+        "move" | "dragto" | "dragby" if BENCHING.load(std::sync::atomic::Ordering::Relaxed) => {
+            let n = nums(rest);
+            if n.len() >= 2 {
+                let (x, y) = match cmd {
+                    "move" => (n[0], n[1]),
+                    "dragto" => { *DRAG_AT.lock().unwrap() = (n[0], n[1]); (n[0], n[1]) }
+                    _ => { let mut d = DRAG_AT.lock().unwrap(); d.0 += n[0]; d.1 += n[1]; *d }
+                };
+                let pressed_button = (cmd != "move").then_some(MouseButton::Left);
+                window.dispatch_event(PlatformInput::MouseMove(MouseMoveEvent { position: point(px(x), px(y)), pressed_button, modifiers: Modifiers::default() }), cx);
+            }
+        }
         // Synthesized right-button NSEvents report buttonNumber 0, so GPUI would
         // read them as left clicks; feed the right click to GPUI directly.
         "forget-uploads" => eprintln!("devtools: forgot {} uploads", crate::editor::image::forget_uploads(window, cx)),

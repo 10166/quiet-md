@@ -34,6 +34,7 @@ KEYS = {
     "04-tables": ("tables", "writing-guides", False),
     "05-code": ("code", "writing-guides", False),
     "06-media": ("media", "writing-guides", False),
+    "06a-boards": ("boards", "writing-guides", False),
     "07-organize": ("organize", None, False),
     "07a-reading-list": ("reading-list", "examples", False),
     "07b-weekly": ("weekly", "examples", False),

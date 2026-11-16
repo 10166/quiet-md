@@ -234,6 +234,7 @@ impl CosmicTextSystemState {
             let allowed_bad_font_names = [
                 "SegoeFluentIcons", // NOTE: Segoe fluent icons postscript name is inconsistent
                 "Segoe Fluent Icons",
+                "XiaolaiSC", // quiet.md: the board's CJK-only font
             ];
 
             if font.as_swash().charmap().map('m') == 0

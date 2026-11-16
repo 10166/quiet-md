@@ -618,10 +618,11 @@ impl Workspace {
             let mut e = Editor::new(doc, modified, width, window, cx);
             e.cat_pinned = pinned;
             e.markdown = meta.as_ref().is_some_and(|m| m.markdown);
+            e.board_file = meta.as_ref().is_some_and(|m| m.kind == crate::store::DocKind::Board);
             if let Some(m) = &meta {
                 e.created = m.created;
                 e.info = m.info;
-                e.set_read_only(m.reading, cx);
+                if !e.board_file { e.set_read_only(m.reading, cx); }
             }
             e
         });
@@ -665,6 +666,7 @@ impl Workspace {
                     this.duplicate_doc(&id, window, cx);
                 }
             }
+            EditorEvent::Leave => cx.defer_in(window, |this, window, cx| this.leave_board(window, cx)),
             EditorEvent::Catalogue(pinned) => {
                 if let Some(id) = this.current.clone() {
                     if let Some(e) = this.entries.iter_mut().find(|e| e.id == id) {
@@ -678,6 +680,8 @@ impl Workspace {
         if !self.search_open {
             editor.read(cx).focus(window);
         }
+        // A 画板 opens straight into its board, over the whole window.
+        editor.update(cx, |e, cx| e.open_board_file(window, cx));
         if let Some(m) = self.store.touch(id)
             && let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
                 e.meta.opened = m.opened;
@@ -830,6 +834,21 @@ impl Workspace {
         self.doc_menu = false;
         self.doc_sub = None;
         self.show_toast(if on { crate::settings::text("已添加到“收藏”") } else { crate::settings::text("已从“收藏”中移除") }, cx);
+        cx.notify();
+    }
+
+    /// 退出 on a standalone 画板: save it, close it, and show the folder it
+    /// is in (主页 at the top).
+    fn leave_board(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.flush(cx) { return; }
+        let Some(id) = self.current.take() else { return };
+        self.editor = None;
+        self.editor_sub = None;
+        if self.document_peers(&id, window, cx).is_empty() { self.store.forget_loaded(&id); }
+        match self.entries.iter().find(|e| e.id == id).and_then(|e| e.meta.parent.clone()) {
+            Some(p) => { self.open_folder(&p, window, cx); }
+            None => self.show_view(View::Home, cx),
+        }
         cx.notify();
     }
 
@@ -1463,7 +1482,13 @@ impl Render for Workspace {
             let vs = window.viewport_size();
             if f32::from(vs.width) < min_w - 0.5 && !window.is_fullscreen() { window.resize(size(px(min_w), vs.height)); }
         }
-        let sidebar = if self.sidebar_open { Some(if matches!(self.view, View::Settings | View::Trash) { self.render_settings_sidebar(window, cx) } else { self.render_sidebar(window, cx) }) } else { None };
+        // A board open over the whole window covers the sidebar: it keeps its
+        // width (the note under it keeps its layout) but not its rows, which
+        // would otherwise be laid out again on every frame the board draws.
+        let covered = self.view == View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).board_open());
+        let sidebar = if self.sidebar_open { Some(if covered {
+            div().w(px(self.sidebar_w(window))).flex_none().h_full().into_any_element()
+        } else if matches!(self.view, View::Settings | View::Trash) { self.render_settings_sidebar(window, cx) } else { self.render_sidebar(window, cx) }) } else { None };
         let row_menu = self.render_row_menu(window, cx);
         let resize = self.sidebar_open.then(|| self.render_resize_handle(window, cx));
         let resize_overlay = self.render_resize_overlay(cx);
