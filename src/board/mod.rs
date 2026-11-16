@@ -429,9 +429,10 @@ impl Render for BoardView {
             .map(|d| keys::listeners(d, cx))
             .map(|d| canvas::listeners(d, cx))
             .child(canvas_el)
-            .children(labels)
+            // frame names (and the rename field) stay inside the board: a
+            // frame scrolled off the left edge would put its name over the sidebar
+            .child(div().absolute().top_0().left_0().size_full().overflow_hidden().children(labels).children(frame_name))
             .children(editor)
-            .children(frame_name)
             .child(AnyView::from(chrome).cached(StyleRefinement::default().absolute().top_0().left_0().size_full()))
             .children(canvas::capture_layer(self, cx))
     }
