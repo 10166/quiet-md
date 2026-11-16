@@ -285,7 +285,7 @@ impl Workspace {
             if written.is_err() {
                 let _ = this.update(cx, |w, cx| w.show_toast_kind(ToastKind::Error, crate::settings::text("导出失败，请重试"), cx));
             } else if missing > 0 {
-                let _ = this.update(cx, |w, cx| w.show_toast_kind(ToastKind::Error, &crate::localized_format!("已导出，但有 {missing} 个图片或附件未能复制", "Exported, but {missing} images or attachments could not be copied"), cx));
+                let _ = this.update(cx, |w, cx| w.show_toast_kind(ToastKind::Error, &crate::localized_count!(missing, "已导出，但有 {missing} 个图片或附件未能复制", "Exported, but {missing} image or attachment could not be copied", "Exported, but {missing} images or attachments could not be copied"), cx));
             }
         })
         .detach();
@@ -593,7 +593,7 @@ impl Workspace {
         if let Err(e) = saved {
             self.show_toast_kind(ToastKind::Error, &crate::localized_format!("导入未能完成：{}", "Import could not finish: {}", crate::settings::diagnostic(&e.to_string())), cx);
         } else if failed > 0 {
-            self.show_toast_kind(ToastKind::Error, &crate::localized_format!("有 {failed} 个文件未能导入", "{failed} files could not be imported"), cx);
+            self.show_toast_kind(ToastKind::Error, &crate::localized_count!(failed, "有 {failed} 个文件未能导入", "{failed} file could not be imported", "{failed} files could not be imported"), cx);
         } else if self.toast.as_ref().is_some_and(|t| matches!(t.0, ToastKind::Info) && t.1.as_ref() == crate::settings::tr("正在导入…", "Importing…")) { self.toast = None; }
         cx.notify();
     }
