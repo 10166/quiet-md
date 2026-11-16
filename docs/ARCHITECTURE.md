@@ -131,7 +131,7 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 | `highlight.rs` | 代码高亮 |
 | `assets.rs` | 编进二进制的图标、字体、封面图库 |
 | `devtools.rs` | 脚本驱动，只在 `--features devtools` 构建里编入（见 tools/harness/README.md） |
-| `board/` 视图 | 整窗画板 `BoardView`（`mod.rs`：场景、store、提交循环）、指针分发 `canvas.rs`、快捷键 `keys.rs`、action 执行与剪贴板 `run.rs` / `action.rs`、文字编辑框 `text_editor.rs`、分区改名 `frame_name.rs`；文档里的缩略图和进出在 `editor/board.rs` |
+| `board/` 视图 | 画板 `BoardView`（打开时取代文档占满笔记区）（`mod.rs`：场景、store、提交循环）、指针分发 `canvas.rs`、快捷键 `keys.rs`、action 执行与剪贴板 `run.rs` / `action.rs`、文字编辑框 `text_editor.rs`、分区改名 `frame_name.rs`；文档里的缩略图和进出在 `editor/board.rs` |
 | `board/tools/` | 工具状态机：`selection`（拖动、手柄、框选）`shape` `linear` `freedraw` `text` `eraser` `lasso` `image` `crop` `flowchart` |
 | `board/` 渲染 | GPUI 后端 `render.rs` + `render_geom.rs`（CPU 裁剪与图片重采样）、macOS 的 vello_cpu 后端 `render_vello.rs`、交互层 `overlay.rs`（选框、手柄、吸附线） |
 | `board/chrome/` | 工具栏、属性面板、色板、右键菜单、缩放控件、快捷键帮助 |

@@ -77,7 +77,10 @@ pub fn labels(me: &mut BoardView, window: &mut Window) -> Vec<AnyElement> {
     me.frame_labels.clear();
     if !me.app.frame_rendering.enabled || !me.app.frame_rendering.name { return vec![]; }
     let v = me.view();
-    let vp = window.viewport_size();
+    // labels sit in the board view, which the canvas fills; `frame_labels`
+    // keeps window rects (the pointer's coordinates)
+    let cb = me.bounds.get();
+    let (o, vp) = (cb.origin, cb.size);
     let font = gpui::font(crate::board::chrome::style::UI_FONT);
     let fs = px(FrameStyle::NAME_FONT_SIZE as f32);
     let mut out = vec![];
@@ -85,14 +88,14 @@ pub fn labels(me: &mut BoardView, window: &mut Window) -> Vec<AnyElement> {
         let a = v.to_screen([f.x, f.y]);
         let max_w = px(f.width as f32 * v.zoom);
         let top = a.y - px(FrameStyle::NAME_OFFSET_Y as f32 + NAME_LINE);
-        if a.x > vp.width || a.x + max_w < px(0.) || top > vp.height || a.y + px(f.height as f32 * v.zoom) < px(0.) { continue; }
+        if a.x > o.x + vp.width || a.x + max_w < o.x || top > o.y + vp.height || a.y + px(f.height as f32 * v.zoom) < o.y { continue; }
         let title: SharedString = get_frame_like_title(f).to_string().into();
         let run = TextRun { len: title.len(), font: font.clone(), color: name_color(), background_color: None, underline: None, strikethrough: None };
         // (rounded up: a hair short and the ellipsis would cut it)
         let w = (window.text_system().shape_line(title.clone(), fs, &[run], None).width.ceil() + px(1.)).min(max_w);
         me.frame_labels.push((f.id.clone(), Bounds { origin: point(a.x, top), size: size(w, px(NAME_LINE)) }));
         if me.frame_name.as_ref().is_some_and(|n| n.id == f.id) { continue; }
-        out.push(div().absolute().left(a.x).top(top).w(w).font_family(crate::board::chrome::style::UI_FONT).h(px(NAME_LINE)).overflow_hidden().whitespace_nowrap().text_ellipsis()
+        out.push(div().absolute().left(a.x - o.x).top(top - o.y).w(w).font_family(crate::board::chrome::style::UI_FONT).h(px(NAME_LINE)).overflow_hidden().whitespace_nowrap().text_ellipsis()
             .text_size(fs).line_height(px(NAME_LINE)).text_color(name_color()).child(title).into_any_element());
     }
     out
@@ -109,6 +112,7 @@ pub fn frame_name_at(me: &BoardView, p: Point<Pixels>) -> Option<String> {
 pub fn element(me: &BoardView, cx: &mut Context<BoardView>) -> Option<AnyElement> {
     let f = me.frame_name.as_ref()?;
     let (_, b) = me.frame_labels.iter().find(|(id, _)| *id == f.id)?;
+    let o = me.bounds.get().origin;
     let pad = 6.;
     let size = FrameStyle::NAME_FONT_SIZE as f32;
     let text = f.field.read(cx).text.clone();
@@ -117,7 +121,7 @@ pub fn element(me: &BoardView, cx: &mut Context<BoardView>) -> Option<AnyElement
     let w = px((text.chars().count() as f32 + 1.) * size * 0.6).max(px(size));
     let bg = super::render::color(super::color::color_or_black(&me.app.view_background_color), 1.);
     f.field.update(cx, |t, _| { t.size = size; t.line_height = NAME_LINE; t.color = name_color(); });
-    Some(div().absolute().left(b.origin.x - px(pad)).top(b.origin.y - px(pad) + px(pad)).p(px(pad)).rounded(px(4.)).bg(bg).border_1().border_color(super::chrome::style::primary())
+    Some(div().absolute().left(b.origin.x - o.x - px(pad)).top(b.origin.y - o.y).p(px(pad)).rounded(px(4.)).bg(bg).border_1().border_color(super::chrome::style::primary())
         .font_family(super::chrome::style::UI_FONT)
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())

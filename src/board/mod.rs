@@ -60,8 +60,8 @@ pub enum BoardEvent {
 
 /// Room the chrome takes from the canvas edges when fitting (screen px):
 /// upstream `viewport.getOffsets()` measures the `data-viewport-ui` toolbar
-/// (bottom at 16 + 44) and adds 24 on every side.
-pub(crate) const FIT_OFFSETS: viewport::Offsets = viewport::Offsets { top: 84., right: 24., bottom: 24., left: 24. };
+/// (its bottom: ours at 8 + 44, upstream 16 + 44) and adds 24 on every side.
+pub(crate) const FIT_OFFSETS: viewport::Offsets = viewport::Offsets { top: chrome::style::TOP_PADDING as f64 + 44. + 24., right: 24., bottom: 24., left: 24. };
 
 /// Elbow routing (core's default) plus arrow labels laid out with our
 /// measurer: the hooks every core call that moves arrows gets.
@@ -87,8 +87,6 @@ pub struct BoardView {
     pub height: f32,
     pub(crate) store: Store,
     pub(crate) history: History,
-    /// A standalone file's name, shown next to 退出.
-    pub name: Option<String>,
     pub(crate) m: Rc<GpuiMeasure>,
     pub(crate) painter: Rc<RefCell<render::Painter>>,
     pub(crate) focus: FocusHandle,
@@ -179,7 +177,7 @@ impl BoardView {
         app.apply_exported(&board.app);
         let bd = Arc::unwrap_or_clone(board);
         let mut v = BoardView {
-            scene: Scene::new(bd.elements), files: bd.files, app, height: bd.height, store: Store::new(), history: History::new(), name: None,
+            scene: Scene::new(bd.elements), files: bd.files, app, height: bd.height, store: Store::new(), history: History::new(),
             m: render::measure(window), painter: Rc::new(RefCell::new({ let mut p = render::Painter::default(); p.screen_frame_names = true; p })), focus: cx.focus_handle(), bounds: Rc::default(), gesture: None, space: false, fitted: false,
             linear: None, multi: None, suggested: None, snap_lines: vec![], text: None, frame_name: None, frame_labels: vec![], font_cache: None, font_previewing: false, refocus: false, hover_cursor: CursorStyle::Arrow, pointer: point(px(0.), px(0.)),
             menu: None, help: false, copied_styles: vec![], flowchart: FlowChartCreator::default(), navigator: FlowChartNavigator::default(),
@@ -410,13 +408,6 @@ impl BoardView {
 
 impl Render for BoardView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let vp = window.viewport_size();
-        // The canvas is the whole view: fit before the first paint.
-        if !self.fitted {
-            self.fitted = true;
-            self.bounds.set(Bounds { origin: point(px(0.), px(0.)), size: vp });
-            self.zoom_to_fit(cx);
-        }
         text_editor::restyle(self, window, cx);
         if std::mem::take(&mut self.refocus) && self.text.is_none() && self.frame_name.is_none() { self.focus(window); }
         let canvas_el = canvas::canvas_element(self, cx).into_any_element();
@@ -431,8 +422,7 @@ impl Render for BoardView {
             .track_focus(&self.focus)
             .occlude()
             .relative()
-            .w(vp.width)
-            .h(vp.height)
+            .size_full()
             .bg(render::color(color::color_or_black(&self.app.view_background_color), 1.))
             .font_family(crate::theme::UI_FONT)
             .cursor(canvas::cursor(self))

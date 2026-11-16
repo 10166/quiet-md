@@ -1,6 +1,7 @@
 //! 画板 block: a static thumbnail in the page (the scene fit into the
 //! block, painted by `board::render`); 编辑 or a double click opens the
-//! board over the whole window (`crate::board::BoardView`). Closing writes
+//! board in the document's place (`crate::board::BoardView`), under the
+//! app's header, whose breadcrumb leads back to the document. Closing writes
 //! a changed scene back as one document step (`Core::set_board`). A
 //! standalone `.excalidraw` file opens straight into the board.
 
@@ -38,7 +39,7 @@ impl R<'_> {
         let board = bd.clone();
         let empty = bd.elements.is_empty();
         let group = SharedString::from(format!("board-{}", id.0));
-        // under the open board (the whole window) the thumbnail isn't seen: don't paint it every frame
+        // under the open board the thumbnail isn't seen: don't paint it every frame
         let covered = self.ed.boards.open.as_ref().is_some_and(|o| o.0 == id);
         let thumb = canvas(|_, _, _| {}, move |bounds, _, window, cx| if !covered { paint_fit(&mut painter.borrow_mut(), &board, bounds, PAD, window, cx) }).absolute().size_full();
         let open_btn = div()
@@ -87,12 +88,7 @@ use gpui::prelude::FluentBuilder;
 impl Editor {
     pub(super) fn open_board(&mut self, id: BlockId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(BlockKind::Board(bd)) = self.core.block(id).map(|b| b.kind.clone()) else { return };
-        let name = self.board_file.then(|| self.core.doc.title.text.clone());
-        let view = cx.new(|cx| {
-            let mut v = BoardView::new(bd, window, cx);
-            v.name = name;
-            v
-        });
+        let view = cx.new(|cx| BoardView::new(bd, window, cx));
         let sub = cx.subscribe_in(&view, window, move |e, view, ev: &BoardEvent, window, cx| match ev {
             BoardEvent::Close => {
                 let board = view.read(cx).board();
@@ -139,16 +135,30 @@ impl Editor {
         cx.notify();
     }
 
-    /// A board is open over the whole window.
+    /// A board is open (in place of the document).
     pub fn board_open(&self) -> bool { self.boards.open.is_some() }
 
     /// The open board's view (the harness drops files on it).
     #[cfg(feature = "devtools")]
     pub fn board_view(&self) -> Option<Entity<BoardView>> { self.boards.open.as_ref().map(|o| o.1.clone()) }
 
-    /// The open board over the whole window.
+    /// The open board, filling the note pane under the app's header.
     pub(super) fn board_el(&self) -> Option<AnyElement> {
         let (_, view, _) = self.boards.open.as_ref()?;
-        Some(anchored().position_mode(AnchoredPositionMode::Window).position(point(px(0.), px(0.))).child(view.clone()).into_any_element())
+        Some(view.clone().into_any_element())
     }
+
+    /// Leaves the open board for the document it's in (the header's
+    /// breadcrumb); a standalone file has nothing to go back to.
+    pub fn close_open_board(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.board_file { return }
+        let Some((_, view, _)) = self.boards.open.as_ref() else { return };
+        let view = view.clone();
+        view.update(cx, |v, cx| v.finish_pending(window, cx));
+        let board = view.read(cx).board();
+        self.close_board(Some(board), window, cx);
+    }
+
+    /// The open board belongs to the document (not a standalone file).
+    pub fn board_block_open(&self) -> bool { self.boards.open.is_some() && !self.board_file }
 }

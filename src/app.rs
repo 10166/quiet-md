@@ -1255,11 +1255,14 @@ impl Workspace {
 
     /// `pane_w`: the width the header spans, to fold the breadcrumbs when narrow.
     fn top_bar(&self, pane_w: f32, cx: &mut Context<Self>) -> impl IntoElement {
-        let title = self
+        let mut title = self
             .editor
             .as_ref()
             .map(|e| display_title(&e.read(cx).core.doc.title.text))
             .unwrap_or_default();
+        // a 画板 block open in the document's place: the document becomes a
+        // crumb back to it, and the board is the page
+        let board_block = self.editor.as_ref().is_some_and(|e| e.read(cx).board_block_open());
         let save_error = match &self.status {
             SaveStatus::Failed(error) => Some(error.clone()),
             _ => None,
@@ -1330,6 +1333,17 @@ impl Workspace {
                     .into_any_element(),
             );
             crumbs.push(sep());
+        }
+        if board_block {
+            crumbs.push(
+                div().id("crumb-board-doc").no_drag().min_w(px(28.)).max_w(px(200.)).px(px(4.)).flex().items_center().rounded(px(4.)).cursor_pointer()
+                    .text_color(Theme::text_caption()).hover(|s| s.text_color(Theme::primary_500()))
+                    .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(title.clone())))
+                    .on_click(cx.listener(|w, _, window, cx| if let Some(e) = w.editor.clone() { e.update(cx, |e, cx| e.close_open_board(window, cx)) }))
+                    .into_any_element(),
+            );
+            crumbs.push(sep());
+            title = crate::settings::tr("画板", "Board").to_string();
         }
         // Too narrow for the path: it folds into one "…" (the path on hover),
         // and the title keeps the room. Left: the sidebar's buttons when it is
@@ -1482,13 +1496,7 @@ impl Render for Workspace {
             let vs = window.viewport_size();
             if f32::from(vs.width) < min_w - 0.5 && !window.is_fullscreen() { window.resize(size(px(min_w), vs.height)); }
         }
-        // A board open over the whole window covers the sidebar: it keeps its
-        // width (the note under it keeps its layout) but not its rows, which
-        // would otherwise be laid out again on every frame the board draws.
-        let covered = self.view == View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).board_open());
-        let sidebar = if self.sidebar_open { Some(if covered {
-            div().w(px(self.sidebar_w(window))).flex_none().h_full().into_any_element()
-        } else if matches!(self.view, View::Settings | View::Trash) { self.render_settings_sidebar(window, cx) } else { self.render_sidebar(window, cx) }) } else { None };
+        let sidebar = if self.sidebar_open { Some(if matches!(self.view, View::Settings | View::Trash) { self.render_settings_sidebar(window, cx) } else { self.render_sidebar(window, cx) }) } else { None };
         let row_menu = self.render_row_menu(window, cx);
         let resize = self.sidebar_open.then(|| self.render_resize_handle(window, cx));
         let resize_overlay = self.render_resize_overlay(cx);

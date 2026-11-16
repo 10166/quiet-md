@@ -50,8 +50,14 @@ impl Mods {
 pub fn canvas_element(me: &BoardView, cx: &mut Context<BoardView>) -> impl IntoElement {
     let (bounds, painter, entity) = (me.bounds.clone(), me.painter.clone(), cx.entity().downgrade());
     let overlay = super::overlay::build(me);
+    let fit = entity.clone();
     canvas(
-        move |b, _, _| bounds.set(b),
+        // the canvas is the whole view: fit once its size is known, before
+        // the first paint
+        move |b, _, cx| {
+            bounds.set(b);
+            if let Some(e) = fit.upgrade() { e.update(cx, |v, cx| if !v.fitted { v.fitted = true; v.zoom_to_fit(cx) }); }
+        },
         move |b, _, window, cx| {
             let Some(e) = entity.upgrade() else { return };
             // borrow the scene for the paint (no clone per frame)

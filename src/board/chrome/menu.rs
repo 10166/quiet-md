@@ -3,9 +3,9 @@
 //! `dropdownMenu/*` (`DropdownMenu.scss`) @ 3a317b5: the hamburger
 //! (`.main-menu-trigger`) opens an island (padding 8) of 32px items (icon,
 //! 14px text, faded shortcut). The default items we support: 帮助 and 重置画布
-//! (with its confirm dialog) and the canvas background (`ChangeCanvasBackground`);
-//! first, our own 退出画板. Differs: no open / save / export / search /
-//! socials / theme items.
+//! (with its confirm dialog) and the canvas background (`ChangeCanvasBackground`).
+//! Differs: no open / save / export / search / socials / theme items (the
+//! app's header, above the board, has the way back and the document menu).
 
 use super::*;
 use crate::board::action::BoardAction;
@@ -41,17 +41,12 @@ pub(crate) fn main_menu(me: &BoardView, window: &mut Window, cx: &mut Context<Bo
     let trigger = filled_button("board-main-menu", open).w(px(style::LG_BUTTON))
         .child(icon("hamburger", style::ICON, style::text()))
         .on_click(cx.listener(|_, _, _, cx| { let open = matches!(pop(cx), Some(Pop::MainMenu | Pop::CanvasBackground)); set_pop(if open { None } else { Some(Pop::MainMenu) }, cx) }));
-    let name = me.name.clone().map(|n| if n.trim().is_empty() { tr("未命名画板", "Untitled board").to_string() } else { n });
-    let mut col = div().absolute().top(px(style::PADDING)).left(px(crate::theme::TRAFFIC_LIGHTS_W + 4.)).flex().items_center().gap(px(8.)).child(trigger)
-        // a standalone file's name (`ActiveFile`-like, ours)
-        .when_some(name, |d, n| d.child(div().max_w(px(240.)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(14.)).text_color(style::text()).child(n)));
+    // the board sits in the note pane, under the app's header (which names it)
+    let mut col = div().absolute().top(px(style::TOP_PADDING)).left(px(style::PADDING)).child(trigger);
     if open {
         let run = |a: BoardAction| cx.listener(move |me: &mut BoardView, _: &ClickEvent, window, cx| { set_pop(None, cx); me.run(a.clone(), window, cx) });
         let menu = dropdown("board-main-menu-list").min_w(px(232.)).max_w(px(320.))
             .on_mouse_down_out(cx.listener(|_, _, _, cx| if pop(cx) == Some(Pop::MainMenu) { set_pop(None, cx) }))
-            .child(dropdown_item("board-mm-exit", Some("close"), tr("退出画板", "Exit board"), Some("Esc".into()), false)
-                .on_click(cx.listener(|me, _, window, cx| { set_pop(None, cx); me.close(window, cx) })))
-            .child(dropdown_separator())
             .child(dropdown_item("board-mm-help", Some("help"), tr("帮助", "Help"), Some("?".into()), false).on_click(run(BoardAction::ShowHelp)))
             // (upstream shows it on an empty canvas too)
             .child(dropdown_item("board-mm-clear", Some("trash"), tr("重置画布", "Reset the canvas"), None, false)

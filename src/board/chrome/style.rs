@@ -27,6 +27,9 @@ pub const ICON: f32 = 16.; // --default-icon-size, --lg-icon-size
 pub const RADIUS_LG: f32 = 8.; // --border-radius-lg
 pub const RADIUS_MD: f32 = 6.; // --border-radius-md
 pub const PADDING: f32 = 16.; // --editor-container-padding
+/// Above the top row (menu, toolbar): ours, as the board sits under the
+/// app's header, which already leaves room (upstream: `PADDING`).
+pub const TOP_PADDING: f32 = 8.;
 /// `.excalidraw button { font-size: 0.8333rem }`.
 pub const BUTTON_TEXT: f32 = 13.333;
 pub const LABEL_TEXT: f32 = 12.; // 0.75rem

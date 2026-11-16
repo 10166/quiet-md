@@ -326,6 +326,9 @@ mod native {
     pub const RIGHT_DOWN: u64 = 3;
     pub const RIGHT_UP: u64 = 4;
     pub const LEFT_DRAGGED: u64 = 6;
+    pub const OTHER_DOWN: u64 = 25;
+    pub const OTHER_UP: u64 = 26;
+    pub const OTHER_DRAGGED: u64 = 27;
 
     /// Places scripted windows almost entirely past a screen edge that has no
     /// neighbouring display, so they neither cover the user's windows nor get
@@ -519,6 +522,14 @@ mod native {
                 eventNumber: 0isize
                 clickCount: clicks
                 pressure: 1.0f32];
+            // the middle button: `mouseEventWithType` leaves the button
+            // number 0 (left); set it on the CGEvent and rebuild the NSEvent
+            let ev: *mut Object = if matches!(kind, OTHER_DOWN | OTHER_UP | OTHER_DRAGGED) {
+                unsafe extern "C" { fn CGEventSetIntegerValueField(event: *mut std::ffi::c_void, field: u32, value: i64); }
+                let cg: *mut std::ffi::c_void = msg_send![ev, CGEvent];
+                CGEventSetIntegerValueField(cg, 3, 2); // kCGMouseEventButtonNumber
+                msg_send![class!(NSEvent), eventWithCGEvent: cg]
+            } else { ev };
             // Deliver straight to the view: going through `-[NSWindow sendEvent:]`
             // would require the window to be key, i.e. steal focus from the user.
             match kind {
@@ -527,6 +538,9 @@ mod native {
                 RIGHT_DOWN => msg_send![view, rightMouseDown: ev],
                 RIGHT_UP => msg_send![view, rightMouseUp: ev],
                 LEFT_DRAGGED => msg_send![view, mouseDragged: ev],
+                OTHER_DOWN => msg_send![view, otherMouseDown: ev],
+                OTHER_UP => msg_send![view, otherMouseUp: ev],
+                OTHER_DRAGGED => msg_send![view, otherMouseDragged: ev],
                 _ => msg_send![view, mouseMoved: ev],
             }
         }
@@ -588,6 +602,10 @@ fn mouse_step(view: usize, cmd: &str, n: &[f32]) -> bool {
         // display, floating (for desktop shots; see tools/harness/README.md).
         "place" if n.len() >= 2 => place_top_left(view, n[0] as f64, n[1] as f64),
         "up" if n.len() >= 2 => send(view, LEFT_UP, n[0], n[1], n.get(2).map_or(1, |c| *c as i64)),
+        // the middle button (the wheel pressed): `mdown`, `mdragto`, `mup`
+        "mdown" if n.len() >= 2 => { send(view, MOVED, n[0], n[1], 0); send(view, OTHER_DOWN, n[0], n[1], 1) }
+        "mdragto" if n.len() >= 2 => send(view, OTHER_DRAGGED, n[0], n[1], 1),
+        "mup" if n.len() >= 2 => send(view, OTHER_UP, n[0], n[1], 1),
         _ => return false,
     }
     true

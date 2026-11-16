@@ -120,5 +120,5 @@ pub(crate) fn render(me: &BoardView, cx: &mut Context<BoardView>) -> impl IntoEl
     for t in MAIN { row = row.child(tool_button(me, t, cx)); }
     row = row.child(divider().ml(px(4.))).child(extra_tools(me, cx));
     let bar = island("board-toolbar", 1.).relative().child(row).children(super::hints::render(me));
-    div().absolute().top(px(style::PADDING)).left_0().right_0().flex().justify_center().child(bar)
+    div().absolute().top(px(style::TOP_PADDING)).left_0().right_0().flex().justify_center().child(bar)
 }

@@ -31,7 +31,7 @@ use std::rc::Rc;
 const PAD: f32 = 12.;
 const MAX_W: f32 = 200.;
 /// Below the main menu: its top, the 36px button, `menuTopGap` 6 × 4.
-const TOP: f32 = style::PADDING + style::LG_BUTTON + 24.;
+const TOP: f32 = style::TOP_PADDING + style::LG_BUTTON + 24.;
 
 fn tool_type(t: Tool) -> Option<ElementType> {
     Some(match t {
@@ -656,7 +656,7 @@ pub(crate) fn render(me: &BoardView, window: &mut Window, cx: &mut Context<Board
     }
 
     // `appState.height - 166`
-    let max_h = (window.viewport_size().height - px(166.)).max(px(120.));
+    let max_h = (me.bounds.get().size.height - px(166.)).max(px(120.));
     Some(div().absolute().left(px(style::PADDING)).top(px(TOP))
         .child(island("board-props", 0.).max_w(px(MAX_W)).max_h(max_h).flex().flex_col()
             .child(div().id("board-props-scroll").max_h(max_h).overflow_y_scroll().p(px(PAD)).child(body.w(px(cw)))))

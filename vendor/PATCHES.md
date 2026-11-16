@@ -57,6 +57,7 @@ diff -ru $R/taffy-0.9.0/src vendor/taffy/src
 | 35 | `text_system.rs` | `WindowTextSystem::layout_line`（`shape_line` 也走它）合并相邻 run 时比较字体，同 `shape_text`；原来只要颜色、下划线相同就并进上一个 run 的字体 | 画板一行文字按字体分 run（Excalifont 后接 Xiaolai），后面的 run 原来被排成前一个字体，CJK 落到系统回退字体 |
 | 36 | `platform/mac/metal_renderer.rs` | 路径光栅化的顶点直接写进 instance buffer（先算总数、超出缓冲区照旧返回 false）；原来先在一个从空开始逐个扩容的 `Vec` 里攒好再整块拷过去 | 画板每帧大量路径顶点；原来每帧在这里反复 realloc 和拷贝，约占 Metal 提交一帧的四分之三（3 万元素场景拖动时每帧约 0.8ms，现在约 0.2ms） |
 | 37 | `elements/div.rs` | 有 `active` 样式的元素总是监听松开（capture 阶段，按下过才清掉并刷新）；原来只有「画的时候已是按下状态」的那一帧才注册松开监听 | 按下和松开在同一帧之前到达（触控板轻点、脚本点击）时，按钮的按下样式一直留着，直到下一次松开 |
+| 38 | `platform/mac/window.rs` | 视图类注册 `rightMouseDragged:`、`otherMouseDragged:`（同 `mouseDragged:` 交给 `handle_view_event`，`events.rs` 原本就会转换这两种事件） | 原来只注册了左键拖动，按住滚轮键或右键移动时 AppKit 不把事件交给视图，画板按住滚轮键平移画布不动 |
 
 ## taffy 0.9.0
 

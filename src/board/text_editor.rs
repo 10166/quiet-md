@@ -161,16 +161,15 @@ pub fn restyle(me: &mut BoardView, _: &mut Window, cx: &mut Context<BoardView>) 
     t.layout = up.layout;
 }
 
-/// The field, placed over the text (canvas-relative, the canvas at the
-/// window origin).
+/// The field, placed over the text (relative to the board view, which the
+/// canvas fills).
 pub fn element(me: &BoardView) -> Option<AnyElement> {
     let t = me.text.as_ref()?;
     let l = t.layout.as_ref()?;
     let p = &l.placement;
     let z = p.zoom as f32;
-    let o = me.bounds.get().origin;
-    let left = o.x + px(p.anchor[0] as f32 + p.origin_x as f32 * z);
-    let top = o.y + px(p.anchor[1] as f32);
+    let left = px(p.anchor[0] as f32 + p.origin_x as f32 * z);
+    let top = px(p.anchor[1] as f32);
     // room for the caret past the last glyph: an unwrapped field keeps the
     // caret 8pt inside its box (`hscroll`) and would scroll the text left
     let w = (p.width as f32 * z).max(1.) + 10.;
