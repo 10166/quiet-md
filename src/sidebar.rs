@@ -596,6 +596,13 @@ impl Workspace {
 
     pub(crate) fn doc_row(&self, e: &Entry, key: &str, depth: usize, _kids: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let drop_target = self.folder_drop_target(&e.id);
+        // 我的文档 rows float their buttons over the row's right end instead of reserving
+        // the room: at rest the name runs to the edge, and it gives way as they fade in.
+        let folder = e.meta.folder.is_some();
+        let lib_batch = self.batch.is_some() && key == "doc";
+        let float = key == "doc" && !lib_batch && self.rename.as_ref().is_none_or(|r| r.id != e.id);
+        let menu_open = self.row_menu.as_ref().is_some_and(|m| m.id == e.id && !m.batch && m.pos.x < px(0.)) || (folder && self.create_menu.as_ref().is_some_and(|(p, _)| p.as_deref() == Some(e.id.as_str())));
+        let give = if float { (if folder { 74. } else { 28. }) * if menu_open { 1. } else { self.folder_drag.reveal(&e.id) } } else { 0. };
         let selected = (self.view == View::Doc && self.current.as_deref() == Some(e.id.as_str())) || (self.view == View::Folder && self.folder_current.as_deref() == Some(e.id.as_str()));
         let renaming = self.rename.as_ref().filter(|r| r.id == e.id).map(|r| r.field.clone());
         let title = match renaming {
@@ -640,12 +647,12 @@ impl Workspace {
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()
+                .mr(px(give))
                 .text_color(if drop_target || selected { Theme::text() } else { Theme::sidebar_text() })
                 .child(ui_text(display_title(&e.title)))
                 .into_any_element(),
         };
         let renaming = self.rename.as_ref().is_some_and(|r| r.id == e.id);
-        let folder = e.meta.folder.is_some();
         // 批量操作: 我的文档 rows get a checkbox and lose "…"; checked rows are tinted.
         let batch = self.batch.as_ref().filter(|_| key == "doc");
         let checked = batch.is_some_and(|b| b.contains(&e.id));
@@ -653,6 +660,7 @@ impl Workspace {
         self.row_base(e, key, cx)
             .h(px(DOC_ROW_H))
             .w_full()
+            .relative()
             .flex()
             .items_center()
             // In 我的文档 the selection pill and the hover wash are drawn under the row (`sidebar_drag.rs`).
@@ -704,8 +712,12 @@ impl Workspace {
             .child(title)
             // A folder's "…", "new folder" and "+" sit in the same columns as the header's
             // 批量操作, 新建文件夹 and 新建文档.
-            .when(!renaming && folder && batch.is_none() && key == "doc", |d| d.child(self.more_button(e, key, cx).mr(px(0.))).child(self.add_button(e, key, true, cx).ml(px(2.))).child(self.add_button(e, key, false, cx).ml(px(2.)).mr(px(4.))))
-            .when(!renaming && !(folder && key == "doc") && batch.is_none(), |d| d.child(self.more_button(e, key, cx).when(key == "doc", |d| d.ml(px(2.)))))
+            .when(float, |d| {
+                let end = div().absolute().top_0().bottom_0().right_0().flex().items_center();
+                d.child(if folder { end.child(self.more_button(e, key, cx).mr(px(0.))).child(self.add_button(e, key, true, cx).ml(px(2.))).child(self.add_button(e, key, false, cx).ml(px(2.)).mr(px(4.))) }
+                    else { end.child(self.more_button(e, key, cx)) })
+            })
+            .when(!renaming && key != "doc" && batch.is_none(), |d| d.child(self.more_button(e, key, cx)))
     }
 
     pub(crate) fn render_row_menu(&self, window: &Window, cx: &mut Context<Self>) -> Vec<AnyElement> {

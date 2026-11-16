@@ -467,10 +467,14 @@ impl Workspace {
         let renaming = self.rename.as_ref().map(|r| r.id.clone());
         self.folder_drag.parents = self.entries.iter().filter_map(|e| e.meta.parent.clone()).collect();
         let high = crate::settings::motion_high();
-        // The visible list's bottom edge, in this list's coordinates (last frame's layout).
+        // The visible band in this list's coordinates, from last frame's layout. Both edges are
+        // measured against the list itself (sections above it scroll too), and padded so a
+        // scroll since that frame doesn't uncover rows that were skipped.
         let visible = self.folder_drag.bounds.get();
-        let vis_bottom = visible.map_or(f32::MAX, |b| f32::from(self.list_scroll.bounds().bottom() - b.top()));
-        let vis_top = visible.map_or(f32::MIN, |_| -f32::from(self.list_scroll.offset().y));
+        let sb = self.list_scroll.bounds();
+        let pad = f32::from(sb.size.height).max(200.);
+        let vis_bottom = visible.map_or(f32::MAX, |b| f32::from(sb.bottom() - b.top()) + pad);
+        let vis_top = visible.map_or(f32::MIN, |b| f32::from(sb.top() - b.top()) - pad);
         // ---- Step every spring; nothing below this block mutates.
         let fd = &mut self.folder_drag;
         let index: HashMap<&str, usize> = rows.iter().enumerate().map(|(i, r)| (r.entry.id.as_str(), i)).collect();
