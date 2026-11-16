@@ -189,7 +189,7 @@ mod tests {
         }
         let r = runs("ab中文", ff::EXCALIFONT);
         assert_eq!(r.iter().map(|r| (r.0, r.1.family.to_string())).collect::<Vec<_>>(), [(2, "Excalifont".into()), (6, "Xiaolai".into())]);
-        // shaped runs keep their fonts (vendor/PATCHES.md #35)
+        // shaped runs keep their fonts (vendor/PATCHES.md #39)
         let t = "ab 中文 cd";
         let lay = ts.layout_line(t, gpui::px(20.), &super::super::render::runs(t, ff::EXCALIFONT, gpui::black()), None);
         let fams: Vec<_> = lay.runs.iter().map(|r| ts.get_font_for_id(r.font_id).map(|f| f.family.to_string())).collect();

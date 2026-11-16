@@ -20,7 +20,7 @@
 画板内容先生成**显示列表**（core `display.rs`，纯数据：路径、填充、描边、文字、图片），由后端画出来：
 
 1. **GPUI 后端**（全平台，`src/board/render.rs`）：显示列表 → `PathBuilder` / 文字 / 图片。按元素缓存显示列表（`version` / `versionNonce` 变了才重建）和按缩放档（四分之一倍频程）缓存的三角化路径；场景不变（平移、缩放、悬停）时复用上次的绘制顺序和外框，只做外框裁剪。GPUI 不能旋转文字和图片、只能按轴对齐矩形裁剪：旋转的文字画成 SVG 小图，旋转 / 翻转 / 裁剪 / 分区裁剪的图片在 CPU 上重采样，分区裁剪和箭头标签的镂空按三角形切路径（`render_geom.rs`）。
-2. **vello_cpu 后端**（macOS，`src/board/render_vello.rs`）：可见元素 ≥ 800 时切过去，< 500 时切回 GPUI（迟滞）；缩略图从 64 个可见元素起。画进像素图、拷进 IOSurface 的 BGRA `CVPixelBuffer`，用 `Window::paint_surface` 显示（vendor/PATCHES.md #31）。文字由 GPUI 文字系统排版，画字形轮廓（彩色 emoji 没有轮廓，不画）。场景、视图、主题都没变时直接复用上一帧。Windows / Linux 只用 GPUI 后端。
+2. **vello_cpu 后端**（macOS，`src/board/render_vello.rs`）：可见元素 ≥ 800 时切过去，< 500 时切回 GPUI（迟滞）；缩略图从 64 个可见元素起。画进像素图、拷进 IOSurface 的 BGRA `CVPixelBuffer`，用 `Window::paint_surface` 显示（vendor/PATCHES.md #36）。文字由 GPUI 文字系统排版，画字形轮廓（彩色 emoji 没有轮廓，不画）。场景、视图、主题都没变时直接复用上一帧。Windows / Linux 只用 GPUI 后端。
 
 阈值和压测数字见 tools/perf/board-results.md。选框、手柄、吸附线、文字编辑框、工具栏、面板一律 GPUI 原生元素，叠在内容之上（`overlay.rs`，对应上游 `interactiveScene`）。
 

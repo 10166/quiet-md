@@ -25,14 +25,14 @@ pub(crate) fn set_base(feishu: bool) { FEISHU.store(feishu, Ordering::Relaxed); 
 /// 界面语言, in the order Settings lists them. Chinese strings are the keys:
 /// other languages look them up in `l10n` and fall back to English.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Lang { Zh, En, Ja, Ko, Fr, Es }
+pub enum Lang { Zh, En, Ja, Ko, Fr, Es, Ar }
 
 impl Lang {
-    pub const ALL: [Lang; 6] = [Lang::Zh, Lang::En, Lang::Ja, Lang::Ko, Lang::Fr, Lang::Es];
+    pub const ALL: [Lang; 7] = [Lang::Zh, Lang::En, Lang::Ja, Lang::Ko, Lang::Fr, Lang::Es, Lang::Ar];
     /// The `language` preference value.
-    pub fn code(self) -> &'static str { match self { Lang::Zh => "zh", Lang::En => "en", Lang::Ja => "ja", Lang::Ko => "ko", Lang::Fr => "fr", Lang::Es => "es" } }
+    pub fn code(self) -> &'static str { match self { Lang::Zh => "zh", Lang::En => "en", Lang::Ja => "ja", Lang::Ko => "ko", Lang::Fr => "fr", Lang::Es => "es", Lang::Ar => "ar" } }
     /// The language's own name, as Settings lists it.
-    pub fn name(self) -> &'static str { match self { Lang::Zh => "简体中文", Lang::En => "English", Lang::Ja => "日本語", Lang::Ko => "한국어", Lang::Fr => "Français", Lang::Es => "Español" } }
+    pub fn name(self) -> &'static str { match self { Lang::Zh => "简体中文", Lang::En => "English", Lang::Ja => "日本語", Lang::Ko => "한국어", Lang::Fr => "Français", Lang::Es => "Español", Lang::Ar => "العربية" } }
 }
 
 pub fn lang() -> Lang { Lang::ALL.get(LANG.load(Ordering::Relaxed) as usize).copied().unwrap_or(Lang::En) }
@@ -952,6 +952,24 @@ impl Workspace {
             .into_any_element()
     }
 
+    /// 版本历史: the retention count is stored in the library, so every
+    /// window sees it; the cached copy only avoids reading a file per frame.
+    pub(crate) fn change_history_limit(&mut self, delta: i32, window: &mut Window, cx: &mut Context<Self>) {
+        let mut s = self.store.settings();
+        let next = (s.history_limit() as i32 + delta).clamp(1, 30) as u32;
+        s.set_history_limit(next);
+        if self.store.save_settings(&s).is_err() { return }
+        self.history_limit = next;
+        // Other windows cache the number for their settings page; saving
+        // always reads the library, so this is display-only.
+        for handle in cx.windows().into_iter()
+            .filter(|w| w.window_id() != window.window_handle().window_id())
+            .filter_map(|w| w.downcast::<Workspace>()) {
+            let _ = handle.update(cx, |ws, _, cx| { ws.history_limit = next; cx.notify() });
+        }
+        cx.notify();
+    }
+
     fn library_page(&self, cx: &mut Context<Self>) -> AnyElement {
         let root = crate::store::Store::root_dir();
         let location = if cfg!(target_os = "windows") { root.display().to_string() } else {
@@ -968,6 +986,12 @@ impl Workspace {
                     .when(std::env::var_os("QUIET_MD_HOME").is_none(), |d| d.child(button("change-library", tr("更改…", "Change…")).on_click(cx.listener(|w, _, _, cx| w.pick_library(cx)))))).into_any_element(),
                 row(tr("回收站", "Trash"), Some(crate::localized_format!("删除的文档保留 {} 天后自动清除。", "Deleted documents are kept for {} days.", crate::store::TRASH_DAYS).into()),
                     button("open-trash", tr("打开", "Open")).on_click(cx.listener(|w, _, _, cx| w.show_view(View::Trash, cx)))).into_any_element(),
+                row(tr("版本历史", "Version history"),
+                    desc(tr("每篇文档保留的历史版本数（1–30 份）", "Snapshots kept for each document (1–30)")),
+                    div().flex_none().flex().items_center().gap(px(12.))
+                        .child(button("history-minus", "−").on_click(cx.listener(|w, _, window, cx| w.change_history_limit(-1, window, cx))))
+                        .child(div().w(px(40.)).flex().items_center().justify_center().text_size(px(theme::ui_font())).text_color(Theme::text()).child(self.history_limit.to_string()))
+                        .child(button("history-plus", "+").on_click(cx.listener(|w, _, window, cx| w.change_history_limit(1, window, cx))))).into_any_element(),
             ]))
             .into_any_element()
     }
@@ -1060,8 +1084,8 @@ fn update_row(cx: &mut Context<Workspace>) -> Div {
 pub(crate) fn about_icon() -> ImageSource {
     const PATH: &str = "branding/app-icon.png";
     static ICON: LazyLock<Option<Arc<RenderImage>>> = LazyLock::new(|| {
-        let bytes = crate::assets::Assets.load(PATH).ok()??;
-        let mut buf = image::imageops::resize(&image::load_from_memory(&bytes).ok()?.into_rgba8(), 176, 176, image::imageops::FilterType::Lanczos3);
+        let bytes = crate::assets::get(PATH)?;
+        let mut buf = image::imageops::resize(&image::load_from_memory(bytes).ok()?.into_rgba8(), 176, 176, image::imageops::FilterType::Lanczos3);
         for px in buf.pixels_mut() {
             px.0.swap(0, 2);
         }
@@ -1678,6 +1702,7 @@ mod preference_tests {
             (r#"{"english":false}"#, Lang::Zh),
             (r#"{"english":true}"#, Lang::En),
             (r#"{"english":true,"language":"ko"}"#, Lang::Ko),
+            (r#"{"english":true,"language":"ar"}"#, Lang::Ar),
             (r#"{"english":true,"language":"xx"}"#, Lang::En),
         ] {
             let saved: Preferences = serde_json::from_str(json).unwrap();

@@ -2,7 +2,7 @@
 //! excalidraw.md, 渲染方案 2; macOS only): the visible elements are drawn by
 //! vello_cpu (multithreaded) into a pixmap, copied into one of three
 //! IOSurface-backed BGRA `CVPixelBuffer`s and shown with
-//! `Window::paint_surface` (vendor/PATCHES.md #31). `render.rs` picks it
+//! `Window::paint_surface` (vendor/PATCHES.md #36). `render.rs` picks it
 //! above a number of visible elements; overlay and chrome stay GPUI.
 //!
 //! Same geometry and colors as the GPUI backend: paths from `display.rs`

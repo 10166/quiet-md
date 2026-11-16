@@ -42,6 +42,8 @@ pub enum EditorEvent {
     Duplicate,
     /// A standalone 画板 was closed (退出 / Esc): go back to where it is.
     Leave,
+    /// Esc while 版本历史 is open: back to the live document, then close.
+    HistoryEscape,
 }
 
 /// A child page shown by 子页面列表 blocks.
@@ -254,6 +256,14 @@ pub struct Editor {
     /// window, and leaving it leaves the file.
     pub board_file: bool,
     pub(super) ro_doc: Option<crate::model::Document>,
+    /// 版本历史 preview: this snapshot is not the live document. Only the
+    /// hint text differs from 阅读模式.
+    pub preview: bool,
+    /// The 版本历史 drawer is open: Esc closes it (the window's capture
+    /// handler never sees Esc — the editor's key binding takes it first).
+    pub history_drawer: bool,
+    /// Blocks this snapshot added or rewrote, tinted while 显示改动 is on.
+    pub diff_marks: Option<std::collections::HashMap<BlockId, fdl_core::changes::Change>>,
     /// The 文档信息 row under the title.
     pub info: crate::store::InfoRow,
     /// 阅读位置: where to put the page once this document's rows are laid out
@@ -466,6 +476,9 @@ impl Editor {
             markdown: false,
             board_file: false,
             ro_doc: None,
+            preview: false,
+            history_drawer: false,
+            diff_marks: None,
             info: Default::default(),
             restore_top: None,
             cd,
@@ -1796,6 +1809,12 @@ impl Editor {
         if !self.guard(window, cx) {
             return;
         }
+        // 版本历史: the key binding reaches the editor before the window's
+        // capture handler, so the drawer gets its own way out here.
+        if self.preview || self.history_drawer {
+            cx.emit(EditorEvent::HistoryEscape);
+            return;
+        }
         if self.cropping() {
             return self.cancel_crop(cx);
         }
@@ -1934,7 +1953,7 @@ impl Editor {
         let internal = meta.and_then(|xml| docxml::parse(&xml).ok()).filter(|d| !d.blocks.is_empty());
         let html = match &fake {
             Some(f) => f.html.clone(),
-            None if !plain && internal.is_none() && rich_target && !text.as_deref().is_some_and(crate::paste::has_display_math) => {
+            None if !plain && internal.is_none() && rich_target && !text.as_deref().is_some_and(crate::paste::has_math) => {
                 crate::clipboard::clipboard_html()
             }
             None => None,
