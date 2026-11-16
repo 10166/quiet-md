@@ -886,14 +886,6 @@ fragment float4 surface_fragment(SurfaceFragmentInput input [[stage_in]],
   return ycbcrToRGBTransform * ycbcr;
 }
 
-// quiet.md: a BGRA surface (the board's CPU renderer) drawn 1:1 (nearest).
-fragment float4 surface_bgra_fragment(SurfaceFragmentInput input [[stage_in]],
-                                      texture2d<float> tex
-                                      [[texture(SurfaceInputIndex_YTexture)]]) {
-  constexpr sampler s(mag_filter::nearest, min_filter::nearest);
-  return tex.sample(s, input.texture_position);
-}
-
 float4 hsla_to_rgba(Hsla hsla) {
   float h = hsla.h * 6.0; // Now, it's an angle but scaled in [0, 6) range
   float s = hsla.s;

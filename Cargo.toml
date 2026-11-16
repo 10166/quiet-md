@@ -47,15 +47,14 @@ log = "0.4"
 sys-locale = "0.3.2"
 jpeg-decoder = { version = "0.3", default-features = false }
 png = "0.18"
+# 画板's CPU renderer above a scene size (src/board/render_vello.rs), on every
+# platform; its frames are shown with GPUI's `Window::paint_pixels`.
+vello_cpu = { version = "=0.3.0", default-features = false, features = ["std", "u8_pipeline", "multithreading"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.24"
 core-foundation = "=0.10.0"
 objc = "0.2"
-# 画板's CPU renderer above a scene size (src/board/render_vello.rs), shown
-# through GPUI's BGRA surface (vendor/PATCHES.md #36).
-vello_cpu = { version = "=0.3.0", default-features = false, features = ["std", "u8_pipeline", "multithreading"] }
-core-video = "0.4.3"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-registry = "0.5"

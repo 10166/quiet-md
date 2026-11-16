@@ -343,7 +343,7 @@ pub struct WindowTextSystem {
 pub enum GlyphOutlineCmd { MoveTo([f32; 2]), LineTo([f32; 2]), QuadTo([f32; 2], [f32; 2]), CubicTo([f32; 2], [f32; 2], [f32; 2]), Close }
 
 impl WindowTextSystem {
-    /// quiet.md: a glyph's outline in font units, y up (macOS only), for
+    /// quiet.md: a glyph's outline in font units, y up, for
     /// drawing text with another rasterizer (the board's CPU renderer).
     pub fn glyph_outline(&self, font_id: FontId, glyph_id: GlyphId) -> Option<Vec<GlyphOutlineCmd>> {
         self.text_system.platform_text_system.glyph_outline(font_id, glyph_id)

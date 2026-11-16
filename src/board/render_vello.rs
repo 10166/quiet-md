@@ -1,15 +1,17 @@
 //! The vello_cpu backend of the board's display list (docs/design/whiteboard-
-//! excalidraw.md, 渲染方案 2; macOS only): the visible elements are drawn by
-//! vello_cpu (multithreaded) into a pixmap, copied into one of three
-//! IOSurface-backed BGRA `CVPixelBuffer`s and shown with
-//! `Window::paint_surface` (vendor/PATCHES.md #36). `render.rs` picks it
+//! excalidraw.md, 渲染方案 2; every platform alike): the visible elements are
+//! drawn by vello_cpu (multithreaded) into a pixmap, copied as BGRA into one
+//! of three `PixelFrame`s (in turn, so the GPU never reads a frame being
+//! written) and shown with `Window::paint_pixels`, an image sprite whose atlas
+//! tile is written over in place (vendor/PATCHES.md #36). `render.rs` picks it
 //! above a number of visible elements; overlay and chrome stay GPUI.
 //!
 //! Same geometry and colors as the GPUI backend: paths from `display.rs`
 //! (kurbo, cached per element version in `Cached::vello`), colors through
 //! `render::color`. Frame clips and arrow label holes are clip layers. Text
 //! is shaped by GPUI (Excalidraw's fonts, `fonts::runs`) on upstream's baseline
-//! and drawn as glyph outlines (`WindowTextSystem::glyph_outline`, CoreText);
+//! and drawn as glyph outlines (`WindowTextSystem::glyph_outline`: CoreText,
+//! DirectWrite, swash);
 //! color emoji have no outline and are left out. Images are sampled from the
 //! decoded file (`render_geom::Src`), rotated, mirrored and cropped by the
 //! paint transform.
@@ -19,9 +21,7 @@ use super::geom::{Pt, Src};
 use crate::board::shape::PathCmd;
 use crate::board::types::TextAlign;
 use super::{Cached, VText, runs};
-use core_foundation::{base::TCFType, boolean::CFBoolean, dictionary::CFDictionary, string::CFString};
-use core_video::pixel_buffer::{CVPixelBuffer, CVPixelBufferKeys, kCVPixelFormatType_32BGRA};
-use gpui::{Bounds, FontId, GlyphId, Hsla, Pixels, Window, px};
+use gpui::{Bounds, FontId, GlyphId, Hsla, ImageId, PixelFrame, Pixels, Window, px};
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -37,8 +37,10 @@ pub struct Vello {
     ctx: RenderContext,
     pixmap: Pixmap,
     res: Resources,
-    bufs: Vec<CVPixelBuffer>,
+    bufs: Vec<PixelFrame>,
     next: usize,
+    /// Frames of an earlier size, their atlas tiles freed at the next `show`.
+    stale: Vec<ImageId>,
     size: (u16, u16),
     /// Scene → device pixels of the canvas, and its zoom.
     view: Affine,
@@ -50,13 +52,8 @@ pub struct Vello {
     images: HashMap<String, (u32, Option<Arc<Pixmap>>)>,
 }
 
-fn pixel_buffer(w: usize, h: usize) -> Option<CVPixelBuffer> {
-    let empty: CFDictionary<CFString, core_foundation::base::CFType> = CFDictionary::from_CFType_pairs(&[]);
-    let opts = CFDictionary::from_CFType_pairs(&[
-        (CFString::from(CVPixelBufferKeys::IOSurfaceProperties), empty.as_CFType()),
-        (CFString::from(CVPixelBufferKeys::MetalCompatibility), CFBoolean::true_value().as_CFType()),
-    ]);
-    CVPixelBuffer::new(kCVPixelFormatType_32BGRA, w, h, Some(&opts)).ok()
+fn pixel_frame(w: u16, h: u16) -> PixelFrame {
+    PixelFrame { id: ImageId::next(), width: w as u32, height: h as u32, generation: 0, bgra: vec![0; w as usize * h as usize * 4] }
 }
 
 fn rgba(h: Hsla) -> AlphaColor<Srgb> { let c = gpui::Rgba::from(h); AlphaColor::new([c.r, c.g, c.b, c.a]) }
@@ -92,7 +89,7 @@ fn poly_path(poly: &[Pt]) -> BezPath {
 
 impl Vello {
     pub fn new() -> Self {
-        Vello { ctx: RenderContext::new(1, 1), pixmap: Pixmap::new(1, 1), res: Resources::new(), bufs: vec![], next: 0, size: (0, 0), view: Affine::IDENTITY, zoom: 1.,
+        Vello { ctx: RenderContext::new(1, 1), pixmap: Pixmap::new(1, 1), res: Resources::new(), bufs: vec![], next: 0, stale: vec![], size: (0, 0), view: Affine::IDENTITY, zoom: 1.,
             glyphs: FxHashMap::default(), upem: FxHashMap::default(), images: HashMap::new() }
     }
 
@@ -104,7 +101,8 @@ impl Vello {
             self.size = (w, h);
             self.ctx = RenderContext::new(w, h);
             self.pixmap = Pixmap::new(w, h);
-            self.bufs = (0..3).filter_map(|_| pixel_buffer(w as usize, h as usize)).collect();
+            self.stale.extend(self.bufs.iter().map(|b| b.id));
+            self.bufs = (0..3).map(|_| pixel_frame(w, h)).collect();
         } else {
             self.ctx.reset();
         }
@@ -221,31 +219,23 @@ impl Vello {
         for _ in 0..layers { ctx.pop_layer(); }
     }
 
-    /// Renders the frame into the next pixel buffer.
+    /// Renders the frame into the next pixel frame.
     pub fn render(&mut self) {
         self.ctx.flush();
         self.ctx.render(&mut self.pixmap, &mut self.res);
         if self.bufs.is_empty() { return; }
         self.next = (self.next + 1) % self.bufs.len();
-        let buf = &self.bufs[self.next];
-        let (w, h) = (self.size.0 as usize, self.size.1 as usize);
-        if buf.lock_base_address(0) != 0 { return; }
+        let buf = &mut self.bufs[self.next];
         // RGBA (premultiplied; the canvas is opaque) → BGRA
-        unsafe {
-            let base = buf.get_base_address() as *mut u8;
-            let stride = buf.get_bytes_per_row();
-            let src = self.pixmap.data_as_u8_slice();
-            for y in 0..h {
-                let row = std::slice::from_raw_parts_mut(base.add(y * stride), w * 4);
-                for (d, s) in row.as_chunks_mut::<4>().0.iter_mut().zip(src[y * w * 4..(y + 1) * w * 4].as_chunks::<4>().0) { d[0] = s[2]; d[1] = s[1]; d[2] = s[0]; d[3] = s[3]; }
-            }
-        }
-        buf.unlock_base_address(0);
+        let src = self.pixmap.data_as_u8_slice();
+        for (d, s) in buf.bgra.as_chunks_mut::<4>().0.iter_mut().zip(src.as_chunks::<4>().0) { *d = [s[2], s[1], s[0], s[3]]; }
+        buf.generation += 1;
     }
 
     /// Paints the last rendered frame at `bounds` (the canvas).
-    pub fn show(&self, bounds: Bounds<Pixels>, window: &mut Window) {
-        if let Some(buf) = self.bufs.get(self.next) { window.paint_surface(bounds, buf.clone()); }
+    pub fn show(&mut self, bounds: Bounds<Pixels>, window: &mut Window) {
+        for id in self.stale.drain(..) { window.drop_pixels(id); }
+        if let Some(buf) = self.bufs.get(self.next) { let _ = window.paint_pixels(bounds.origin, buf); }
     }
 
 }

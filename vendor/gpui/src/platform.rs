@@ -780,6 +780,8 @@ pub(crate) trait PlatformAtlas: Send + Sync {
         build: &mut dyn FnMut() -> Result<Option<(Size<DevicePixels>, Cow<'a, [u8]>)>>,
     ) -> Result<Option<AtlasTile>>;
     fn remove(&self, key: &AtlasKey);
+    /// quiet.md: writes `bytes` over `key`'s tile (same size), for `Window::paint_pixels`.
+    fn update(&self, key: &AtlasKey, bytes: &[u8]);
 }
 
 struct AtlasTextureList<T> {

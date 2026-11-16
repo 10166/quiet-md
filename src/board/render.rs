@@ -10,9 +10,10 @@
 //! tessellated paths at a zoom bucket (quarter octaves), redrawn by
 //! `Path::transformed` while panning and between buckets.
 //!
-//! Backends: this GPUI painter everywhere; on macOS, above `VELLO_ABOVE`
-//! visible elements (and for thumbnails above `THUMB_VELLO`), the vello_cpu
-//! painter of `render_vello.rs` shown as a surface; its frame is reused
+//! Backends, the same on every platform: this GPUI painter, and above
+//! `VELLO_ABOVE` visible elements (for thumbnails above `THUMB_VELLO`) the
+//! vello_cpu painter of `render_vello.rs`, its frame shown with
+//! `Window::paint_pixels`; the frame is reused
 //! while scene, view and theme stay the same. Both draw from the same
 //! caches (display list, bounds, frame clip) and the same paint order,
 //! kept while the scene is unchanged (tools/perf/board-results.md).
@@ -27,9 +28,8 @@
 //! `FONT_METADATA`).
 //!
 //! GPUI can't rotate text or images, nor clip but to axis-aligned
-//! rectangles: rotated text is drawn as an SVG sprite (the glyph outlines
-//! GPUI shaped, on macOS; elsewhere a `<text>` usvg lays out with system
-//! fonts) under a rotation matrix; rotated, mirrored or
+//! rectangles: rotated text is drawn as an SVG sprite (the outlines of the
+//! glyphs GPUI shaped) under a rotation matrix; rotated, mirrored or
 //! frame-clipped images are resampled on the CPU (`render_geom.rs`, cached
 //! per element and resolution octave); frame clips (rotated, rounded) and
 //! arrow label holes are cut out of the tessellated paths triangle by
@@ -41,7 +41,7 @@ use super::color::Rgba as BRgba;
 use super::display::{self as dl, DisplayItem, ElementDisplay, ImageItem, Paint, RenderOpts, element_display, renderable_elements};
 use super::scene::Scene;
 use super::shape::PathCmd;
-use super::text_measure::{Font as BFont, Measure, get_font_family_string};
+use super::text_measure::{Font as BFont, Measure};
 use super::types::{Element, FileData, TextAlign};
 use crate::whiteboard::Board;
 use gpui::*;
@@ -52,12 +52,10 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 #[path = "render_geom.rs"]
 mod geom;
-#[cfg(target_os = "macos")]
 #[path = "render_vello.rs"]
 mod vello;
 
 /// Text shaped for the vello backend: glyphs by font, at local positions.
-#[cfg(target_os = "macos")]
 type VText = Vec<(FontId, Vec<(GlyphId, [f64; 2])>)>;
 
 /// Which backend paints (`FDL_BOARD_RENDER`=gpui|vello|auto, auto by default).
@@ -65,7 +63,7 @@ type VText = Vec<(FontId, Vec<(GlyphId, [f64; 2])>)>;
 enum Backend { Gpui, Vello, Auto }
 fn backend() -> Backend {
     static B: LazyLock<Backend> = LazyLock::new(|| match std::env::var("FDL_BOARD_RENDER").as_deref() { Ok("gpui") => Backend::Gpui, Ok("vello") => Backend::Vello, _ => Backend::Auto });
-    if cfg!(target_os = "macos") { *B } else { Backend::Gpui }
+    *B
 }
 /// `FDL_BOARD_PROF`: print each paint's backend, element count and times (tools/perf/board_bench.py).
 fn profiling() -> bool { static P: LazyLock<bool> = LazyLock::new(|| std::env::var_os("FDL_BOARD_PROF").is_some()); *P }
@@ -159,9 +157,7 @@ struct Cached {
     /// the bitmap and the scene rectangle it covers.
     image: Option<(f64, Option<(Arc<RenderImage>, [f64; 4])>)>,
     /// The vello backend's paths and shaped text.
-    #[cfg(target_os = "macos")]
     vello: Option<vello::Paths>,
-    #[cfg(target_os = "macos")]
     vtext: Vec<Option<(u32, VText)>>,
 }
 
@@ -196,10 +192,8 @@ pub struct Painter {
     pub screen_frame_names: bool,
     /// Painting with vello (auto mode's state).
     use_vello: bool,
-    #[cfg(target_os = "macos")]
     vello: Option<Box<vello::Vello>>,
     /// What the last vello frame showed (unchanged: shown again as is).
-    #[cfg(target_os = "macos")]
     vello_key: Option<u64>,
 }
 
@@ -277,7 +271,7 @@ impl Painter {
             let n = display.as_ref().map_or(0, |d| d.items.len());
             let clip = display.as_ref().and_then(|d| d.clip.as_ref()).map(geom::clip_polygon);
             let c = Cached { key, base: key, off: [0., 0.], shown_off: [0., 0.], display, bounds: b, paths: None, sprites: vec![None; n], clip, image: None,
-                #[cfg(target_os = "macos")] vello: None, #[cfg(target_os = "macos")] vtext: vec![] };
+                vello: None, vtext: vec![] };
             if let Some(old) = cache.insert(e.id.clone(), c) {
                 trash.extend(old.image.and_then(|i| i.1).map(|i| i.0));
             }
@@ -386,8 +380,7 @@ impl Painter {
             Backend::Auto if thumb => shown.len() >= THUMB_VELLO,
             Backend::Auto => if *use_vello { shown.len() >= VELLO_BELOW } else { shown.len() >= VELLO_ABOVE },
         };
-        #[cfg(target_os = "macos")]
-        if *use_vello {
+            if *use_vello {
             let t_shown = prof.map(|t| t.elapsed().as_secs_f64() * 1e3);
             self.paint_vello(scene, &shown, crop_preview.as_ref(), files, canvas, dim, view, clip, window);
             if self.sources.busy() { window.request_animation_frame(); }
@@ -416,7 +409,6 @@ impl Painter {
     }
 
     /// The vello frame for `shown` (re-shown as is while nothing changed).
-    #[cfg(target_os = "macos")]
     #[allow(clippy::too_many_arguments)]
     fn paint_vello(&mut self, scene: &Scene, shown: &[(&Element, f32)], crop_preview: Option<&ElementDisplay>, files: &BTreeMap<String, FileData>, canvas: Hsla, dim: &FxHashMap<String, f32>, view: View, clip: Bounds<Pixels>, window: &mut Window) {
         use std::hash::{Hash, Hasher};
@@ -585,13 +577,10 @@ static SVGS: LazyLock<Mutex<HashMap<String, Vec<u8>>>> = LazyLock::new(Default::
 /// The generated SVG at an asset path under `SVG_PREFIX`.
 pub fn svg_asset(path: &str) -> Option<Vec<u8>> { SVGS.lock().ok()?.get(path).cloned() }
 
-fn esc(s: &str) -> String { s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;") }
-
 /// A line's glyph outlines as SVG path data, at local scene coordinates
-/// (None where GPUI has no outlines: off macOS).
-fn glyph_path(ts: &WindowTextSystem, text: &str, family: u32, size: f64, left: f64, baseline: f64) -> Option<String> {
+/// (color emoji have none and are left out).
+fn glyph_path(ts: &WindowTextSystem, text: &str, family: u32, size: f64, left: f64, baseline: f64) -> String {
     use std::fmt::Write;
-    if !cfg!(target_os = "macos") { return None; }
     let lay = ts.layout_line(text, px(size as f32), &runs(text, family, black()), None);
     let mut d = String::new();
     for r in &lay.runs {
@@ -610,7 +599,7 @@ fn glyph_path(ts: &WindowTextSystem, text: &str, family: u32, size: f64, left: f
             }
         }
     }
-    Some(d)
+    d
 }
 
 /// A text run as a monochrome SVG (black: `paint_svg` tints it), with its
@@ -628,17 +617,13 @@ fn text_sprite(t: &dl::TextRun, m: &GpuiMeasure) -> Option<(SharedString, [f64; 
     // a little room for glyph overhangs
     let pad = t.font_size * 0.25;
     let r = [x1 - pad, y1 - pad, x2 - x1 + pad * 2., y2 - y1 + pad * 2.];
-    let anchor = match t.align { TextAlign::Left => "start", TextAlign::Center => "middle", TextAlign::Right => "end" };
     let mut svg = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{} {} {} {}" width="{}" height="{}">"#, r[0], r[1], r[2], r[3], r[2], r[3]);
     for l in &t.lines {
         if l.text.is_empty() { continue; }
         let w = m.line_width(&l.text, font);
         let left = match t.align { TextAlign::Left => l.x, TextAlign::Center => l.x - w / 2., TextAlign::Right => l.x - w };
-        match glyph_path(&m.0, &l.text, t.font_family, t.font_size, left, l.baseline) {
-            Some(d) => svg.push_str(&format!(r##"<path d="{d}" fill="#000"/>"##)),
-            None => svg.push_str(&format!(r##"<text x="{}" y="{}" font-family="{}" font-size="{}" fill="#000" text-anchor="{anchor}" xml:space="preserve">{}</text>"##,
-                l.x, l.baseline, esc(&get_font_family_string(t.font_family)), t.font_size, esc(&l.text))),
-        }
+        let d = glyph_path(&m.0, &l.text, t.font_family, t.font_size, left, l.baseline);
+        svg.push_str(&format!(r##"<path d="{d}" fill="#000"/>"##));
     }
     svg.push_str("</svg>");
     use std::hash::{Hash, Hasher};
@@ -706,7 +691,6 @@ type Job = Arc<std::sync::Mutex<Option<Option<geom::Src>>>>;
 #[derive(Default)]
 struct Slot { cap: u32, src: Option<Arc<geom::Src>>, job: Option<(u32, Job)> }
 
-#[cfg(target_os = "macos")]
 /// What `Sources::take` has for the caller.
 pub enum Take { Same, Pending, Ready(u32, Option<geom::Src>) }
 
@@ -742,7 +726,6 @@ impl Sources {
         }
         self.map.get(&fd.id)?.src.clone()
     }
-    #[cfg(target_os = "macos")]
     /// As `get`, but owned and left out of the cache (vello keeps its own
     /// premultiplied copy); `have` is the caller's cap.
     pub fn take(&mut self, fd: &FileData, need: f64, have: Option<u32>) -> Take {
@@ -754,7 +737,6 @@ impl Sources {
         }
         match self.poll(fd, cap) { Some(r) => Take::Ready(cap, r), None => Take::Pending }
     }
-    #[cfg(target_os = "macos")]
     /// Decodes started and finished, so far (changes when one ends).
     pub fn progress(&self) -> u64 { self.jobs.load(std::sync::atomic::Ordering::Relaxed) }
     /// Whether a decode is under way (the caller paints again until not).
