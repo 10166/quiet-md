@@ -307,6 +307,20 @@ pub fn board_picture(path: &Path, long: f32, window: &mut Window, cx: &mut App) 
 /// Decodes `path` with its long edge at most `cap` pixels (0: as is). The
 /// shrunken image keeps the file's size for layout through its scale factor.
 fn decode(path: &Path, cap: u32) -> Decoded {
+    let (im, w, _) = shrunk(path, cap)?;
+    let mut rgba = im.into_rgba8();
+    for px in rgba.as_chunks_mut::<4>().0 { px.swap(0, 2); }
+    let scale = rgba.width() as f32 / w.max(1) as f32;
+    Ok(Arc::new(RenderImage::new(vec![image::Frame::new(rgba)]).with_scale_factor(scale)))
+}
+
+/// `path`'s pixels as straight RGBA, the long edge at most `cap` (0: as
+/// is), shrunk while decoding as `decode` does (board image sources).
+pub fn decode_rgba(path: &Path, cap: u32) -> Option<image::RgbaImage> { shrunk(path, cap).ok().map(|(im, _, _)| im.into_rgba8()) }
+
+/// `path` decoded with its long edge at most `cap` (0: as is), with the
+/// file's own size.
+fn shrunk(path: &Path, cap: u32) -> Result<(image::DynamicImage, u32, u32), ImageCacheError> {
     // A PNG streams from the file, never read whole.
     let (im, w, h) = match if cap > 0 { decode_png(path, cap) } else { None } {
         Some(p) => p,
@@ -330,10 +344,7 @@ fn decode(path: &Path, cap: u32) -> Decoded {
         drop(im);
         small
     } else { im };
-    let mut rgba = im.into_rgba8();
-    for px in rgba.as_chunks_mut::<4>().0 { px.swap(0, 2); }
-    let scale = rgba.width() as f32 / w.max(1) as f32;
-    Ok(Arc::new(RenderImage::new(vec![image::Frame::new(rgba)]).with_scale_factor(scale)))
+    Ok((im, w, h))
 }
 
 /// A PNG shrunk row by row as it decodes (box filter, alpha-weighted), so only

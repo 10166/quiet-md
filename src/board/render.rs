@@ -177,7 +177,7 @@ pub struct Painter {
     /// Data-URL images decoded once, by file id.
     data_images: HashMap<String, Option<Arc<RenderImage>>>,
     /// Image pixels for resampling, by file id.
-    sources: HashMap<String, Option<Arc<geom::Src>>>,
+    sources: Sources,
     /// Resampled images replaced since the last paint (freed from the atlas then).
     trash: Vec<Arc<RenderImage>>,
     /// The live scene's nonce at the last paint.
@@ -390,6 +390,7 @@ impl Painter {
         if *use_vello {
             let t_shown = prof.map(|t| t.elapsed().as_secs_f64() * 1e3);
             self.paint_vello(scene, &shown, crop_preview.as_ref(), files, canvas, dim, view, clip, window);
+            if self.sources.busy() { window.request_animation_frame(); }
             if let Some(t) = prof { eprintln!("prof vello {} shown (list {:.2}), {:.2} ms", shown.len(), t_shown.unwrap_or(0.), t.elapsed().as_secs_f64() * 1e3); }
             return;
         }
@@ -410,6 +411,7 @@ impl Painter {
                 });
             }
         });
+        if sources.busy() { window.request_animation_frame(); }
         if let Some(t) = prof { eprintln!("prof gpui {} shown, patched {patched}, {:.2} ms", shown.len(), t.elapsed().as_secs_f64() * 1e3); }
     }
 
@@ -425,6 +427,7 @@ impl Painter {
         (canvas.h.to_bits(), canvas.s.to_bits(), canvas.l.to_bits(), crate::theme::dark()).hash(&mut k);
         for (id, f) in dim { (id, f.to_bits()).hash(&mut k); }
         crop_preview.map(|p| (&p.id, p.origin[0].to_bits(), p.origin[1].to_bits(), p.angle.to_bits())).hash(&mut k);
+        self.sources.progress().hash(&mut k);
         let key = k.finish();
         let v = self.vello.get_or_insert_with(|| Box::new(vello::Vello::new()));
         if self.vello_key != Some(key) {
@@ -433,7 +436,7 @@ impl Painter {
             let t = vello_cpu::kurbo::Affine::scale(sf as f64) * vello_cpu::kurbo::Affine::translate((f32::from(o.x) as f64, f32::from(o.y) as f64)) * vello_cpu::kurbo::Affine::scale(view.zoom as f64);
             v.begin(w, h, canvas, t, view.zoom as f64);
             let sources = &mut self.sources;
-            let mut src = |img: &ImageItem| { let fd = files.get(img.file_id.as_deref()?)?; sources.entry(fd.id.clone()).or_insert_with(|| source_of(fd)).clone() };
+            let mut src = |img: &ImageItem, need: f64, have: Option<u32>| match img.file_id.as_deref().and_then(|id| files.get(id)) { Some(fd) => sources.take(fd, need, have), None => Take::Same };
             for (e, fade) in shown {
                 let Some(c) = self.cache.get_mut(&e.id) else { continue };
                 settle(c);
@@ -489,7 +492,7 @@ fn settle(c: &mut Cached) {
 
 #[allow(clippy::too_many_arguments)]
 fn paint_element(c: &mut Cached, d: &ElementDisplay, files: &BTreeMap<String, FileData>, view: View, b: f32, canvas: Hsla, m: &GpuiMeasure,
-    data_images: &mut HashMap<String, Option<Arc<RenderImage>>>, sources: &mut HashMap<String, Option<Arc<geom::Src>>>, trash: &mut Vec<Arc<RenderImage>>, window: &mut Window, cx: &mut App) {
+    data_images: &mut HashMap<String, Option<Arc<RenderImage>>>, sources: &mut Sources, trash: &mut Vec<Arc<RenderImage>>, window: &mut Window, cx: &mut App) {
     let paint_of = |p: Paint| paint_color(p, d, canvas);
     if c.paths.as_ref().is_none_or(|(at, _)| *at != b) {
         c.paths = Some((b, build_paths(d, b, c.clip.as_deref())));
@@ -690,21 +693,103 @@ fn crop_preview(e: &Element, scene: &Scene, m: &dyn Measure) -> Option<ElementDi
     Some(d)
 }
 
-/// An image file's pixels for resampling (decoded once, at most 4096 px on
-/// the long edge).
-fn source_of(fd: &FileData) -> Option<Arc<geom::Src>> {
-    let bytes = match fd.path.as_deref().and_then(crate::store::image_path).filter(|p| p.exists()) {
-        Some(p) => std::fs::read(p).ok()?,
+/// Image file pixels for resampling and for vello, by file id, with the
+/// long-edge cap they were decoded at, decoded off the main thread. A board
+/// view decodes each file once (at most 4096 px); a thumbnail only as large
+/// as it is drawn, rounded up to a power of two, and again when it grows
+/// past that or shrinks to under a quarter.
+#[derive(Default)]
+pub struct Sources { map: HashMap<String, Slot>, thumb: bool, jobs: Arc<std::sync::atomic::AtomicU64> }
+
+type Job = Arc<std::sync::Mutex<Option<Option<geom::Src>>>>;
+
+#[derive(Default)]
+struct Slot { cap: u32, src: Option<Arc<geom::Src>>, job: Option<(u32, Job)> }
+
+/// What `Sources::take` has for the caller.
+pub enum Take { Same, Pending, Ready(u32, Option<geom::Src>) }
+
+impl Sources {
+    fn cap(&self, need: f64, have: Option<u32>) -> u32 {
+        if !self.thumb || !need.is_finite() { return 4096 }
+        let want = (need.clamp(64., 4096.).ceil() as u32).next_power_of_two();
+        match have { Some(h) if h >= want && h <= want * 4 => h, _ => want }
+    }
+    /// Starts decoding `fd` at `cap` unless that is under way; its result
+    /// once there.
+    fn poll(&mut self, fd: &FileData, cap: u32) -> Option<Option<geom::Src>> {
+        let slot = self.map.entry(fd.id.clone()).or_default();
+        if slot.job.as_ref().is_none_or(|(c, _)| *c != cap) {
+            let out: Job = Arc::default();
+            let (fd, o, jobs) = (fd.clone(), out.clone(), self.jobs.clone());
+            jobs.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            std::thread::spawn(move || { let s = source_of(&fd, cap); *o.lock().unwrap() = Some(s); jobs.fetch_add(1, std::sync::atomic::Ordering::Relaxed); });
+            slot.job = Some((cap, out));
+        }
+        let r = slot.job.as_ref()?.1.lock().unwrap().take()?;
+        slot.job = None;
+        Some(r)
+    }
+    /// `fd`'s pixels for drawing its full image `need` device pixels long:
+    /// the last decode while a better one is on its way.
+    fn get(&mut self, fd: &FileData, need: f64) -> Option<Arc<geom::Src>> {
+        let have = self.map.get(&fd.id).filter(|s| s.cap > 0).map(|s| s.cap);
+        let cap = self.cap(need, have);
+        if have != Some(cap) && let Some(r) = self.poll(fd, cap) {
+            let slot = self.map.get_mut(&fd.id)?;
+            (slot.cap, slot.src) = (cap, r.map(Arc::new));
+        }
+        self.map.get(&fd.id)?.src.clone()
+    }
+    /// As `get`, but owned and left out of the cache (vello keeps its own
+    /// premultiplied copy); `have` is the caller's cap.
+    pub fn take(&mut self, fd: &FileData, need: f64, have: Option<u32>) -> Take {
+        let cap = self.cap(need, have);
+        if have == Some(cap) { return Take::Same }
+        if let Some(slot) = self.map.get_mut(&fd.id) && slot.cap == cap && let Some(s) = slot.src.take() {
+            slot.cap = 0;
+            return Take::Ready(cap, Some(Arc::try_unwrap(s).unwrap_or_else(|s| (*s).clone())));
+        }
+        match self.poll(fd, cap) { Some(r) => Take::Ready(cap, r), None => Take::Pending }
+    }
+    /// Decodes started and finished, so far (changes when one ends).
+    pub fn progress(&self) -> u64 { self.jobs.load(std::sync::atomic::Ordering::Relaxed) }
+    /// Whether a decode is under way (the caller paints again until not).
+    pub fn busy(&self) -> bool { self.map.values().any(|s| s.job.is_some()) }
+}
+
+/// How many device pixels long `img`'s whole (uncropped) image is drawn at
+/// `zoom` device pixels per scene unit.
+pub fn need_px(img: &ImageItem, zoom: f64) -> f64 {
+    let [_, _, w, h] = img.dest;
+    let (fw, fh) = match (img.crop, img.natural_size) {
+        (Some(c), Some([nw, nh])) if c[2] > 0. && c[3] > 0. => (w * nw / c[2], h * nh / c[3]),
+        _ => (w, h),
+    };
+    fw.max(fh) * zoom
+}
+
+/// An image file's pixels, the long edge at most `cap` (on a worker thread).
+fn source_of(fd: &FileData, cap: u32) -> Option<geom::Src> {
+    let t = std::time::Instant::now();
+    let r = decode_source(fd, cap);
+    if profiling() { eprintln!("prof decode {} at {cap}: {:.2} ms", fd.id, t.elapsed().as_secs_f64() * 1e3); }
+    r
+}
+
+fn decode_source(fd: &FileData, cap: u32) -> Option<geom::Src> {
+    let im = match fd.path.as_deref().and_then(crate::store::image_path).filter(|p| p.exists()) {
+        Some(p) => crate::editor::image::decode_rgba(&p, cap)?,
         None => {
             use base64::Engine;
             let (_, b64) = fd.data_url.as_deref()?.split_once(";base64,")?;
-            base64::engine::general_purpose::STANDARD.decode(b64.trim()).ok()?
+            let bytes = base64::engine::general_purpose::STANDARD.decode(b64.trim()).ok()?;
+            let mut im = image::load_from_memory(&bytes).ok()?;
+            if im.width().max(im.height()) > cap { im = im.thumbnail(cap, cap); }
+            im.into_rgba8()
         }
     };
-    let mut im = image::load_from_memory(&bytes).ok()?;
-    if im.width().max(im.height()) > 4096 { im = im.thumbnail(4096, 4096); }
-    let im = im.into_rgba8();
-    Some(Arc::new(geom::Src { w: im.width(), h: im.height(), px: im.into_raw() }))
+    Some(geom::Src { w: im.width(), h: im.height(), px: im.into_raw() })
 }
 
 /// Whether GPUI can draw `img` itself: upright, not mirrored, and inside
@@ -721,7 +806,7 @@ fn plain_image(img: &ImageItem, d: &ElementDisplay) -> bool {
 
 #[allow(clippy::too_many_arguments)]
 fn paint_image(img: &ImageItem, d: &ElementDisplay, clip: Option<&[geom::Pt]>, cached: &mut Option<(f64, Option<(Arc<RenderImage>, [f64; 4])>)>, files: &BTreeMap<String, FileData>, view: View, data_images: &mut HashMap<String, Option<Arc<RenderImage>>>,
-    sources: &mut HashMap<String, Option<Arc<geom::Src>>>, trash: &mut Vec<Arc<RenderImage>>, window: &mut Window, cx: &mut App) {
+    sources: &mut Sources, trash: &mut Vec<Arc<RenderImage>>, window: &mut Window, cx: &mut App) {
     let [x, y, w, h] = img.dest;
     let o = d.origin;
     let dest = view.rect([o[0] + x, o[1] + y, o[0] + x + w, o[1] + y + h]);
@@ -736,7 +821,7 @@ fn paint_image(img: &ImageItem, d: &ElementDisplay, clip: Option<&[geom::Pt]>, c
         if let Ok(p) = pb.build() { window.paint_path(p, placeholder_color(d.opacity)); }
     };
     if !plain_image(img, d) {
-        let Some(src) = fd.and_then(|fd| sources.entry(fd.id.clone()).or_insert_with(|| source_of(fd)).clone()) else { placeholder(window); return };
+        let Some(src) = fd.and_then(|fd| sources.get(fd, need_px(img, view.zoom as f64 * window.scale_factor() as f64))) else { placeholder(window); return };
         // resolution: the screen's at the zoom octave above, at most the file's
         let full_w = match (img.crop, img.natural_size) { (Some(cr), Some([nw, _])) if cr[2] > 0. => nw * w / cr[2], _ => w };
         let natural = src.w as f64 / full_w.max(1e-6);
@@ -777,6 +862,7 @@ fn paint_image(img: &ImageItem, d: &ElementDisplay, clip: Option<&[geom::Pt]>, c
 /// less `pad`, never enlarged past 100%, centered.
 pub fn paint_fit(painter: &mut Painter, board: &Board, bounds: Bounds<Pixels>, pad: f32, window: &mut Window, cx: &mut App) {
     painter.thumb = true;
+    painter.sources.thumb = true;
     painter.sync(board);
     let Some(c) = painter.content_bounds() else { return };
     let (w, h) = (f32::from(bounds.size.width) - pad * 2., f32::from(bounds.size.height) - pad * 2.);

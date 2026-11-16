@@ -38,6 +38,7 @@ KEYS = {
     "07-organize": ("organize", None, False),
     "07a-reading-list": ("reading-list", "examples", False),
     "07b-weekly": ("weekly", "examples", False),
+    "07c-board-trip": ("board-trip", "examples", False),
     "08-data": ("data", None, False),
     "09-personalize": ("personalize", None, False),
     "10-practice": ("practice", None, False),

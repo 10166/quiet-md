@@ -112,6 +112,7 @@ pub fn clip_path(path: &Path<Pixels>, keep: Option<&[[f32; 2]]>, hole: Option<&[
 }
 
 /// Decoded image pixels, RGBA, straight alpha.
+#[derive(Clone)]
 pub struct Src { pub w: u32, pub h: u32, pub px: Vec<u8> }
 
 /// `img` of `d` as drawn: a BGRA bitmap (straight alpha, GPUI's) covering

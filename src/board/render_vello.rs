@@ -46,7 +46,8 @@ pub struct Vello {
     /// Glyph outlines in em units, y down, by font and glyph.
     glyphs: FxHashMap<(FontId, GlyphId), Option<BezPath>>,
     upem: FxHashMap<FontId, f64>,
-    images: HashMap<String, Option<Arc<Pixmap>>>,
+    /// Premultiplied image pixels by file id, with the cap they were decoded at.
+    images: HashMap<String, (u32, Option<Arc<Pixmap>>)>,
 }
 
 fn pixel_buffer(w: usize, h: usize) -> Option<CVPixelBuffer> {
@@ -116,7 +117,7 @@ impl Vello {
     /// Draws one element. `clip`: its frame clip (scene polygon); `fade`:
     /// the dim factor; `src` finds image pixels.
     #[allow(clippy::too_many_arguments)]
-    pub fn element(&mut self, c: &mut Cached, d: &ElementDisplay, fade: f32, canvas: Hsla, src: &mut dyn FnMut(&ImageItem) -> Option<Arc<Src>>, window: &Window) {
+    pub fn element(&mut self, c: &mut Cached, d: &ElementDisplay, fade: f32, canvas: Hsla, src: &mut dyn FnMut(&ImageItem, f64, Option<u32>) -> super::Take, window: &Window) {
         let Vello { ctx, res: _, view, glyphs, upem, images, zoom, .. } = self;
         let zoom = *zoom;
         let el = *view * Affine::translate(kpt(d.origin)) * Affine::rotate_about(d.angle, kpt(d.center));
@@ -187,7 +188,12 @@ impl Vello {
                     let flip = Affine::translate((x + w / 2., y + h / 2.)) * Affine::scale_non_uniform(img.flip[0], img.flip[1]) * Affine::translate((-x - w / 2., -y - h / 2.));
                     ctx.set_transform(el * flip);
                     let shape = if img.corner_radius > 0. { vello_cpu::kurbo::RoundedRect::new(x, y, x + w, y + h, img.corner_radius).to_path(0.1) } else { Rect::new(x, y, x + w, y + h).to_path(0.1) };
-                    let pm = img.file_id.as_ref().and_then(|id| images.entry(id.clone()).or_insert_with(|| src(img).and_then(|s| pixmap_of(&s))).clone());
+                    let need = super::need_px(img, zoom * window.scale_factor() as f64);
+                    let pm = img.file_id.as_ref().and_then(|id| {
+                        // decoded again only when the cap changes (thumbnails)
+                        if let super::Take::Ready(cap, s) = src(img, need, images.get(id).map(|(c, _)| *c)) { images.insert(id.clone(), (cap, s.and_then(pixmap_of))); }
+                        images.get(id)?.1.clone()
+                    });
                     ctx.set_fill_rule(Fill::NonZero);
                     match pm {
                         Some(pm) => {
@@ -244,9 +250,9 @@ impl Vello {
 
 }
 
-fn pixmap_of(s: &Src) -> Option<Arc<Pixmap>> {
+fn pixmap_of(s: Src) -> Option<Arc<Pixmap>> {
     let (w, h) = (u16::try_from(s.w).ok()?, u16::try_from(s.h).ok()?);
-    Some(Arc::new(Pixmap::from_parts(s.px.clone(), w, h, PixelMetadata { may_have_transparency: true, alpha_type: ImageAlphaType::Alpha })))
+    Some(Arc::new(Pixmap::from_parts(s.px, w, h, PixelMetadata { may_have_transparency: true, alpha_type: ImageAlphaType::Alpha })))
 }
 
 /// A glyph outline in em units, y down.
