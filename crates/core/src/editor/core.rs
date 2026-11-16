@@ -639,6 +639,32 @@ impl Core {
         self.fix_selection();
     }
 
+    /// Points every image whose source is `from` at `to`, in the document and
+    /// across the undo / redo history, outside the edit history: a pasted web
+    /// image becoming its downloaded copy (#220) is the same picture, so an
+    /// undo must not bring the expiring link back. Whether the document changed.
+    pub fn relink_image(&mut self, from: &str, to: &str) -> bool {
+        fn walk(blocks: &mut [Block], from: &str, to: &str) -> bool {
+            let mut hit = false;
+            for b in blocks {
+                hit |= walk(&mut b.children, from, to);
+                match &mut b.kind {
+                    BlockKind::Image { src, .. } if src == from => { *src = to.to_string(); hit = true; }
+                    BlockKind::Table(t) => for cell in t.rows.iter_mut().flatten() { hit |= walk(&mut cell.blocks, from, to); },
+                    _ => {}
+                }
+            }
+            hit
+        }
+        let has = |doc: &Document| { let mut n = false; doc.for_each_block(|b| n |= matches!(&b.kind, BlockKind::Image { src, .. } if src == from)); n };
+        for s in self.undo.iter_mut().chain(self.redo.iter_mut()) {
+            if has(&s.doc) { walk(&mut std::sync::Arc::make_mut(s).doc.blocks, from, to); }
+        }
+        let hit = walk(&mut self.doc.blocks, from, to);
+        if hit { self.generation += 1; }
+        hit
+    }
+
     pub fn break_coalescing(&mut self) {
         self.last_edit = None;
     }
@@ -3328,6 +3354,26 @@ mod tests {
 
     fn id(c: &Core, n: usize) -> BlockId {
         c.units()[n].id
+    }
+
+    /// #220: a pasted web image relinked to its download, in tables too and
+    /// across undo / redo, so stepping back never revives the expiring link.
+    #[test]
+    fn relink_image_rewrites_document_and_history() {
+        let u = "https://f.cn/a?code=1";
+        let mut c = doc(&format!("<title>t</title><p>x</p><img href=\"{u}\"/><table><tr><td><img href=\"{u}\"/></td></tr></table><img href=\"https://e/b.png\"/>"));
+        c.checkpoint(EditKind::Other);
+        c.doc.blocks.remove(0);
+        c.checkpoint(EditKind::Other);
+        c.doc.blocks.pop();
+        assert!(c.undo());
+        assert!(c.relink_image(u, "/lib/assets/a.png"));
+        assert!(!xml(&c).contains(u) && xml(&c).matches("/lib/assets/a.png").count() == 2 && xml(&c).contains("https://e/b.png"));
+        assert!(c.redo());
+        assert!(!xml(&c).contains(u));
+        assert!(c.undo() && c.undo());
+        assert!(!xml(&c).contains(u) && xml(&c).contains("<p>x</p>"));
+        assert!(!c.relink_image(u, "/lib/assets/a.png"));
     }
 
     #[test]

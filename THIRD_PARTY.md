@@ -4,7 +4,7 @@ Quiet.md 本体以 MIT 协议发布（见 [LICENSE](LICENSE)）。下面是随�
 
 ## Rust 依赖
 
-由 `cargo metadata` 生成，共 759 个包。许可逐项列于下表，其中也包含 MPL-2.0；本表记录依赖声明，不替代各组件的许可文本。
+由 `cargo metadata` 生成，共 764 个包。许可逐项列于下表，其中也包含 MPL-2.0；本表记录依赖声明，不替代各组件的许可文本。
 
 要重新生成这张表：`scripts/licences.sh`（从 `cargo metadata` 取全部依赖）。
 
@@ -181,6 +181,7 @@ Quiet.md 本体以 MIT 协议发布（见 [LICENSE](LICENSE)）。下面是随�
 | filedescriptor | 0.8.3 | MIT |
 | filetime | 0.2.29 | MIT/Apache-2.0 |
 | find-msvc-tools | 0.1.15 | MIT OR Apache-2.0 |
+| fixed_decimal | 0.7.3 | Unicode-3.0 |
 | flate2 | 1.1.10 | MIT OR Apache-2.0 |
 | float-cmp | 0.9.0 | MIT |
 | float-ord | 0.3.2 | MIT / Apache-2.0 |
@@ -262,12 +263,16 @@ Quiet.md 本体以 MIT 协议发布（见 [LICENSE](LICENSE)）。下面是随�
 | hyper-rustls | 0.27.10 | Apache-2.0 OR ISC OR MIT |
 | hyper-util | 0.1.21 | MIT |
 | icu_collections | 2.3.0 | Unicode-3.0 |
-| icu_locale_core | 2.3.0 | Unicode-3.0 |
+| icu_locale_core | 2.4.0 | Unicode-3.0 |
+| icu_locale_fallback | 2.4.0 | Unicode-3.0 |
+| icu_locale_fallback_data | 2.4.0 | Unicode-3.0 |
 | icu_normalizer | 2.3.0 | Unicode-3.0 |
 | icu_normalizer_data | 2.3.0 | Unicode-3.0 |
+| icu_plurals | 2.4.0 | Unicode-3.0 |
+| icu_plurals_data | 2.4.0 | Unicode-3.0 |
 | icu_properties | 2.3.0 | Unicode-3.0 |
 | icu_properties_data | 2.3.0 | Unicode-3.0 |
-| icu_provider | 2.3.1 | Unicode-3.0 |
+| icu_provider | 2.4.0 | Unicode-3.0 |
 | ident_case | 1.0.1 | MIT/Apache-2.0 |
 | idna | 1.1.0 | MIT OR Apache-2.0 |
 | idna_adapter | 1.2.2 | Apache-2.0 OR MIT |
@@ -579,7 +584,7 @@ Quiet.md 本体以 MIT 协议发布（见 [LICENSE](LICENSE)）。下面是随�
 | tiny-keccak | 2.0.2 | CC0-1.0 |
 | tiny-skia | 0.11.4 | BSD-3-Clause |
 | tiny-skia-path | 0.11.4 | BSD-3-Clause |
-| tinystr | 0.8.4 | Unicode-3.0 |
+| tinystr | 0.8.5 | Unicode-3.0 |
 | tinyvec | 1.13.3 | Zlib OR Apache-2.0 OR MIT |
 | tokio | 1.53.3 | MIT |
 | tokio-rustls | 0.26.6 | MIT OR Apache-2.0 |
@@ -740,7 +745,7 @@ Quiet.md 本体以 MIT 协议发布（见 [LICENSE](LICENSE)）。下面是随�
 | y4m | 0.8.0 | MIT |
 | yazi | 0.2.1 | Apache-2.0 OR MIT |
 | yeslogic-fontconfig-sys | 6.0.1 | MIT |
-| yoke | 0.8.3 | Unicode-3.0 |
+| yoke | 0.8.4 | Unicode-3.0 |
 | yoke-derive | 0.8.4 | Unicode-3.0 |
 | zbus | 5.19.0 | MIT |
 | zbus_macros | 5.19.0 | MIT |
@@ -759,8 +764,8 @@ Quiet.md 本体以 MIT 协议发布（见 [LICENSE](LICENSE)）。下面是随�
 | zeroize | 1.9.1 | Apache-2.0 OR MIT |
 | zeroize_derive | 1.5.0 | Apache-2.0 OR MIT |
 | zerotrie | 0.2.5 | Unicode-3.0 |
-| zerovec | 0.11.8 | Unicode-3.0 |
-| zerovec-derive | 0.11.6 | Unicode-3.0 |
+| zerovec | 0.11.9 | Unicode-3.0 |
+| zerovec-derive | 0.11.7 | Unicode-3.0 |
 | zlib-rs | 0.6.8 | Zlib |
 | zmij | 1.0.23 | MIT |
 | zune-core | 0.5.3 | MIT OR Apache-2.0 OR Zlib |

@@ -2147,6 +2147,7 @@ impl Editor {
                 let _ = this.update(cx, |e, cx| {
                     if ok {
                         e.img.remote.borrow_mut().remove(&url);
+                        e.adopt_remote(cx);
                     } else {
                         e.img.remote.borrow_mut().insert(url, Remote::Failed);
                     }
@@ -2157,6 +2158,96 @@ impl Editor {
             .detach();
         }
     }
+}
+
+/// Web images pasted this session (#220), with their copy in the assets
+/// folder once made. Links like Feishu's expire within hours, so a pasted
+/// one becomes an owned asset as soon as it is downloaded. Process-wide: the
+/// document may be closed before the download lands, and is relinked the
+/// next time an editor opens it.
+static PASTED: std::sync::Mutex<Vec<(String, Option<PathBuf>)>> = std::sync::Mutex::new(Vec::new());
+
+impl Editor {
+    /// Queues pasted web images for download now (not only once scrolled
+    /// to) and adopts any already cached. With 网络图片 turned off they stay
+    /// links; a failed download too.
+    pub(super) fn adopt_pasted(&mut self, urls: Vec<String>, cx: &mut Context<Self>) {
+        if urls.is_empty() || !crate::settings::prefs().remote_images { return }
+        {
+            let mut pasted = PASTED.lock().unwrap_or_else(|e| e.into_inner());
+            for url in urls {
+                self.img.remote.borrow_mut().entry(url.clone()).or_insert(Remote::Queued);
+                if !pasted.iter().any(|(u, _)| *u == url) { pasted.push((url, None)); }
+            }
+        }
+        self.adopt_remote(cx);
+        // Queued downloads start on the next frame.
+        cx.notify();
+    }
+
+    /// Points this document's pasted web images at their downloaded copies,
+    /// copying a download into the assets folder the first time (not an undo
+    /// step: the undo history is relinked too). Saves like any other edit.
+    pub fn adopt_remote(&mut self, cx: &mut Context<Self>) {
+        if self.read_only { return }
+        let mut pasted = PASTED.lock().unwrap_or_else(|e| e.into_inner());
+        if pasted.is_empty() { return }
+        let mut srcs = std::collections::HashSet::new();
+        self.core.doc.for_each_block(|b| if let BlockKind::Image { src, .. } = &b.kind && src.starts_with("http") { srcs.insert(src.clone()); });
+        let mut changed = false;
+        pasted.retain_mut(|(url, copy)| {
+            if !srcs.contains(url.as_str()) { return true }
+            if copy.is_none() {
+                let Some(cached) = cached_remote(url) else { return true };
+                // Not an image we can keep (too big, odd format): it stays a link.
+                let Some(p) = adopt_file(&cached) else { return false };
+                *copy = Some(p);
+            }
+            let to = copy.as_ref().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+            changed |= self.core.relink_image(url, &to);
+            true
+        });
+        drop(pasted);
+        // Right after a paste the caller's `changed()` reports it.
+        if changed && !self.core.dirty {
+            cx.emit(EditorEvent::Changed);
+            cx.notify();
+        }
+    }
+}
+
+/// The `http(s)` image sources among pasted blocks, for `adopt_pasted`.
+pub(super) fn pasted_remote(blocks: &[Block]) -> Vec<String> {
+    let mut out = vec![];
+    remote_srcs(blocks, &mut out);
+    out
+}
+
+fn remote_srcs(blocks: &[Block], out: &mut Vec<String>) {
+    for b in blocks {
+        remote_srcs(&b.children, out);
+        if let BlockKind::Table(t) = &b.kind {
+            for cell in t.rows.iter().flatten() { remote_srcs(&cell.blocks, out); }
+        }
+        if let BlockKind::Image { src, .. } = &b.kind
+            && (src.starts_with("http://") || src.starts_with("https://")) && !out.contains(src) {
+            out.push(src.clone());
+        }
+    }
+}
+
+/// A downloaded remote image (no extension in the cache) as a new asset.
+fn adopt_file(cached: &Path) -> Option<PathBuf> {
+    let bytes = std::fs::read(cached).ok()?;
+    let ext = match image::guess_format(&bytes).ok()? {
+        image::ImageFormat::Png => "png",
+        image::ImageFormat::Jpeg => "jpg",
+        image::ImageFormat::Gif => "gif",
+        image::ImageFormat::WebP => "webp",
+        image::ImageFormat::Bmp => "bmp",
+        _ => return None,
+    };
+    store_image(&bytes, ext).ok()
 }
 
 fn download(url: &str, dest: &Path) -> bool {
@@ -2331,8 +2422,22 @@ pub(crate) fn localize_pasted_images(blocks: &mut Vec<Block>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{cap, clipboard_image_data, decode, decode_png, BAD_DIMS};
+    use super::{cap, clipboard_image_data, decode, decode_png, pasted_remote, BAD_DIMS};
+    use crate::model::{Block, BlockKind, RichText};
     use gpui::ImageFormat;
+
+    fn img(src: &str) -> Block {
+        Block::new(BlockKind::Image { src_kind: "src".into(), src: src.into(), width: None, height: None, caption: None, crop: None }, RichText::default())
+    }
+
+    /// #220: pasted web images to fetch, nested ones too, each once; local and inline ones stay out.
+    #[test]
+    fn finds_pasted_remote_images() {
+        let mut quote = Block::text("q");
+        quote.children = vec![img("https://f.cn/a?code=1"), img("/tmp/x.png")];
+        let blocks = vec![img("http://e.com/b.png"), quote, img("data:image/png;base64,AAAA"), img("https://f.cn/a?code=1")];
+        assert_eq!(pasted_remote(&blocks), ["http://e.com/b.png", "https://f.cn/a?code=1"]);
+    }
 
     fn photo(dir: &std::path::Path, w: u32, h: u32) -> std::path::PathBuf {
         let p = dir.join(format!("{w}x{h}.jpg"));
