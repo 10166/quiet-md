@@ -706,6 +706,7 @@ type Job = Arc<std::sync::Mutex<Option<Option<geom::Src>>>>;
 #[derive(Default)]
 struct Slot { cap: u32, src: Option<Arc<geom::Src>>, job: Option<(u32, Job)> }
 
+#[cfg(target_os = "macos")]
 /// What `Sources::take` has for the caller.
 pub enum Take { Same, Pending, Ready(u32, Option<geom::Src>) }
 
@@ -741,6 +742,7 @@ impl Sources {
         }
         self.map.get(&fd.id)?.src.clone()
     }
+    #[cfg(target_os = "macos")]
     /// As `get`, but owned and left out of the cache (vello keeps its own
     /// premultiplied copy); `have` is the caller's cap.
     pub fn take(&mut self, fd: &FileData, need: f64, have: Option<u32>) -> Take {
@@ -752,6 +754,7 @@ impl Sources {
         }
         match self.poll(fd, cap) { Some(r) => Take::Ready(cap, r), None => Take::Pending }
     }
+    #[cfg(target_os = "macos")]
     /// Decodes started and finished, so far (changes when one ends).
     pub fn progress(&self) -> u64 { self.jobs.load(std::sync::atomic::Ordering::Relaxed) }
     /// Whether a decode is under way (the caller paints again until not).
