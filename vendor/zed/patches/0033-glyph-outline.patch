@@ -186,7 +186,7 @@ index 83e2d2d02d863e16b4d32129a844660dee57e76a..bc86191201ce0de55be5dd925951488c
      "Win32_Graphics_Dwm",
      "Win32_Graphics_Dxgi_Common",
 diff --git a/crates/gpui_windows/src/direct_write.rs b/crates/gpui_windows/src/direct_write.rs
-index 82ff963c1d7136af3d387f05169f9f3fcbcc0455..f138e38be06e3e8dcbd66b1b657f399f246ebf31 100644
+index 82ff963c1d7136af3d387f05169f9f3fcbcc0455..d7037da57e4c5a993c60dfd2ed2f1679003f2d5c 100644
 --- a/crates/gpui_windows/src/direct_write.rs
 +++ b/crates/gpui_windows/src/direct_write.rs
 @@ -122,6 +122,25 @@ impl DirectWriteTextSystem {
@@ -196,7 +196,7 @@ index 82ff963c1d7136af3d387f05169f9f3fcbcc0455..f138e38be06e3e8dcbd66b1b657f399f
 +    // quiet.md: DirectWrite's outline at the design size (font units), y
 +    // flipped up; simulated oblique and bold come with the font face.
 +    fn glyph_outline(&self, font_id: FontId, glyph_id: GlyphId) -> Option<Vec<GlyphOutlineCmd>> {
-+        let state = self.0.read();
++        let state = self.state.read();
 +        let face = &state.fonts.get(font_id.0)?.font_face;
 +        let cmds = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
 +        let sink: windows::Win32::Graphics::Direct2D::Common::ID2D1SimplifiedGeometrySink =
@@ -222,7 +222,7 @@ index 82ff963c1d7136af3d387f05169f9f3fcbcc0455..f138e38be06e3e8dcbd66b1b657f399f
 +
 +/// quiet.md: collects `GetGlyphRunOutline`'s figures (y down) as
 +/// `GlyphOutlineCmd`s (y up).
-+#[windows::core::implement(windows::Win32::Graphics::Direct2D::Common::ID2D1SimplifiedGeometrySink)]
++#[implement(windows::Win32::Graphics::Direct2D::Common::ID2D1SimplifiedGeometrySink)]
 +struct OutlineSink {
 +    cmds: std::rc::Rc<std::cell::RefCell<Vec<GlyphOutlineCmd>>>,
 +}

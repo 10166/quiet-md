@@ -125,7 +125,7 @@ impl PlatformTextSystem for DirectWriteTextSystem {
     // quiet.md: DirectWrite's outline at the design size (font units), y
     // flipped up; simulated oblique and bold come with the font face.
     fn glyph_outline(&self, font_id: FontId, glyph_id: GlyphId) -> Option<Vec<GlyphOutlineCmd>> {
-        let state = self.0.read();
+        let state = self.state.read();
         let face = &state.fonts.get(font_id.0)?.font_face;
         let cmds = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
         let sink: windows::Win32::Graphics::Direct2D::Common::ID2D1SimplifiedGeometrySink =
@@ -2096,7 +2096,7 @@ mod tests {
 
 /// quiet.md: collects `GetGlyphRunOutline`'s figures (y down) as
 /// `GlyphOutlineCmd`s (y up).
-#[windows::core::implement(windows::Win32::Graphics::Direct2D::Common::ID2D1SimplifiedGeometrySink)]
+#[implement(windows::Win32::Graphics::Direct2D::Common::ID2D1SimplifiedGeometrySink)]
 struct OutlineSink {
     cmds: std::rc::Rc<std::cell::RefCell<Vec<GlyphOutlineCmd>>>,
 }
