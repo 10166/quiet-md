@@ -8,7 +8,8 @@ use crate::model::*;
 use std::cell::{Cell, RefCell};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::ops::Range;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub const TITLE: BlockId = BlockId(0);
