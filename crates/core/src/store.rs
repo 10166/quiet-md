@@ -76,11 +76,52 @@ pub struct Meta {
     /// the 回收站: where it was.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub rel: String,
+    /// What the file holds; follows from its extension like `markdown`.
+    #[serde(default, skip_serializing_if = "DocKind::is_doc")]
+    pub kind: DocKind,
 }
 
 impl Meta {
     /// 本机文件: outside the library's tree.
     pub fn local(&self) -> bool { self.path.is_some() }
+    /// Titled by its file name, not by a title inside it: Markdown and
+    /// everything that is not a document.
+    pub fn named_by_file(&self) -> bool { self.markdown || !self.kind.is_doc() }
+}
+
+/// What a library file holds. Whatever is not a document still lives in the
+/// tree like one (index, folders, moves, 回收站); it has its own file format
+/// and editor. The kind follows from the extension, the one place below.
+#[derive(Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum DocKind {
+    #[default]
+    Doc,
+    /// 画板: a `.excalidraw` file (Excalidraw's own JSON).
+    Board,
+}
+
+impl DocKind {
+    pub fn is_doc(&self) -> bool { *self == DocKind::Doc }
+
+    /// The file extension (a document's is `md` when it is Markdown).
+    pub fn ext(self, markdown: bool) -> &'static str {
+        match self {
+            DocKind::Doc => if markdown { "md" } else { "xml" },
+            DocKind::Board => "excalidraw",
+        }
+    }
+
+    /// A library file's kind and whether it is Markdown, by its name; `None`:
+    /// not a library file (older builds skip `.excalidraw` the same way).
+    pub fn of_name(name: &str) -> Option<(DocKind, bool)> {
+        match name.rsplit_once('.')?.1 {
+            "xml" => Some((DocKind::Doc, false)),
+            "md" => Some((DocKind::Doc, true)),
+            "excalidraw" => Some((DocKind::Board, false)),
+            _ => None,
+        }
+    }
 }
 
 fn catalogue_closed_default() -> bool { true }
@@ -92,7 +133,7 @@ impl Default for Meta {
             width: PageWidth::default(), catalogue_closed: true,
             parent: None, order: 0, starred: 0, reading: false,
             info: InfoRow::default(), refs_hidden: false,
-            markdown: false, path: None, name: None, rel: String::new(),
+            markdown: false, path: None, name: None, rel: String::new(), kind: DocKind::Doc,
         }
     }
 }
@@ -253,6 +294,10 @@ pub struct Store {
     /// and remembered in `.quiet/index.json`, but nothing in a file refers
     /// to them: links are relative paths.
     index: HashMap<String, Meta>,
+    /// Index entries for files this build does not know (a newer build's
+    /// document kinds), written back unchanged so their ids and settings
+    /// survive this build's writes (an older build dropped 画板 this way).
+    foreign: DiskIndex,
     trash: HashMap<String, Trashed>,
     /// The old layout (FORMAT 3: `docs/<id>.xml`, folders only in the index,
     /// the app's files at the top), kept until the user agrees to the move.
@@ -461,6 +506,12 @@ fn load_json<T: serde::de::DeserializeOwned + Default>(path: &std::path::Path, w
 }
 
 /// A JSON file as another copy of the app left it, if it can be read right now.
+/// The entries of `.quiet/index.json` for files of kinds this build does not know.
+fn foreign_of(disk: &DiskIndex) -> DiskIndex {
+    disk.iter().filter(|(k, _)| !k.ends_with('/') && !k.split('/').any(|p| p.is_empty() || p.starts_with('.')) && DocKind::of_name(k).is_none())
+        .map(|(k, a)| (k.clone(), a.clone())).collect()
+}
+
 fn reread<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Option<T> {
     serde_json::from_slice(&crate::vfs::read(path).ok()?).ok()
 }
@@ -558,8 +609,8 @@ fn derive_tree(index: &mut HashMap<String, Meta>) {
         let name = base_name(&m.rel).to_string();
         if m.folder.is_some() { m.folder = Some(name); }
         else {
-            m.markdown = name.ends_with(".md");
-            m.name = m.markdown.then(|| stem_of(&name).to_string());
+            (m.kind, m.markdown) = DocKind::of_name(&name).unwrap_or_default();
+            m.name = m.named_by_file().then(|| stem_of(&name).to_string());
         }
         let up = parent_rel(&m.rel);
         m.parent = (!up.is_empty()).then(|| folders.get(up).cloned()).flatten();
@@ -567,7 +618,7 @@ fn derive_tree(index: &mut HashMap<String, Meta>) {
 }
 
 /// A doc file's extension in the library.
-fn ext_of(m: &Meta) -> &'static str { if m.markdown { "md" } else { "xml" } }
+fn ext_of(m: &Meta) -> &'static str { m.kind.ext(m.markdown) }
 
 impl Store {
     /// `QUIET_MD_HOME`, else the folder picked at first launch (`library.json`
@@ -710,7 +761,7 @@ impl Store {
         }
         let base = if flat { root.clone() } else { internal.clone() };
         let trash = load_json(&base.join("trash").join("index.json"), "回收站索引", &mut warnings);
-        let mut store = Store { file_changes: vec![], root, index: HashMap::new(), trash, flat, warnings, migrated: None, loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), batch: Default::default() };
+        let mut store = Store { file_changes: vec![], root, index: HashMap::new(), foreign: DiskIndex::new(), trash, flat, warnings, migrated: None, loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), batch: Default::default() };
         if flat {
             store.index = load_json(&base.join("index.json"), "文档索引", &mut store.warnings);
             store.flat_folders()?;
@@ -718,6 +769,7 @@ impl Store {
             let disk: DiskIndex = load_json(&internal.join("index.json"), "文档索引", &mut store.warnings);
             let local = store.read_local();
             store.index = store.from_disk(&disk, &local);
+            store.foreign = foreign_of(&disk);
             store.load_parsed();
         }
         if let Ok(entries) = crate::vfs::read_dir(store.recovery_dir()) {
@@ -766,7 +818,7 @@ impl Store {
         for (key, a) in disk {
             let folder = key.ends_with('/');
             let rel = key.trim_end_matches('/');
-            if rel.is_empty() || rel.split('/').any(|p| p.is_empty() || p.starts_with('.')) || (!folder && !(rel.ends_with(".md") || rel.ends_with(".xml"))) { continue; }
+            if rel.is_empty() || rel.split('/').any(|p| p.is_empty() || p.starts_with('.')) || (!folder && DocKind::of_name(rel).is_none()) { continue; }
             if folder && !folders.insert(rel.to_string()) { continue; }
             let id = if a.id.is_empty() || index.contains_key(&a.id) || local.files.contains_key(&a.id) { uuid::Uuid::new_v4().to_string() } else { a.id.clone() };
             let mut m = a.meta();
@@ -794,6 +846,13 @@ impl Store {
             index.insert(id.clone(), m);
         }
         index
+    }
+
+    /// What `.quiet/index.json` holds: this build's entries and the ones it keeps for others.
+    fn disk_index(&self) -> DiskIndex {
+        let mut disk = self.to_disk();
+        for (k, a) in &self.foreign { disk.entry(k.clone()).or_insert_with(|| a.clone()); }
+        disk
     }
 
     fn to_disk(&self) -> DiskIndex {
@@ -831,7 +890,7 @@ impl Store {
     fn path(&self, id: &str) -> PathBuf {
         match self.index.get(id) {
             Some(Meta { path: Some(p), .. }) => PathBuf::from(p),
-            m if self.flat => self.root.join("docs").join(format!("{id}.{}", if m.is_some_and(|m| m.markdown) { "md" } else { "xml" })),
+            m if self.flat => self.root.join("docs").join(format!("{id}.{}", m.map_or("xml", ext_of))),
             Some(m) if !m.rel.is_empty() => self.abs(&m.rel),
             _ => self.internal().join("missing").join(id),
         }
@@ -852,13 +911,15 @@ impl Store {
     }
 
     pub fn is_markdown(&self, id: &str) -> bool { self.index.get(id).is_some_and(|m| m.markdown) }
+    pub fn kind(&self, id: &str) -> DocKind { self.index.get(id).map_or(DocKind::Doc, |m| m.kind) }
+    fn named_by_file(&self, id: &str) -> bool { self.index.get(id).is_some_and(Meta::named_by_file) }
 
     /// The folder of a 本机文件, which its images are relative to.
     fn base(&self, id: &str) -> Option<PathBuf> {
         self.index.get(id)?.path.as_ref().and_then(|p| std::path::Path::new(p).parent()).map(PathBuf::from)
     }
 
-    /// A Markdown document's title: its file name.
+    /// The title of a Markdown file or a 画板: its file name.
     fn markdown_title(&self, id: &str) -> String {
         let Some(m) = self.index.get(id) else { return String::new() };
         match &m.path {
@@ -901,6 +962,7 @@ impl Store {
 
     /// `text` (a file's contents) as a document.
     fn parse_doc(&self, id: &str, text: &str) -> Result<Document> {
+        if self.kind(id) == DocKind::Board { return crate::whiteboard::parse_file(text, &self.markdown_title(id)); }
         if !self.is_markdown(id) {
             let mut doc = docxml::parse(text)?;
             if text.contains("href=") { self.links_to_ids(&self.doc_dir(id), &mut doc); }
@@ -919,6 +981,7 @@ impl Store {
     /// `serialize_doc`, and the library files a 本机文件 needs copied beside
     /// it: (source, path relative to its folder).
     fn serialize_with_copies(&self, id: &str, doc: &Document, disk: Option<&str>) -> (String, Vec<(PathBuf, String)>) {
+        if self.kind(id) == DocKind::Board { return (crate::whiteboard::write_file(doc), vec![]); }
         if !self.is_markdown(id) {
             if !self.flat && !doc.doc_links().is_empty() {
                 let mut doc = doc.clone();
@@ -957,18 +1020,41 @@ impl Store {
         if self.flat {
             if let Some(index) = reread(&self.index_file()) { self.index = index; }
         } else if let Some(disk) = reread::<DiskIndex>(&self.index_file()) {
+            let before = std::mem::take(&mut self.index);
             let local = self.read_local();
             self.index = self.from_disk(&disk, &local);
+            self.foreign = foreign_of(&disk);
+            self.reclaim_open(before);
         }
         if let Some(trash) = reread(&self.trash_index_file()) { self.trash = trash; }
         Ok(lock)
+    }
+
+    /// An editor still open on a document whose entry another copy of the app
+    /// dropped (an older build that does not know its kind) keeps its id while
+    /// its file is where it was: the index re-read gave the file a new id, or none.
+    fn reclaim_open(&mut self, before: HashMap<String, Meta>) {
+        let open: Vec<String> = self.loaded.borrow().keys().filter(|id| !self.index.contains_key(*id)).cloned().collect();
+        let mut changed = false;
+        for id in open {
+            let Some(old) = before.get(&id).filter(|m| !m.local() && m.folder.is_none() && !m.rel.is_empty()) else { continue };
+            let other = self.index.iter().find(|(_, m)| !m.local() && m.folder.is_none() && m.rel == old.rel).map(|(k, _)| k.clone());
+            match other {
+                Some(other) => { self.index.remove(&other); }
+                None if self.abs(&old.rel).fs_exists() => {}
+                None => continue,
+            }
+            self.index.insert(id, old.clone());
+            changed = true;
+        }
+        if changed { derive_tree(&mut self.index); }
     }
 
     fn save_index(&self) -> Result<()> {
         if self.batch.lock.is_some() { self.batch.index.set(true); return Ok(()); }
         // The old layout keeps everything in its index, as older builds expect.
         if self.flat { return save_json(&self.index_file(), &self.index); }
-        save_json(&self.index_file(), &self.to_disk())?;
+        save_json(&self.index_file(), &self.disk_index())?;
         self.save_local(&self.local_state())
     }
 
@@ -1107,7 +1193,7 @@ impl Store {
                 dirty = true;
             }
             let Parsed { mut title, icon, body, reminders, links } = parsed;
-            if self.index[&id].markdown { title = self.markdown_title(&id); }
+            if self.index[&id].named_by_file() { title = self.markdown_title(&id); }
             out.push(Entry { id: id.clone(), meta: self.index[&id].clone(), title, icon, body, reminders, links });
         }
         let mut folders: Vec<(&String, &Meta)> = self.index.iter().filter(|(_, m)| m.folder.is_some()).collect();
@@ -1127,6 +1213,7 @@ impl Store {
     fn relocate(&mut self, moves: &[(String, String)]) -> Result<()> {
         anyhow::ensure!(!self.flat, "旧格式的文档库没有真实文件夹");
         let mut new_rel: HashMap<String, String> = HashMap::new();
+        let mut dirs: Vec<(String, &str)> = vec![];
         for (id, to) in moves {
             let m = self.index.get(id).ok_or_else(|| anyhow::anyhow!("文档或文件夹不存在"))?;
             anyhow::ensure!(!m.local(), "本机文件不能移入文档库的文件夹");
@@ -1136,6 +1223,7 @@ impl Store {
                 for (k, c) in &self.index {
                     if let Some(rest) = c.rel.strip_prefix(&prefix) && !c.local() { new_rel.insert(k.clone(), format!("{to}/{rest}")); }
                 }
+                dirs.push((prefix, to));
             }
             new_rel.insert(id.clone(), to.clone());
         }
@@ -1144,7 +1232,7 @@ impl Store {
         let affected: HashSet<&str> = new_rel.keys().map(String::as_str).collect();
         let mut docs = vec![];
         for (k, m) in &self.index {
-            if m.folder.is_some() || m.local() || m.markdown { continue; }
+            if m.folder.is_some() || m.local() || m.named_by_file() { continue; }
             let mentions = self.parsed.get(k).is_none_or(|p| p.2.links.iter().any(|l| affected.contains(l.target.as_str())));
             if !affected.contains(k.as_str()) && !mentions { continue; }
             let Ok(text) = crate::vfs::read_to_string(self.path(k)) else { continue };
@@ -1171,6 +1259,9 @@ impl Store {
             done.push((from, dest));
         }
         for (k, rel) in &new_rel { if let Some(m) = self.index.get_mut(k) { m.rel = rel.clone(); } }
+        // Files of kinds this build does not know went with their folders.
+        self.foreign = std::mem::take(&mut self.foreign).into_iter()
+            .map(|(k, a)| (dirs.iter().find_map(|(p, to)| k.strip_prefix(p.as_str()).map(|rest| format!("{to}/{rest}"))).unwrap_or(k), a)).collect();
         derive_tree(&mut self.index);
         for (k, text, doc) in docs {
             let out = self.serialize_doc(&k, &doc, None);
@@ -1205,7 +1296,7 @@ impl Store {
         if self.flat {
             // The old layout: names live in the index.
             let m = self.index.get_mut(id).unwrap();
-            if m.folder.is_some() { m.folder = Some(title.to_string()); } else if m.markdown { m.name = Some(title.to_string()); }
+            if m.folder.is_some() { m.folder = Some(title.to_string()); } else if m.named_by_file() { m.name = Some(title.to_string()); }
             return Ok(());
         }
         let base = file_name_for(title);
@@ -1280,7 +1371,7 @@ impl Store {
                 }
             };
             let Parsed { mut title, icon, body, reminders, links } = parsed;
-            if m.markdown { title = self.markdown_title(&id); }
+            if m.named_by_file() { title = self.markdown_title(&id); }
             out.push(Entry { id, meta: m.clone(), title, icon, body, reminders, links });
         }
         // Folders in id order: the index is a HashMap, whose order changes every time it is re-read.
@@ -1380,7 +1471,7 @@ impl Store {
         let disk = if self.is_markdown(id) || self.loaded.borrow().contains_key(id) { crate::vfs::read_to_string(self.path(id)).ok() } else { None };
         let (xml, copies) = self.serialize_with_copies(id, doc, disk.as_deref());
         if let Some(previous) = self.loaded.borrow().get(id) {
-            let disk = disk.as_deref().ok_or_else(|| anyhow::anyhow!("无法读取文档"))?;
+            let disk = disk.as_deref().ok_or_else(|| anyhow::anyhow!("文档文件已不在原处，可能已被移动或删除"))?;
             let message = if self.index.get(id).is_some_and(Meta::local) { "文件已在别处被修改，未覆盖磁盘内容。请另存副本或重新打开文件" } else { "文档已被另一个实例修改，未覆盖磁盘内容。请另存副本或重新载入磁盘版本" };
             anyhow::ensure!(disk == previous || disk == xml, "{message}");
         }
@@ -1415,8 +1506,9 @@ impl Store {
         }
         self.loaded.borrow_mut().insert(id.to_string(), if same { disk.unwrap_or(xml) } else { xml });
         let title = doc.title.text.trim().to_string();
-        let changed = if self.is_markdown(id) { title != self.markdown_title(id) } else { true };
-        if changed && !(self.is_markdown(id) && title.is_empty()) && let Err(e) = self.follow_title(id, &title) {
+        let named = self.named_by_file(id);
+        let changed = if named { title != self.markdown_title(id) } else { true };
+        if changed && !(named && title.is_empty()) && let Err(e) = self.follow_title(id, &title) {
             self.warnings.push(format!("未能按标题重命名文件：{e}"));
         }
         let t = now();
@@ -1470,6 +1562,26 @@ impl Store {
             derive_tree(&mut self.index);
         }
         let text = format!("{front}{}", crate::markdown::write_file(doc, "", None));
+        if let Err(e) = self.write_file(&self.path(&id), text.as_bytes()).and_then(|_| self.save_index()) { self.index.remove(&id); return Err(e); }
+        self.record_file_change(&id, None);
+        drop(lock);
+        self.place_new(&id, parent)?;
+        Ok(id)
+    }
+
+    /// A new 画板 in folder `parent`: a `.excalidraw` file named `title`, holding
+    /// `board`. Only in the folder layout (the old one is migrated on open).
+    pub fn create_board_in(&mut self, title: &str, board: &crate::whiteboard::Board, parent: Option<&str>) -> Result<String> {
+        anyhow::ensure!(!self.flat, "旧格式的文档库不能新建画板");
+        let id = uuid::Uuid::new_v4().to_string();
+        let lock = self.begin_write()?;
+        self.validate_folder(None, parent)?;
+        let t = now();
+        let dir = self.folder_rel(parent);
+        let rel = join_rel(&dir, &self.free_name(&dir, &file_name_for(title), Some(DocKind::Board.ext(false)), None));
+        self.index.insert(id.clone(), Meta { created: t, modified: t, opened: t, rel, ..Default::default() });
+        derive_tree(&mut self.index);
+        let text = board.file_json();
         if let Err(e) = self.write_file(&self.path(&id), text.as_bytes()).and_then(|_| self.save_index()) { self.index.remove(&id); return Err(e); }
         self.record_file_change(&id, None);
         drop(lock);
@@ -1627,7 +1739,7 @@ impl Store {
         let dir = self.internal().join("trash");
         match meta {
             Some(m) if m.folder.is_some() => dir.join(id),
-            m => dir.join(format!("{id}.{}", if m.is_some_and(|m| m.markdown) { "md" } else { "xml" })),
+            m => dir.join(format!("{id}.{}", m.map_or("xml", ext_of))),
         }
     }
 
@@ -1673,7 +1785,7 @@ impl Store {
                     if let Some(id) = p.file_name().and_then(|s| s.to_str()) { on_disk.insert(id.to_string()); }
                     continue;
                 }
-                let markdown = match p.extension().and_then(|s| s.to_str()) { Some("xml") => false, Some("md") => true, _ => continue };
+                let Some((kind, markdown)) = p.file_name().and_then(|s| s.to_str()).and_then(DocKind::of_name) else { continue };
                 let Some(id) = p.file_stem().and_then(|s| s.to_str()).map(str::to_string) else { continue };
                 if !self.trash.contains_key(&id) {
                     let t = e
@@ -1685,7 +1797,7 @@ impl Store {
                         .unwrap_or_else(now);
                     // Modification time is not deletion time. Recovered orphans
                     // get a full retention period instead of immediate expiry.
-                    let meta = Meta { created: t, modified: t, markdown, name: markdown.then(|| "未命名".into()), ..Default::default() };
+                    let meta = Meta { created: t, modified: t, markdown, kind, name: (markdown || !kind.is_doc()).then(|| "未命名".into()), ..Default::default() };
                     self.trash.insert(id.clone(), Trashed { meta, deleted: now(), root: None });
                     dirty = true;
                 }
@@ -1716,7 +1828,7 @@ impl Store {
             .iter()
             .filter(|(_, t)| t.root.as_ref().is_none_or(|r| !self.trash.contains_key(r)))
             .map(|(id, t)| {
-                let doc = if t.meta.markdown || t.meta.folder.is_some() { Document::default() } else { crate::vfs::read_to_string(self.trash_path(id)).ok().and_then(|x| docxml::parse(&x).ok()).unwrap_or_default() };
+                let doc = if t.meta.named_by_file() || t.meta.folder.is_some() { Document::default() } else { crate::vfs::read_to_string(self.trash_path(id)).ok().and_then(|x| docxml::parse(&x).ok()).unwrap_or_default() };
                 TrashEntry {
                     id: id.clone(),
                     title: t.meta.folder.clone().or_else(|| t.meta.name.clone()).unwrap_or_else(|| doc.title.text.clone()),
@@ -1779,7 +1891,7 @@ impl Store {
         }
         let dir = parent.as_ref().and_then(|p| self.index.get(p)).map(|m| m.rel.clone()).unwrap_or_default();
         let mut meta = t.meta.clone();
-        let text = if meta.folder.is_none() && !meta.markdown { crate::vfs::read_to_string(&src).ok() } else { None };
+        let text = if meta.folder.is_none() && !meta.named_by_file() { crate::vfs::read_to_string(&src).ok() } else { None };
         // Read where it was, so relative links resolve as they did.
         let doc = text.as_deref().filter(|x| x.contains("type=\"doc\"")).and_then(|x| {
             let mut d = docxml::parse(x).ok()?;
@@ -1792,7 +1904,7 @@ impl Store {
             rel
         } else {
             let base = if !t.meta.rel.is_empty() { layout::unnumbered(stem_of(base_name(&t.meta.rel))).to_string() }
-                else if meta.markdown { file_name_for(meta.name.as_deref().unwrap_or("")) }
+                else if meta.named_by_file() { file_name_for(meta.name.as_deref().unwrap_or("")) }
                 else { file_name_for(&text.as_deref().and_then(|x| docxml::parse(x).ok()).map(|d| d.title.text).unwrap_or_default()) };
             let rel = join_rel(&dir, &self.free_name(&dir, &base, Some(ext_of(&meta)), None));
             crate::vfs::rename(&src, self.abs(&rel))?;
@@ -1858,9 +1970,9 @@ impl Store {
         let _lock = self.begin_write()?;
         if let Some(m) = self.index.get_mut(id) {
             // Where it is follows from the file, not from here.
-            let (rel, folder, parent, markdown, name, path) = (m.rel.clone(), m.folder.clone(), m.parent.clone(), m.markdown, m.name.clone(), m.path.clone());
+            let (rel, folder, parent, markdown, name, path, kind) = (m.rel.clone(), m.folder.clone(), m.parent.clone(), m.markdown, m.name.clone(), m.path.clone(), m.kind);
             f(m);
-            (m.rel, m.folder, m.parent, m.markdown, m.name, m.path) = (rel, folder, parent, markdown, name, path);
+            (m.rel, m.folder, m.parent, m.markdown, m.name, m.path, m.kind) = (rel, folder, parent, markdown, name, path, kind);
         }
         self.save_index()
     }
@@ -1973,8 +2085,8 @@ impl Store {
     pub fn rename(&mut self, id: &str, title: &str) -> Result<Meta> {
         let _lock = self.begin_write()?;
         let before = self.file_state(id);
-        if self.index.get(id).is_some_and(|m| m.folder.is_some() || m.markdown) {
-            // A Markdown file is left as it is: only its name changes.
+        if self.index.get(id).is_some_and(|m| m.folder.is_some() || m.named_by_file()) {
+            // A Markdown file or a 画板 is left as it is: only its name changes.
             self.follow_title(id, title)?;
             let m = self.index.get_mut(id).unwrap();
             m.modified = now();
@@ -2147,6 +2259,93 @@ mod tests {
         let changes = journal.take();
         local.apply_file_history(&changes, false).unwrap();
         assert_eq!(local.index[&page].parent.as_ref(), Some(&a));
+    }
+
+    #[test]
+    fn a_board_is_a_file_of_its_own() {
+        let lib = Lib::new("board");
+        let mut s = lib.open();
+        let folder = s.create_folder("草图", None).unwrap();
+        let b = crate::whiteboard::Board::from_file(include_str!("../tests/fixtures/board/all-elements.excalidraw")).unwrap();
+        let id = s.create_board_in("流程", &b, Some(&folder)).unwrap();
+        let file = lib.0.join("草图/流程.excalidraw");
+        let text = crate::vfs::read_to_string(&file).unwrap();
+        assert!(text.starts_with("{\n  \"type\": \"excalidraw\""));
+        let e = s.list().into_iter().find(|e| e.id == id).unwrap();
+        assert_eq!((e.meta.kind, e.title.as_str(), e.meta.parent.as_deref()), (DocKind::Board, "流程", Some(folder.as_str())));
+        // Editing saves the 画板 only; the title is the file's name.
+        let mut d = s.load_for_edit(&id, false).unwrap();
+        assert_eq!(d.title.text, "流程");
+        let crate::model::BlockKind::Board(bd) = &mut d.blocks[0].kind else { panic!("not a board") };
+        std::sync::Arc::make_mut(bd).elements[0].opacity = 50.;
+        d.title = crate::model::RichText::plain("流程图");
+        s.save(&id, &d).unwrap();
+        let file = lib.0.join("草图/流程图.excalidraw");
+        assert!(file.fs_is_file() && !lib.0.join("草图/流程.excalidraw").fs_exists());
+        assert!(!crate::vfs::read_to_string(&file).unwrap().contains("流程图"));
+        // Reopened from disk, it reads back the same.
+        let mut s = lib.open();
+        let e = s.list().into_iter().find(|e| e.id == id).unwrap();
+        assert_eq!((e.meta.kind, e.title.as_str()), (DocKind::Board, "流程图"));
+        let again = s.load(&id).unwrap();
+        let kinds = |d: &Document| d.blocks.iter().map(|b| b.kind.clone()).collect::<Vec<_>>();
+        assert_eq!(kinds(&again), kinds(&d));
+        assert_eq!(crate::whiteboard::write_file(&again), crate::vfs::read_to_string(&file).unwrap());
+        // Through the 回收站 and back as a 画板.
+        s.delete(&id, None).unwrap();
+        assert!(lib.0.join(".quiet/trash").join(format!("{id}.excalidraw")).fs_is_file());
+        assert_eq!(s.list_trash()[0].title, "流程图");
+        s.restore(&id).unwrap();
+        assert!(file.fs_is_file());
+        assert_eq!(kinds(&s.load(&id).unwrap()), kinds(&d));
+    }
+
+    #[test]
+    fn index_keeps_entries_of_unknown_kinds() {
+        // A newer build's file kind: this build neither lists it nor drops its entry.
+        let lib = Lib::new("foreign");
+        let mut s = lib.open();
+        let (id, doc) = s.create().unwrap();
+        let folder = s.create_folder("草图", None).unwrap();
+        crate::vfs::write(lib.0.join("草图/新东西.future"), "{}").unwrap();
+        let index = lib.0.join(".quiet/index.json");
+        let mut disk: DiskIndex = serde_json::from_slice(&crate::vfs::read(&index).unwrap()).unwrap();
+        disk.insert("草图/新东西.future".into(), Attached { id: "keep-me".into(), pinned: true, ..Attached::of("", &Meta::default()) });
+        crate::vfs::write(&index, serde_json::to_vec(&disk).unwrap()).unwrap();
+        let entry = |key: &str| serde_json::from_slice::<DiskIndex>(&crate::vfs::read(&index).unwrap()).unwrap().get(key).map(|a| (a.id.clone(), a.pinned));
+        assert!(s.list().iter().all(|e| e.id != "keep-me"));
+        s.save(&id, &doc).unwrap();
+        assert_eq!(entry("草图/新东西.future"), Some(("keep-me".into(), true)));
+        // Renaming its folder takes the entry along.
+        s.rename(&folder, "图").unwrap();
+        assert_eq!((entry("草图/新东西.future"), entry("图/新东西.future")), (None, Some(("keep-me".into(), true))));
+    }
+
+    #[test]
+    fn an_open_board_survives_a_build_that_drops_it() {
+        // An older build rewrites the index without the 画板; the open editor still saves.
+        let lib = Lib::new("dropped");
+        let mut s = lib.open();
+        let b = crate::whiteboard::Board::from_file(include_str!("../tests/fixtures/board/all-elements.excalidraw")).unwrap();
+        let id = s.create_board_in("流程", &b, None).unwrap();
+        let mut d = s.load_for_edit(&id, false).unwrap();
+        let index = lib.0.join(".quiet/index.json");
+        let rewrite = |f: &dyn Fn(&mut DiskIndex)| {
+            let mut disk: DiskIndex = serde_json::from_slice(&crate::vfs::read(&index).unwrap()).unwrap();
+            f(&mut disk);
+            crate::vfs::write(&index, serde_json::to_vec(&disk).unwrap()).unwrap();
+        };
+        let edit = |d: &mut Document, o: f64| { let crate::model::BlockKind::Board(bd) = &mut d.blocks[0].kind else { panic!("not a board") }; std::sync::Arc::make_mut(bd).elements[0].opacity = o; };
+        rewrite(&|disk| { disk.remove("流程.excalidraw"); });
+        edit(&mut d, 50.);
+        s.save(&id, &d).unwrap();
+        // Or found again by a later `list`, under a new id.
+        rewrite(&|disk| { disk.get_mut("流程.excalidraw").unwrap().id = "found-again".into(); });
+        edit(&mut d, 40.);
+        s.save(&id, &d).unwrap();
+        let ids: Vec<String> = s.list().into_iter().filter(|e| e.meta.kind == DocKind::Board).map(|e| e.id).collect();
+        assert_eq!(ids, vec![id.clone()]);
+        assert_eq!(crate::whiteboard::write_file(&s.load(&id).unwrap()), crate::vfs::read_to_string(lib.0.join("流程.excalidraw")).unwrap());
     }
 
     #[test]
@@ -2552,7 +2751,7 @@ mod tests {
         let index = crate::vfs::read(trash.join("index.json")).unwrap();
         crate::vfs::rename(&trash, lib.0.join(".quiet/trash-away")).unwrap();
         crate::vfs::write(&trash, b"").unwrap();
-        let mut s = Store { file_changes: vec![], root: lib.0.clone(), index: HashMap::new(), flat: false, migrated: None, trash: serde_json::from_slice(&index).unwrap(), warnings: vec![], loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), batch: Default::default() };
+        let mut s = Store { file_changes: vec![], root: lib.0.clone(), index: HashMap::new(), foreign: DiskIndex::new(), flat: false, migrated: None, trash: serde_json::from_slice(&index).unwrap(), warnings: vec![], loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), batch: Default::default() };
         assert_eq!(s.list_trash().len(), 1);
         assert_eq!(s.trash.len(), 1);
     }

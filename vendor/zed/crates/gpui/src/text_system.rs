@@ -629,6 +629,18 @@ impl TextSystem {
     }
 }
 
+/// quiet.md: one step of a glyph outline ([`WindowTextSystem::glyph_outline`]),
+/// in font units, y up.
+#[allow(missing_docs)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum GlyphOutlineCmd {
+    MoveTo([f32; 2]),
+    LineTo([f32; 2]),
+    QuadTo([f32; 2], [f32; 2]),
+    CubicTo([f32; 2], [f32; 2], [f32; 2]),
+    Close,
+}
+
 /// The GPUI text layout subsystem.
 #[derive(Deref)]
 pub struct WindowTextSystem {
@@ -639,6 +651,12 @@ pub struct WindowTextSystem {
 }
 
 impl WindowTextSystem {
+    /// quiet.md: a glyph's outline in font units, y up, for drawing text with
+    /// another rasterizer (the board's CPU renderer).
+    pub fn glyph_outline(&self, font_id: FontId, glyph_id: GlyphId) -> Option<Vec<GlyphOutlineCmd>> {
+        self.text_system.platform_text_system.glyph_outline(font_id, glyph_id)
+    }
+
     /// Create a new WindowTextSystem with the given TextSystem.
     pub fn new(text_system: Arc<TextSystem>) -> Self {
         Self {

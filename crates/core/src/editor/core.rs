@@ -341,6 +341,11 @@ fn doc_bytes(doc: &Document) -> usize {
         if let BlockKind::Raw { xml, .. } = &b.kind {
             n += xml.len();
         }
+        // A board is shared between snapshots until it changes; counted once
+        // per snapshot all the same (a rough budget).
+        if let BlockKind::Board(bd) = &b.kind {
+            n += bd.elements.len() * std::mem::size_of::<crate::board::types::Element>();
+        }
     });
     n
 }
@@ -633,6 +638,32 @@ impl Core {
         self.last_edit = None;
         self.dirty = false;
         self.fix_selection();
+    }
+
+    /// Points every image whose source is `from` at `to`, in the document and
+    /// across the undo / redo history, outside the edit history: a pasted web
+    /// image becoming its downloaded copy (#220) is the same picture, so an
+    /// undo must not bring the expiring link back. Whether the document changed.
+    pub fn relink_image(&mut self, from: &str, to: &str) -> bool {
+        fn walk(blocks: &mut [Block], from: &str, to: &str) -> bool {
+            let mut hit = false;
+            for b in blocks {
+                hit |= walk(&mut b.children, from, to);
+                match &mut b.kind {
+                    BlockKind::Image { src, .. } if src == from => { *src = to.to_string(); hit = true; }
+                    BlockKind::Table(t) => for cell in t.rows.iter_mut().flatten() { hit |= walk(&mut cell.blocks, from, to); },
+                    _ => {}
+                }
+            }
+            hit
+        }
+        let has = |doc: &Document| { let mut n = false; doc.for_each_block(|b| n |= matches!(&b.kind, BlockKind::Image { src, .. } if src == from)); n };
+        for s in self.undo.iter_mut().chain(self.redo.iter_mut()) {
+            if has(&s.doc) { walk(&mut std::sync::Arc::make_mut(s).doc.blocks, from, to); }
+        }
+        let hit = walk(&mut self.doc.blocks, from, to);
+        if hit { self.generation += 1; }
+        hit
     }
 
     pub fn break_coalescing(&mut self) {
@@ -1075,6 +1106,28 @@ impl Core {
         if let Some(BlockKind::File(f)) = self.block_mut(id).map(|b| &mut b.kind) {
             f.view = view;
         }
+    }
+
+    /// 画板: block `id`'s scene replaced (the full-window board closed with
+    /// changes), as one undo step. False when nothing changed.
+    /// `join`: the open board saving as it's edited — every change after
+    /// the session's first joins its undo step.
+    pub fn set_board(&mut self, id: BlockId, bd: crate::whiteboard::Board, join: bool) -> bool {
+        if !matches!(self.kind_of(id), Some(BlockKind::Board(b)) if **b != bd) {
+            return false;
+        }
+        if join {
+            self.generation += 1;
+            self.redo.clear();
+            self.dirty = true;
+        } else {
+            self.checkpoint(EditKind::Other);
+            self.break_coalescing();
+        }
+        if let Some(b) = self.block_mut(id) {
+            b.kind = BlockKind::Board(std::sync::Arc::new(bd));
+        }
+        true
     }
 
     /// 文本视图: the block becomes a paragraph holding the attachment
@@ -2291,6 +2344,34 @@ impl Core {
     /// Nearest enclosing table, if any (block navigation stays inside it).
     /// Tab / Shift+Tab inside a table: caret to the end of the next / previous
     /// cell; Tab in the last cell appends a row. False outside tables.
+    /// ↑/↓ out of a 表格 cell: the stop in the cell above / below, same
+    /// column, or the first stop past the table. `None` when `us[i]` is in no
+    /// table or the step stays inside its cell; `Some(None)` when nothing
+    /// follows the table.
+    pub fn cell_vertical(&self, us: &[Unit], i: usize, down: bool) -> Option<Option<usize>> {
+        let p = self.path(us[i].id)?;
+        let ci = p.iter().rposition(|s| matches!(s, Seg::Cell(..)))?;
+        let Seg::Cell(r, c, _) = p[ci] else { return None };
+        let BlockKind::Table(t) = &block_at(&self.doc.blocks, &p[..ci])?.kind else { return None };
+        // In this table, and in cell `rc` when one is given.
+        let inside = |id: BlockId, rc: Option<(usize, usize)>| {
+            self.path(id).is_some_and(|q| q.len() > ci && q[..ci] == p[..ci] && matches!(q[ci], Seg::Cell(qr, qc, _) if rc.is_none_or(|x| x == (qr, qc))))
+        };
+        let next = if down { Some(i + 1) } else { i.checked_sub(1) };
+        if next.and_then(|n| us.get(n)).is_some_and(|u| inside(u.id, Some((r, c)))) {
+            return None;
+        }
+        let tr = if down { Some(r + (t.rows[r][c].rowspan as usize).max(1)).filter(|&x| x < t.rows.len()) } else { r.checked_sub(1) };
+        let mut order: Box<dyn Iterator<Item = usize>> = if down { Box::new(i + 1..us.len()) } else { Box::new((0..i).rev()) };
+        Some(match tr {
+            Some(tr) => {
+                let to = t.origin(tr, c);
+                order.find(|&k| inside(us[k].id, Some(to)))
+            }
+            None => order.find(|&k| !inside(us[k].id, None)),
+        })
+    }
+
     pub fn cell_step(&mut self, forward: bool) -> bool {
         let h = self.sel.head;
         let Some(p) = self.path(h.block) else { return false };
@@ -3304,6 +3385,26 @@ mod tests {
         c.units()[n].id
     }
 
+    /// #220: a pasted web image relinked to its download, in tables too and
+    /// across undo / redo, so stepping back never revives the expiring link.
+    #[test]
+    fn relink_image_rewrites_document_and_history() {
+        let u = "https://f.cn/a?code=1";
+        let mut c = doc(&format!("<title>t</title><p>x</p><img href=\"{u}\"/><table><tr><td><img href=\"{u}\"/></td></tr></table><img href=\"https://e/b.png\"/>"));
+        c.checkpoint(EditKind::Other);
+        c.doc.blocks.remove(0);
+        c.checkpoint(EditKind::Other);
+        c.doc.blocks.pop();
+        assert!(c.undo());
+        assert!(c.relink_image(u, "/lib/assets/a.png"));
+        assert!(!xml(&c).contains(u) && xml(&c).matches("/lib/assets/a.png").count() == 2 && xml(&c).contains("https://e/b.png"));
+        assert!(c.redo());
+        assert!(!xml(&c).contains(u));
+        assert!(c.undo() && c.undo());
+        assert!(!xml(&c).contains(u) && xml(&c).contains("<p>x</p>"));
+        assert!(!c.relink_image(u, "/lib/assets/a.png"));
+    }
+
     #[test]
     fn file_title_keeps_current_and_history_grapheme_boundaries() {
         for title in ["中文", "👩‍💻笔记", "e\u{301}cole"] {
@@ -3594,6 +3695,29 @@ mod tests {
         let p = c.units().last().unwrap().id;
         c.sel = Selection::caret(Pos::new(p, 0));
         assert!(!c.cell_step(true));
+    }
+
+    #[test]
+    fn up_down_keep_the_table_column() {
+        let row = |r: usize| format!("<tr>{}</tr>", ["A", "B", "C"].map(|k| format!("<td><p>{k}{r}</p></td>")).concat());
+        let c = doc(&format!("<title>T</title><p>before</p><table>{}{}{}</table><p>after</p>", row(1), row(2), row(3)));
+        let us = c.units();
+        let at = |name: &str| us.iter().position(|u| c.text_of(u.id).is_some_and(|t| t.text == name)).unwrap();
+        let name = |k: Option<usize>| k.map(|k| c.text_of(us[k].id).unwrap().text.clone());
+        assert_eq!(name(c.cell_vertical(&us, at("B2"), false).unwrap()).as_deref(), Some("B1"));
+        assert_eq!(name(c.cell_vertical(&us, at("B2"), true).unwrap()).as_deref(), Some("B3"));
+        assert_eq!(name(c.cell_vertical(&us, at("C1"), false).unwrap()).as_deref(), Some("before"));
+        assert_eq!(name(c.cell_vertical(&us, at("A3"), true).unwrap()).as_deref(), Some("after"));
+        assert_eq!(c.cell_vertical(&us, at("before"), true), None);
+        let c = doc("<title>T</title><table><tr><td><p>a</p></td><td><p>b</p></td></tr></table>");
+        let us = c.units();
+        assert_eq!(c.cell_vertical(&us, 1, true), Some(None));
+        // A cell holding two paragraphs steps between them first.
+        let c = doc("<title>T</title><table><tr><td><p>x</p><p>y</p></td></tr><tr><td><p>z</p></td></tr></table>");
+        let us = c.units();
+        assert_eq!(c.cell_vertical(&us, 1, true), None);
+        assert_eq!(c.cell_vertical(&us, 2, true), Some(Some(3)));
+        assert_eq!(c.cell_vertical(&us, 3, false), Some(Some(2)));
     }
 
     #[test]

@@ -6,6 +6,7 @@ pub(crate) const APP_ID: &str = "com.s1dashu.quietmd";
 mod app;
 #[cfg(unix)]
 mod big_alloc;
+mod board;
 #[cfg(unix)]
 #[global_allocator]
 static ALLOC: big_alloc::Alloc = big_alloc::Alloc;
@@ -70,7 +71,7 @@ mod update;
 #[cfg(target_family = "wasm")]
 mod web;
 
-use fdl_core::{docxml, lang, markdown, model, palette, paste, store, time};
+use fdl_core::{docxml, lang, markdown, model, palette, paste, store, time, whiteboard};
 
 use gpui::*;
 
@@ -174,11 +175,15 @@ pub(crate) fn init_app(cx: &mut App) {
     // The editor and fields hide the pointer themselves while typing
     // (`pointer_hidden`); GPUI would also hide it for shortcuts.
     cx.set_cursor_hide_mode(CursorHideMode::Never);
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    editor::emoji::load_font(cx);
     editor::math::load_fonts(cx);
+    board::fonts::load(cx);
     editor::image::init_pictures(cx);
     input::bind_keys(cx);
     editor::keymap::bind_keys(cx);
     editor::image::bind_keys(cx);
+    board::bind_keys(cx);
     app::bind_keys(cx);
     settings::load();
     settings::apply_appearance(&settings::prefs().appearance);

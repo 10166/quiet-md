@@ -165,6 +165,31 @@ impl CosmicTextSystem {
 }
 
 impl PlatformTextSystem for CosmicTextSystem {
+    // quiet.md: swash's unscaled outline (font units, y up); like the
+    // rasterizer here, no synthetic oblique or bold.
+    fn glyph_outline(&self, font_id: FontId, glyph_id: GlyphId) -> Option<Vec<gpui::GlyphOutlineCmd>> {
+        use gpui::GlyphOutlineCmd as C;
+        use swash::zeno::{Command, PathData};
+        let state = self.0.read();
+        let font = &state.loaded_font(font_id).font;
+        let mut ctx = swash::scale::ScaleContext::new();
+        let outline = ctx.builder(font.as_swash()).build().scale_outline(glyph_id.0 as u16)?;
+        let p = |v: swash::zeno::Vector| [v.x, v.y];
+        Some(
+            outline
+                .path()
+                .commands()
+                .map(|c| match c {
+                    Command::MoveTo(a) => C::MoveTo(p(a)),
+                    Command::LineTo(a) => C::LineTo(p(a)),
+                    Command::QuadTo(a, b) => C::QuadTo(p(a), p(b)),
+                    Command::CurveTo(a, b, c) => C::CubicTo(p(a), p(b), p(c)),
+                    Command::Close => C::Close,
+                })
+                .collect(),
+        )
+    }
+
     fn add_fonts(&self, fonts: Vec<Cow<'static, [u8]>>) -> Result<()> {
         self.0.write().add_fonts(fonts)
     }
@@ -330,7 +355,23 @@ impl CosmicTextSystemState {
         self.font_ids_by_family_cache.clear();
         let db = self.font_system.db_mut();
         for bytes in fonts {
+            // quiet.md: a bundled face replaces the system's faces of the same
+            // family and style (Fedora's COLRv1 Noto Color Emoji, which swash
+            // draws blank, gives way to the bundled CBDT one).
+            let before: std::collections::HashSet<_> = db.faces().map(|f| f.id).collect();
             db.load_font_source(cosmic_text::fontdb::Source::Binary(Arc::new(bytes)));
+            let key = |f: &cosmic_text::fontdb::FaceInfo| {
+                (f.families.first().map(|x| x.0.clone()), f.style, f.weight, f.stretch)
+            };
+            let added: Vec<_> = db.faces().filter(|f| !before.contains(&f.id)).map(key).collect();
+            let stale: Vec<_> = db
+                .faces()
+                .filter(|f| before.contains(&f.id) && added.contains(&key(f)))
+                .map(|f| f.id)
+                .collect();
+            for id in stale {
+                db.remove_face(id);
+            }
         }
         Ok(())
     }
@@ -415,6 +456,7 @@ impl CosmicTextSystemState {
             let allowed_bad_font_names = [
                 "SegoeFluentIcons", // NOTE: Segoe fluent icons postscript name is inconsistent
                 "Segoe Fluent Icons",
+                "XiaolaiSC", // quiet.md: the board's CJK-only font
             ];
 
             // This only decides whether a face can be a primary font. The

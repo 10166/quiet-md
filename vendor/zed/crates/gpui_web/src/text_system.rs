@@ -247,6 +247,15 @@ impl WebTextSystem {
 }
 
 impl PlatformTextSystem for WebTextSystem {
+    // quiet.md: fonts loaded into GPUI have outlines; the browser's canvas
+    // fallback fonts don't.
+    fn glyph_outline(&self, font_id: FontId, glyph_id: GlyphId) -> Option<Vec<gpui::GlyphOutlineCmd>> {
+        if font_id.0 & CANVAS_FONT_BIT != 0 {
+            return None;
+        }
+        self.native.glyph_outline(font_id, glyph_id)
+    }
+
     fn set_missing_glyph_sink(&self, sink: Option<Arc<dyn MissingGlyphSink>>) {
         // Cosmic must not report missing glyphs before Canvas has a chance to replace them.
         self.state.write().missing_glyph_sink = sink;

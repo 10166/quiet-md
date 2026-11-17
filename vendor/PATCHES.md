@@ -76,6 +76,11 @@ $V refresh                    # 用当前快照重写所有补丁的 diff（只�
 | 0026 linux-appearance-reborrow | 18 | `gpui_linux/wayland/client.rs`、`x11/client.rs` | 外观变化时先复制窗口句柄、释放 client 的借用，再调窗口回调。回调会查询平台、更新菜单，原来重复借用 panic |
 | 0027 wgpu-30-crates-io | 新 | `gpui_wgpu/wgpu_context.rs`、`wgpu_renderer.rs` | Zed 用 gfx-rs/wgpu 的一个 git 提交，我们用 crates.io 的 30.0.2（`upstream.toml` 的 `[git-to-crates-io]`）。两处 API 差异：`DeviceDescriptor` 还没有 `default_queue`，`has_srgb_suffix` 在 30.0.2 里叫 `is_srgb`。只影响 Linux |
 | 0028 keybinding-load-unmapped | 新 | `gpui/keymap/binding.rs` | `KeyBinding::load_unmapped`：不需要 `App`，按给定系统解析按键，不按键盘布局映射（0.2 的 `load` 配 `DummyKeyboardMapper`）。上游的 `load` 要 `&App` 并用真实的键盘映射，Windows 上会改写按键；应用的 Windows / Linux 键位和用户自定义快捷键照旧不映射 |
+| 0029 web-system-font | 新 | `gpui_web/platform.rs` | `WebPlatform::new_with_system_font`：网页版 `.SystemUIFont` 对应的字族（上游写死 IBM Plex Sans）。网页版加载 Inter（`src/web.rs`） |
+| 0030 web-diagonal-cursors | 新 | `gpui_web/platform.rs` | 两个斜向缩放光标对调：`ResizeUpLeftDownRight` 是 CSS 的 `nwse-resize`。网页版图片四角的光标原来方向相反 |
+| 0031 board-paths | 34、35 | `gpui/path_builder.rs`、`window.rs` | `Path::transformed`（等比缩放加平移，对单调二次曲线是精确的）、`empty`、`is_empty`、`from_polygons`；`PathBuilder::build_polygons`（轮廓按容差展平成多边形，保留每条轮廓）；`Window::with_element_opacity` 改为 `pub`。画板按元素缓存路径、随视图平移缩放复用；框架裁剪和箭头标签挖空在展平的轮廓上做（`src/board/render_geom.rs`），上游的 `Path` 不再保留轮廓顺序，也没有三角形 |
+| 0032 cosmic-bundled-fonts | 43、38 | `gpui_wgpu/cosmic_text_system.rs` | `add_fonts` 加入的字形替换系统里同字族、同样式的已有字形（Fedora 的 COLRv1 Noto Color Emoji 让位给内置的 CBDT 版）；Xiaolai 没有 `m` 字形也加载。Linux 和网页 |
+| 0033 glyph-outline | 37、38 | `gpui/platform.rs`、`text_system.rs`、`gpui_apple/text_system.rs`、`gpui_windows/direct_write.rs`（加 `Win32_Graphics_Direct2D_Common`）、`gpui_wgpu/cosmic_text_system.rs`、`gpui_web/text_system.rs` | `WindowTextSystem::glyph_outline` 和 `GlyphOutlineCmd`：字形轮廓（字体单位、y 向上）。macOS 用 font-kit（合成斜体同样错切），Windows 用 DirectWrite `GetGlyphRunOutline`，Linux 和网页用 swash；网页的画布回退字体没有。画板的 CPU 渲染（vello）和旋转文字用它。macOS 加载没有 `m` 字形的 Xiaolai |
 
 ## 没有再带的旧补丁
 
@@ -90,6 +95,11 @@ $V refresh                    # 用当前快照重写所有补丁的 diff（只�
 | 29 | 阴影按模糊范围判断是否在裁剪区外 | 上游的阴影图元边界已含 3 倍模糊半径 |
 | 31 | 希伯来、阿拉伯等字母算单词字符 | UAX #14 把这些字母归为 AL，词内不断行 |
 | 33 | `CAMetalLayer` 最多 2 张 drawable | 没有带。上游改用 `CAMetalDisplayLink` 提前分发 drawable，限为 2 张有掉帧风险；脚本场景下实测内存占用没有差别（升级前后都约 95 MB）。以后要省这 16 MB 时在真窗口上测帧率再定 |
+| 36 | `PixelFrame`、`Window::paint_pixels`：CPU 画好的帧直接写进图集块 | 画板的 vello 帧改为普通的 `RenderImage`，每次画面变化新建一张、上一张在下次显示时 `drop_image`（`src/board/render_vello.rs`） |
+| 39 | `layout_line` 合并 run 时比较字体 | 上游已比较字体 |
+| 40 | Metal 路径光栅化的顶点直接写进 instance buffer | 上游的路径改为分块绘制，没有这一步 |
+| 41 | 有 `active` 样式的元素总是监听松开 | 上游已无条件注册松开监听 |
+| 42 | 视图注册 `rightMouseDragged:`、`otherMouseDragged:` | 上游已注册 |
 | —（Windows `VK_PROCESSKEY`） | 输入法正在处理的按键始终交给 IME | 上游的 `VK_PROCESSKEY` 解析不出按键，不再作为 GPUI 按键派发，直接交给 `TranslateMessage` 和 IME。需在 Windows 上用小狼毫确认退格、回车不会处理两次 |
 
 ## 升级后和 0.2.2 不同、没有改回去的地方
@@ -172,7 +182,7 @@ scripts/check.sh
 
 ## 没带的上游 crate
 
-`gpui_web`（wasm）和 `gpui_ios` 暂不复制：`upstream.toml` 的 `crates` 里加上即可，`gpui_platform` 里引用它们的依赖和 feature 会随之保留（现在被规范化步骤去掉了）。试过加上 `crates/gpui_web`：28 个补丁照常打上，`gpui` + `gpui_platform` + `gpui_web` 能为 `wasm32-unknown-unknown` 通过 `cargo check`（全部用 crates.io 依赖）；应用本身还要把文件、剪贴板等平台相关代码按目标分开才能编到网页。
+`gpui_ios` 暂不复制：`upstream.toml` 的 `crates` 里加上即可。`gpui_web` 已带上，网页版（官网的实时笔记本）用它，见 `web/README.md`。
 
 ## 上游带来的、暂未启用的能力
 

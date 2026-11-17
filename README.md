@@ -99,6 +99,7 @@ A 120 Hz display gives each frame 8.3 ms. Even at P95 on a million-character doc
 ## Features
 
 - **Editing**: headings, ordered and bulleted lists, to-dos, quotes, code blocks with syntax highlighting, LaTeX math, tables (with merged cells), callouts, columns, images, attachments and covers. Markdown shortcuts such as `#`, `-`, `[]` and `>`, plus a `/` slash menu.
+- **Boards**: a whiteboard ported from Excalidraw — shapes, arrows that stay bound, freehand, text, sticky notes, frames and images — as a block in a note or a standalone `.excalidraw` file that excalidraw.com opens.
 - **Version history**: each note keeps snapshots of its previous contents as it saves (20 by default, 1–30 under Settings › Documents). A drawer lists them by day; clicking one shows that version in place, read-only, with the blocks it added or rewrote tinted and a one-click restore. Important versions can be named.
 - **Organizing**: a document tree, pinning, favorites, full-text search and a trash.
 - **Import and export**: import Markdown folders (Obsidian picture embeds and callouts included) and Feishu (Lark) DocxXML; export Markdown and PDF, or print directly. Drag files from Finder onto Home or straight into a sidebar folder. Pasting from Feishu or a web page keeps the structure.
@@ -113,6 +114,7 @@ Thanks to everyone who has helped build Quiet.md. Issues and pull requests are w
 
 ## Recent updates
 
+- **0.1.13** (Nov 17): boards — a whiteboard ported from Excalidraw, as a block in a note or a standalone `.excalidraw` file, fast with 10,000 shapes. Version history for every note (… › Version history). French and Arabic interfaces. Copy as Markdown, copy a file's path, and switch the library folder in Settings. Pasted web images are saved into the library. Less memory on picture-heavy pages and smoother sidebar scrolling.
 - **0.1.12** (Nov 14): drag files from Finder, or a file from Files on this computer, straight into a sidebar folder or between rows; the whole page lights up as a drop target. Redesigned Home cards with squircle corners, an Open in Finder menu, breadcrumbs that start at My documents, a minimum window width that keeps room for the note, and a solid sidebar in full screen. Fixes a hang when creating a document in a folder.
 - **0.1.11** (Nov 13): the library is now real folders, with files named by title; older libraries move over automatically, with a backup. A new first launch that sets the language, library location and quick-note shortcut and imports notes from Obsidian and other Markdown apps. Japanese, Spanish and Korean interfaces; display math in Markdown; documents reopen where you left off; faster launch and lower memory use.
 - **0.1.10** (Nov 10): choose a document type from the New menu, scroll wide tables horizontally, preserve Markdown column alignment, and keep the caret visible in long fields.

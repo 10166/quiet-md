@@ -31,6 +31,7 @@ python3 tools/harness/compare.py tools/harness/examples/menus.txt <旧版二进�
 - `python3 tools/harness/clipboard_images.py` 用模拟剪贴板验证 TIFF 截图、图片附带文字、多图、光标处插入、保存、撤销重做，以及纯文本和富文本粘贴；需要 Pillow。
 - `python3 tools/harness/gpui_patches.py` 逐项检查 vendor 里 GPUI 补丁给应用带来的行为（文字排版、滚动条、单轴滚动、图片内存、自定义快捷键、首次启动等，见 vendor/PATCHES.md 的「验证」）。`FDL_REF_BIN` 给出升级前的二进制时，每个场景两边都跑，比较各行文字的位置和墨量；需要 Pillow。可以在命令行上指定场景（`text`、`scrollbar`、`images`…）。
 - 这些脚本按旧的布局（`docs/<id>.xml` + `index.json`）写文档库，应用打开时会迁移成 FORMAT 4（按标题命名的文件、真实文件夹，`assets/` 变成 `.assets/`）。读回保存结果用 `hlib.py` 里的 `doc_file`，预期内容里的资源路径用 `as_migrated` 换过来。
+- `python3 tools/harness/paste_remote_images.py` 用本机 HTTP 服务和模拟剪贴板验证从网页粘贴的网络图片下载后变成文档库自己的图片（#220），覆盖撤销重做、关闭「自动下载网络图片」时不联网、已过期链接保持原样；需要 Pillow。
 - 比较时光标不闪烁（`FDL_NOBLINK`）。脚本开头要先把指针移到空白处，否则真实鼠标的位置会以 hover 的形式出现在截图里。
 - 旧版二进制可以这样编：`git worktree add /tmp/old <提交>`，在那里用 `CARGO_TARGET_DIR=<本仓库>/target cargo build --release --features devtools`，再把二进制复制出来。
 
@@ -44,6 +45,8 @@ python3 tools/harness/compare.py tools/harness/examples/menus.txt <旧版二进�
 | `key <按键>` | 发送按键，如 `key cmd-b`、`key escape` |
 | `type <文字>` | 输入文字（行尾空格有效） |
 | `move x y` / `click x y` / `dclick x y` / `rclick x y` / `drag x1 y1 x2 y2` | 鼠标操作（窗口坐标） |
+| `down x y` / `dragto x y` / `dragby dx dy` / `up x y` | 分步拖动：按下、拖到某点、从上一个拖动点挪一步、松开；`bench 30 dragby 4 0` 测拖拽每一步的耗时 |
+| `mdown x y` / `mdragto x y` / `mup x y` | 中键（按下滚轮）：按下、拖到某点、松开 |
 | `wheel x y dy [dx]` | 一次滚轮事件；可选的 `dx` 是横向分量（模拟触控板），正数露出右边的内容 |
 | `shot <名字>` / `burst <名字> n` | 截图；连拍 n 张，间隔约 8ms |
 | `mark <文字>` / `commit <文字>` | 输入法组合文字 / 提交 |

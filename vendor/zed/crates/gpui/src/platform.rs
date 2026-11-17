@@ -1615,6 +1615,12 @@ pub trait PlatformTextSystem: Send + Sync {
     fn glyph_for_char(&self, font_id: FontId, ch: char) -> Option<GlyphId>;
     /// Get raster bounds for a glyph.
     fn glyph_raster_bounds(&self, params: &RenderGlyphParams) -> Result<Bounds<DevicePixels>>;
+    /// quiet.md: a glyph's outline in font units, y up, for drawing text with
+    /// another rasterizer (the board's CPU renderer). None for bitmap glyphs
+    /// and where a platform can't tell.
+    fn glyph_outline(&self, _font_id: FontId, _glyph_id: GlyphId) -> Option<Vec<crate::GlyphOutlineCmd>> {
+        None
+    }
     /// Rasterize a glyph.
     fn rasterize_glyph(
         &self,

@@ -308,7 +308,33 @@ impl PathBuilder {
         options: &StrokeOptions,
         dash_array: Option<&[Pixels]>,
     ) -> Result<Vec<PathCurve>, Error> {
-        let outline = skia_path(path)
+        let Some(outline) = Self::stroked(path, options, dash_array) else {
+            return Ok(Vec::new());
+        };
+
+        let mut output = Outline::default();
+        let at = |p: tiny_skia_path::Point| point(p.x, p.y);
+        for segment in outline.segments() {
+            match segment {
+                tiny_skia_path::PathSegment::MoveTo(p) => output.move_to(at(p)),
+                tiny_skia_path::PathSegment::LineTo(p) => output.line_to(at(p)),
+                tiny_skia_path::PathSegment::QuadTo(ctrl, p) => output.curve_to(at(p), at(ctrl)),
+                tiny_skia_path::PathSegment::CubicTo(ctrl1, ctrl2, p) => {
+                    output.cubic_to(at(p), at(ctrl1), at(ctrl2))
+                }
+                tiny_skia_path::PathSegment::Close => output.close(),
+            }
+        }
+        output.into_curves()
+    }
+
+    /// The outline of a stroke: a path to fill (non-zero).
+    fn stroked(
+        path: &lyon_path::Path,
+        options: &StrokeOptions,
+        dash_array: Option<&[Pixels]>,
+    ) -> Option<tiny_skia_path::Path> {
+        skia_path(path)
             .map(|skia_path| match dash_array {
                 Some(dash_array) => {
                     let array = dash_array.iter().map(|length| length.0).collect();
@@ -342,25 +368,56 @@ impl PathBuilder {
                     },
                     STROKE_RESOLUTION_SCALE,
                 )
-            });
-        let Some(outline) = outline else {
-            return Ok(Vec::new());
-        };
+            })
+    }
 
-        let mut output = Outline::default();
-        let at = |p: tiny_skia_path::Point| point(p.x, p.y);
-        for segment in outline.segments() {
-            match segment {
-                tiny_skia_path::PathSegment::MoveTo(p) => output.move_to(at(p)),
-                tiny_skia_path::PathSegment::LineTo(p) => output.line_to(at(p)),
-                tiny_skia_path::PathSegment::QuadTo(ctrl, p) => output.curve_to(at(p), at(ctrl)),
-                tiny_skia_path::PathSegment::CubicTo(ctrl1, ctrl2, p) => {
-                    output.cubic_to(at(p), at(ctrl1), at(ctrl2))
+    /// The closed contours to fill, flattened into polygons (within
+    /// `tolerance` logical pixels), and the rule to fill them by: for
+    /// geometry the caller cuts before building a [`Path`] with
+    /// [`Path::from_polygons`]. Unlike [`Path`], this keeps each contour whole.
+    pub fn build_polygons(self, tolerance: f32) -> Result<(Vec<Vec<Point<f32>>>, FillRule), Error> {
+        let path = if let Some(transform) = self.transform {
+            self.raw.build().transformed(&transform)
+        } else {
+            self.raw.build()
+        };
+        let mut polys: Vec<Vec<Point<f32>>> = Vec::new();
+        let mut flat = Flattener { tolerance, polys: &mut polys, current: point(0.0, 0.0) };
+        let rule = match self.style {
+            PathStyle::Stroke(options) => {
+                if let Some(outline) = Self::stroked(&path, &options, self.dash_array.as_deref()) {
+                    let at = |p: tiny_skia_path::Point| point(p.x, p.y);
+                    for segment in outline.segments() {
+                        match segment {
+                            tiny_skia_path::PathSegment::MoveTo(p) => flat.move_to(at(p)),
+                            tiny_skia_path::PathSegment::LineTo(p) => flat.line_to(at(p)),
+                            tiny_skia_path::PathSegment::QuadTo(c, p) => flat.quad_to(at(c), at(p)),
+                            tiny_skia_path::PathSegment::CubicTo(c1, c2, p) => flat.cubic_to(at(c1), at(c2), at(p)),
+                            tiny_skia_path::PathSegment::Close => {}
+                        }
+                    }
                 }
-                tiny_skia_path::PathSegment::Close => output.close(),
+                FillRule::NonZero
             }
+            PathStyle::Fill(options) => {
+                let at = |p: lyon_path::math::Point| point(p.x, p.y);
+                for event in path.iter() {
+                    match event {
+                        Event::Begin { at: p } => flat.move_to(at(p)),
+                        Event::Line { to, .. } => flat.line_to(at(to)),
+                        Event::Quadratic { ctrl, to, .. } => flat.quad_to(at(ctrl), at(to)),
+                        Event::Cubic { ctrl1, ctrl2, to, .. } => flat.cubic_to(at(ctrl1), at(ctrl2), at(to)),
+                        Event::End { .. } => {}
+                    }
+                }
+                options.fill_rule
+            }
+        };
+        polys.retain(|p| p.len() >= 3);
+        if polys.iter().flatten().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
+            bail!("path has a non-finite point");
         }
-        output.into_curves()
+        Ok((polys, rule))
     }
 
     /// Convert a lyon path into a fill, closing every subpath.
@@ -402,10 +459,88 @@ impl Path {
         self.even_odd
     }
 
+    /// A path that paints nothing.
+    pub fn empty() -> Self {
+        Self::from_curves(Vec::new(), FillRule::NonZero)
+    }
+
+    /// Closed polygons (in logical pixels) as a path, filled by `fill_rule`.
+    pub fn from_polygons(polygons: &[Vec<Point<f32>>], fill_rule: FillRule) -> Self {
+        let mut outline = Outline::default();
+        for polygon in polygons.iter().filter(|p| p.len() >= 3) {
+            outline.move_to(polygon[0]);
+            for &p in &polygon[1..] {
+                outline.line_to(p);
+            }
+        }
+        Self::from_curves(outline.into_curves().unwrap_or_default(), fill_rule)
+    }
+
+    /// This path scaled by `scale` (positive) about the origin, then moved by
+    /// `offset`: exact for these curves, so a path can be built once and
+    /// painted at other zooms and scroll positions.
+    pub fn transformed(&self, scale: f32, offset: Point<Pixels>) -> Self {
+        let (dx, dy) = (offset.x.0, offset.y.0);
+        let at = |p: Point<f32>| point(p.x * scale + dx, p.y * scale + dy);
+        let curves: Vec<PathCurve> = self
+            .curves
+            .iter()
+            .map(|c| PathCurve {
+                p0: at(c.p0),
+                p1: at(c.p1),
+                a: point(c.a.x * scale, c.a.y * scale),
+                b: point(c.b.x * scale, c.b.y * scale),
+                sign: c.sign,
+                pad: 0,
+            })
+            .collect();
+        Self { curves: curves.into(), even_odd: self.even_odd }
+    }
+
+    /// Whether the path paints nothing.
+    pub fn is_empty(&self) -> bool {
+        self.curves.is_empty()
+    }
+
     /// Bin the curves into tiles in device pixels, for painting at the given
     /// display scale.
     pub(crate) fn bin(&self, scale: f32) -> PathTiles {
         crate::path_winding::bin(&self.curves, self.even_odd, scale)
+    }
+}
+
+/// Collects flattened contours for [`PathBuilder::build_polygons`].
+struct Flattener<'a> {
+    tolerance: f32,
+    polys: &'a mut Vec<Vec<Point<f32>>>,
+    current: Point<f32>,
+}
+
+impl Flattener<'_> {
+    fn move_to(&mut self, p: Point<f32>) {
+        self.polys.push(vec![p]);
+        self.current = p;
+    }
+    fn line_to(&mut self, p: Point<f32>) {
+        if self.polys.is_empty() {
+            self.polys.push(vec![self.current]);
+        }
+        if let Some(poly) = self.polys.last_mut() {
+            poly.push(p);
+        }
+        self.current = p;
+    }
+    fn quad_to(&mut self, ctrl: Point<f32>, to: Point<f32>) {
+        let l = |p: Point<f32>| lyon_path::math::point(p.x, p.y);
+        let segment = QuadraticBezierSegment { from: l(self.current), ctrl: l(ctrl), to: l(to) };
+        segment.for_each_flattened(self.tolerance, &mut |line| self.line_to(point(line.to.x, line.to.y)));
+        self.current = to;
+    }
+    fn cubic_to(&mut self, ctrl1: Point<f32>, ctrl2: Point<f32>, to: Point<f32>) {
+        let l = |p: Point<f32>| lyon_path::math::point(p.x, p.y);
+        let segment = CubicBezierSegment { from: l(self.current), ctrl1: l(ctrl1), ctrl2: l(ctrl2), to: l(to) };
+        segment.for_each_flattened(self.tolerance, &mut |line| self.line_to(point(line.to.x, line.to.y)));
+        self.current = to;
     }
 }
 
