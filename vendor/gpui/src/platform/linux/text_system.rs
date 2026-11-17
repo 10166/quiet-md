@@ -213,15 +213,19 @@ impl CosmicTextSystemState {
     fn add_fonts(&mut self, fonts: Vec<Cow<'static, [u8]>>) -> Result<()> {
         let db = self.font_system.db_mut();
         for bytes in fonts {
-            match bytes {
-                Cow::Borrowed(embedded_font) => {
-                    db.load_font_data(embedded_font.to_vec());
-                }
-                Cow::Owned(bytes) => {
-                    db.load_font_data(bytes);
-                }
+            // quiet.md: a bundled face replaces the system's faces of the same
+            // family and style (Fedora's COLRv1 Noto Color Emoji, which swash
+            // draws blank, gives way to the bundled CBDT one).
+            let before: std::collections::HashSet<_> = db.faces().map(|f| f.id).collect();
+            db.load_font_data(bytes.into_owned());
+            let key = |f: &cosmic_text::fontdb::FaceInfo| (f.families.first().map(|x| x.0.clone()), f.style, f.weight, f.stretch);
+            let added: Vec<_> = db.faces().filter(|f| !before.contains(&f.id)).map(key).collect();
+            let stale: Vec<_> = db.faces().filter(|f| before.contains(&f.id) && added.contains(&key(f))).map(|f| f.id).collect();
+            for id in stale {
+                db.remove_face(id);
             }
         }
+        self.font_ids_by_family_cache.clear();
         Ok(())
     }
 
@@ -593,6 +597,14 @@ fn face_info_into_properties(
             cosmic_text::Stretch::UltraExpanded => font_kit::properties::Stretch::ULTRA_EXPANDED,
         },
     }
+}
+
+/// quiet.md: a window-less text system over cosmic-text, for tests that shape
+/// text outside an app (the bundled emoji font).
+#[doc(hidden)]
+pub fn test_text_system() -> Arc<crate::WindowTextSystem> {
+    let ts = Arc::new(crate::TextSystem::new(Arc::new(CosmicTextSystem::new())));
+    Arc::new(crate::WindowTextSystem::new(ts))
 }
 
 fn check_is_known_emoji_font(postscript_name: &str) -> bool {
