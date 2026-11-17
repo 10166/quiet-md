@@ -1357,7 +1357,12 @@ impl Editor {
             }
             return;
         }
-        let next = if down { us.get(i + 1) } else { i.checked_sub(1).map(|k| &us[k]) };
+        // In a 表格, ↑/↓ out of a cell keep its column instead of the reading order.
+        let next = match self.core.cell_vertical(&us, i, down) {
+            Some(k) => k.map(|k| &us[k]),
+            None if down => us.get(i + 1),
+            None => i.checked_sub(1).map(|k| &us[k]),
+        };
         let p = match next {
             Some(u) if u.text => {
                 let o = cache
