@@ -190,6 +190,8 @@ fn main() {
     app.run(move |cx: &mut App| {
         #[cfg(target_os = "macos")]
         set_app_icon();
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        editor::emoji::load_font(cx);
         editor::math::load_fonts(cx);
         board::fonts::load(cx);
         editor::image::init_pictures(cx);

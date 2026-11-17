@@ -18,6 +18,8 @@ pub(crate) use keyboard::*;
 pub(crate) use platform::*;
 #[cfg(any(feature = "wayland", feature = "x11"))]
 pub(crate) use text_system::*;
+#[cfg(any(feature = "wayland", feature = "x11"))]
+pub use text_system::test_text_system;
 #[cfg(feature = "wayland")]
 pub(crate) use wayland::*;
 #[cfg(feature = "x11")]

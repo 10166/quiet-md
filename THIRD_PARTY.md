@@ -825,6 +825,7 @@ rough.js、hachure-fill、points-on-curve、points-on-path、path-data-parser、
 |---|---|
 | `assets/fonts/katex/`（20 个 KaTeX 字体） | KaTeX 字体，SIL Open Font License / MIT，见同目录 `LICENSE`。9 个粗体、斜体字重改过 OS/2 `fsSelection` 和 `head.macStyle` 的样式位（原文件都标成 Regular，Windows 和 Linux 会把斜体当正体选中），字形未改 |
 | `assets/fonts/excalidraw/`（画板文字用的 Excalidraw 字体，取自 Excalidraw `3a317b5` 的 `packages/excalidraw/fonts/`）：Excalifont（2024 Excalidraw，Ján Filípek / DizajnDesign）、Virgil（2011 Your Own Font Foundry）、Nunito Medium（Nunito Project Authors）、Lilita One（2011 Juan Montoreano）、Cascadia Code（2020 Microsoft）、Assistant 四个字重（Assistant Project Authors / Source Sans Pro Authors）、Xiaolai SC（2020 LXGW，瀬戸のぞみ；Excalidraw 去掉了非 CJK 字符、调过谚文和个别 CJK 字形的位置） | SIL Open Font License 1.1，全文和版权声明见同目录 `OFL.txt` |
+| `assets/fonts/emoji/NotoColorEmoji.ttf`（Noto Color Emoji 2.057，CBDT 彩色位图版，取自 googlefonts/noto-emoji `v2026-09-24-unicode18_0` 的 `2D/fonts/`；只编进 Linux 版） | SIL Open Font License 1.1（2022 Google Inc.），全文见同目录 `OFL.txt`；文件未改动 |
 | `assets/fonts/excalidraw/ComicShanns-Regular.ttf`（Comic Shanns Mono 1.3.0） | MIT（Shannon Miwa 等），见同目录 `LICENSE-ComicShanns.txt` |
 | 上面两项的加工 | 上游分发的是按 Unicode 区段切开的 WOFF2 子集；这里转成 TrueType，每个字族的子集合并成一个文件（用 fontTools 转换；字形轮廓、字宽、字距和 OpenType 特性不变，逐字比对过覆盖范围和轮廓）。Nunito、Comic Shanns、Cascadia、Xiaolai 的 name 表字族名改成 Excalidraw CSS 里用的名字（`Nunito`、`Comic Shanns`、`Cascadia`、`Xiaolai`）。Xiaolai 以 zlib 压缩存放（`Xiaolai-Regular.ttf.zlib`，14 MB，解开 21 MB），第一次用到 CJK 时才解开。上游还带的 Liberation Sans 1.05 是 GPL 加字体例外的许可，没有收入，改用与它等宽度的系统 Arial |
 

@@ -62,6 +62,7 @@ diff -ru $R/taffy-0.9.0/src vendor/taffy/src
 | 40 | `platform/mac/metal_renderer.rs` | 路径光栅化的顶点直接写进 instance buffer（先算总数、超出缓冲区照旧返回 false）；原来先在一个从空开始逐个扩容的 `Vec` 里攒好再整块拷过去 | 画板每帧大量路径顶点；原来每帧在这里反复 realloc 和拷贝，约占 Metal 提交一帧的四分之三（3 万元素场景拖动时每帧约 0.8ms，现在约 0.2ms） |
 | 41 | `elements/div.rs` | 有 `active` 样式的元素总是监听松开（capture 阶段，按下过才清掉并刷新）；原来只有「画的时候已是按下状态」的那一帧才注册松开监听 | 按下和松开在同一帧之前到达（触控板轻点、脚本点击）时，按钮的按下样式一直留着，直到下一次松开 |
 | 42 | `platform/mac/window.rs` | 视图类注册 `rightMouseDragged:`、`otherMouseDragged:`（同 `mouseDragged:` 交给 `handle_view_event`，`events.rs` 原本就会转换这两种事件） | 原来只注册了左键拖动，按住滚轮键或右键移动时 AppKit 不把事件交给视图，画板按住滚轮键平移画布不动 |
+| 43 | `platform.rs`、`platform/linux.rs`、`platform/linux/text_system.rs` | `add_fonts` 加入的字形替换系统里同字族、同样式（style、weight、stretch）的已有字形，并清空按字族缓存的 FontId；`test_text_system()` 增加 Linux 版（cosmic-text，不建窗口） | Linux 版内置 CBDT 格式的 Noto Color Emoji：Fedora 等系统自带的同名字体是 COLRv1，swash 画不出来，emoji 一片空白（#265）；测试在 `src/editor/emoji.rs` |
 
 ## taffy 0.9.0
 

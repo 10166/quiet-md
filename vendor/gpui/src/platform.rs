@@ -9,6 +9,8 @@ mod linux;
 mod mac;
 #[cfg(target_os = "macos")]
 pub use mac::{check_fallback_glyphs, test_text_system};
+#[cfg(all(any(target_os = "linux", target_os = "freebsd"), any(feature = "wayland", feature = "x11")))]
+pub use linux::test_text_system;
 
 #[cfg(any(
     all(
