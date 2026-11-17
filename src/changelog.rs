@@ -24,7 +24,7 @@ const NOTES: &[(&str, &[(&str, &str)])] = &[
         ("复制为 Markdown（⌘⇧C），侧栏可复制文件路径", "Copy as Markdown (⌘⇧C); copy a file's path from the sidebar"),
         ("设置 › 文档库可以更换文档库文件夹", "Settings › Documents can switch to another library folder"),
         ("从网页或飞书粘贴的图片会存进文档库，不再因链接过期失效", "Pasted web images are saved into the library, so they never expire"),
-        ("安装包小了约三分之一，大图页面更省内存，侧栏滚动更顺", "Packages a third smaller, less memory on picture-heavy pages, smoother sidebar"),
+        ("大图页面更省内存，导入和删除在后台进行，侧栏滚动更顺", "Less memory on picture-heavy pages, imports and deletes in the background, smoother sidebar"),
     ]),
     ("0.1.12", &[
         ("把文件或「本机文件」直接拖进侧栏的文件夹或两行之间", "Drag files, or Files on this computer, into a sidebar folder or between rows"),
