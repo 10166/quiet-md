@@ -117,7 +117,7 @@ fn seed(id: &str) -> u64 {
 }
 
 /// A rounded rectangle turned by `rot` about its centre (card-local `c`, painted at `o`).
-fn rounded(o: Point<Pixels>, c: (f32, f32), w: f32, h: f32, r: f32, rot: f32) -> Option<Path<Pixels>> {
+fn rounded(o: Point<Pixels>, c: (f32, f32), w: f32, h: f32, r: f32, rot: f32) -> Option<Path> {
     let mut pb = PathBuilder::fill();
     append_rounded(&mut pb, o, c, w, h, r, rot);
     pb.build().ok()
@@ -150,7 +150,7 @@ impl Paper {
     /// lies on it, lines of "text" (below a real title when `titled`).
     fn paint(&self, o: Point<Pixels>, face: Face, window: &mut Window) {
         let b = Bounds::new(o + point(px(self.cx - self.w / 2.), px(self.cy - self.h / 2.)), size(px(self.w), px(self.h)));
-        window.paint_shadows(b, Corners::all(px(10.)), &[BoxShadow { color: theme::rgbaf(0, 0, 0, if theme::dark() { 0.3 } else { 0.07 }), offset: point(px(0.), px(3.)), blur_radius: px(10.), spread_radius: px(0.) }]);
+        window.paint_drop_shadows(b, Corners::all(px(10.)), &[BoxShadow { color: theme::rgbaf(0, 0, 0, if theme::dark() { 0.3 } else { 0.07 }), offset: point(px(0.), px(3.)), blur_radius: px(10.), spread_radius: px(0.), inset: false }]);
         if let Some(p) = rounded(o, (self.cx, self.cy), self.w + 1., self.h + 1., 10.5, self.rot) { window.paint_path(p, ca(craft::N1000, 0.08)); }
         if let Some(p) = rounded(o, (self.cx, self.cy), self.w, self.h, 10., self.rot) { window.paint_path(p, theme::raised(Theme::bg_body())); }
         let mut rng = self.seed;
@@ -218,8 +218,8 @@ fn glass(o: Point<Pixels>, p: &Pose, window: &mut Window) {
     };
     // The whole folder's shadow sits under the front.
     let lift = -p.lift / 4.;
-    window.paint_shadows(Bounds::new(pt(6., yr + 10.), size(px(w - 12.), px(h - yr - 10.))), Corners::all(px(r)),
-        &[BoxShadow { color: theme::rgbaf(0, 0, 0, if theme::dark() { 0.35 } else { 0.06 + 0.04 * lift }), offset: point(px(0.), px(8. + 6. * lift)), blur_radius: px(22. + 10. * lift), spread_radius: px(-2.) }]);
+    window.paint_drop_shadows(Bounds::new(pt(6., yr + 10.), size(px(w - 12.), px(h - yr - 10.))), Corners::all(px(r)),
+        &[BoxShadow { color: theme::rgbaf(0, 0, 0, if theme::dark() { 0.35 } else { 0.06 + 0.04 * lift }), offset: point(px(0.), px(8. + 6. * lift)), blur_radius: px(22. + 10. * lift), spread_radius: px(-2.), inset: false }]);
     let mut pb = PathBuilder::fill();
     edge(&mut pb);
     pb.line_to(pt(w, h - r));
@@ -387,7 +387,7 @@ impl Workspace {
             .when(self.batch.is_none(), |d| d
                 .on_click(cx.listener(move |w, _, window, cx| { w.try_open(&open_id, window, cx); }))
                 .on_mouse_down(MouseButton::Right, cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
-                    w.row_menu = Some(RowMenu { id: menu_id.clone(), pos: ev.position, corner: Corner::TopLeft, sub: false, batch: false });
+                    w.row_menu = Some(RowMenu { id: menu_id.clone(), pos: ev.position, corner: Anchor::TopLeft, sub: false, batch: false });
                     cx.notify();
                 })))
             .child(back).children(title).child(front_glass).child(label)
@@ -775,7 +775,7 @@ impl Workspace {
             .opacity(show * (0.08 + 0.92 * ((veil_p - 0.12) / 0.88).clamp(0., 1.)).min(show))
             .child(div().relative().flex_none().w(px(w * grow)).h(px(h * grow)).flex().items_center().justify_center()
                 .child(div().absolute().left(px(w * grow / 2. - 40.)).top(px(h * grow / 2. - 30.)).size(px(80.)).rounded_full()
-                    .shadow(vec![BoxShadow { color: if reject { ca(craft::N1000, 0.06) } else { accent.opacity(0.10 + 0.10 * lit + 0.06 * breath) }, offset: point(px(0.), px(0.)), blur_radius: px(90.), spread_radius: px(40. + 24. * lit) }]))
+                    .shadow(vec![BoxShadow { color: if reject { ca(craft::N1000, 0.06) } else { accent.opacity(0.10 + 0.10 * lit + 0.06 * breath) }, offset: point(px(0.), px(0.)), blur_radius: px(90.), spread_radius: px(40. + 24. * lit), inset: false }]))
                 .child(art))
             .child(div().mt(px(14.)).text_size(px(18.)).line_height(px(26.)).font_weight(FontWeight::SEMIBOLD)
                 .text_color(if reject { Theme::text_caption() } else { Theme::text() }).child(ui_text(title)))
@@ -800,7 +800,7 @@ impl Workspace {
             let depth = (46. + 34. * lit + 30. * flare) * show;
             let a = if reject { 0.10 } else { (0.16 + 0.06 * breath + 0.16 * lit + 0.2 * flare) * show };
             let (l, t, rw, rh, big) = (f32::from(ring.left()), f32::from(ring.top()), f32::from(ring.size.width), f32::from(ring.size.height), 400.);
-            let glow = [BoxShadow { color: tint.opacity(a), offset: point(px(0.), px(0.)), blur_radius: px(depth), spread_radius: px(0.) }];
+            let glow = [BoxShadow { color: tint.opacity(a), offset: point(px(0.), px(0.)), blur_radius: px(depth), spread_radius: px(0.), inset: false }];
             // Masks are only rectangles, so the ring's squircle inside (see `ui::squircle_path`)
             // is cut in 1px rows through the corner bands (the dashed line covers the steps);
             // one rect between.
@@ -815,15 +815,15 @@ impl Workspace {
                 window.with_content_mask(Some(ContentMask { bounds: clip }), |window| {
                     // Each strip reaches a point inside, or GPUI culls a shadow wholly outside the clip.
                     for side in [rect(l - big, t - big, rw + 2. * big, big + 1.), rect(l - big, t + rh - 1., rw + 2. * big, big + 1.), rect(l - big, t, big + 1., rh), rect(l + rw - 1., t, big + 1., rh)] {
-                        window.paint_shadows(side, px(0.).into(), &glow);
+                        window.paint_drop_shadows(side, px(0.).into(), &glow);
                     }
                 });
             }
             // The halo under the pointer.
             if !reject && !landed {
                 let c = point(at.x.max(b.left()).min(b.right()), at.y.max(b.top()).min(b.bottom()));
-                window.paint_shadows(Bounds::centered_at(c, size(px(40.), px(40.))), px(20.).into(),
-                    &[BoxShadow { color: accent.opacity(0.12 * lit * show), offset: point(px(0.), px(0.)), blur_radius: px(120.), spread_radius: px(70.) }]);
+                window.paint_drop_shadows(Bounds::centered_at(c, size(px(40.), px(40.))), px(20.).into(),
+                    &[BoxShadow { color: accent.opacity(0.12 * lit * show), offset: point(px(0.), px(0.)), blur_radius: px(120.), spread_radius: px(70.), inset: false }]);
             }
             let ring_a = if reject { 0.22 } else { (0.40 + 0.12 * breath + 0.35 * lit + 0.2 * flare).min(1.) } * show;
             if let Some(p) = crate::ui::squircle_path(ring, r, 1., PathBuilder::stroke(px(2.)).dash_array(&[px(6.), px(5.)])) { window.paint_path(p, tint.opacity(ring_a)); }

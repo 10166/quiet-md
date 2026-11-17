@@ -484,10 +484,6 @@ impl Editor {
         e
     }
 
-    pub fn focus(&self, window: &mut Window) {
-        window.focus(&self.focus);
-    }
-
     // ---- bookkeeping
 
     /// 阅读位置: the top row and how far into it the page sits. `None` at the
@@ -642,7 +638,7 @@ impl Editor {
     pub fn close_menu_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.menu = None;
         self.menu_hovered = false;
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         cx.notify();
     }
 
@@ -1037,7 +1033,7 @@ impl Editor {
         self.dragging = false;
         self.menu = Some(Menu::Equation { block: p.block, offset: p.offset });
         let fh = self.eq_field.read(cx).focus_handle(cx);
-        window.focus(&fh);
+        window.focus(&fh, cx);
         cx.notify();
     }
 
@@ -1047,7 +1043,7 @@ impl Editor {
         self.core.break_coalescing();
         let o = if after { offset + core::EQUATION.len() } else { offset };
         self.core.sel = Selection::caret(Pos::new(block, o));
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         self.restart_blink(window, cx);
         cx.notify();
     }
@@ -1062,7 +1058,7 @@ impl Editor {
                     let f = if text { &self.link_field } else { &self.link_text_field };
                     let fh = f.read(cx).focus_handle(cx);
                     f.update(cx, |f, cx| f.select_all_text(cx));
-                    window.focus(&fh);
+                    window.focus(&fh, cx);
                 }
                 cx.notify();
             }
@@ -1086,7 +1082,7 @@ impl Editor {
         self.lang_field.update(cx, |f, cx| f.set_text("", cx));
         self.menu = Some(Menu::Lang { block, selected: 0 });
         let fh = self.lang_field.read(cx).focus_handle(cx);
-        window.focus(&fh);
+        window.focus(&fh, cx);
         cx.notify();
     }
 
@@ -2310,7 +2306,7 @@ impl Editor {
     }
 
     pub fn on_mouse_down(&mut self, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         self.reminder_blur(window, cx);
         self.menu = None;
         self.menu_hovered = false;
@@ -2504,7 +2500,7 @@ impl Editor {
 
     /// Click in the empty area below the content: focus a trailing empty paragraph.
     pub fn on_click_below(&mut self, _: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         if self.read_only {
             return;
         }
@@ -2519,7 +2515,7 @@ impl Editor {
 
     /// Handle (⋮⋮) click: select the block and open its menu; "+" opens the add panel.
     pub fn open_block_menu(&mut self, block: BlockId, add: bool, window: &mut Window, cx: &mut Context<Self>) {
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         self.slash = None;
         self.menu_hovered = false;
         if add {
@@ -2593,7 +2589,7 @@ impl Editor {
             BlockAct::HeaderCol => self.core.table_toggle_header_col(block),
             BlockAct::DistributeCols => self.core.table_distribute(block),
         }
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         self.changed(window, cx);
     }
 

@@ -40,7 +40,7 @@ fn picker_height(kind: menus::SlashKind) -> f32 {
 }
 
 /// Place `el` at `rel` (content-column coordinates), above everything else.
-pub(super) fn at(rel: Point<Pixels>, corner: Corner, el: impl IntoElement) -> AnyElement {
+pub(super) fn at(rel: Point<Pixels>, corner: Anchor, el: impl IntoElement) -> AnyElement {
     div()
         .absolute()
         .top_0()
@@ -408,7 +408,7 @@ impl Editor {
                     }
                 }),
             );
-        Some(at(point(px(left), px(top)), Corner::TopLeft, el))
+        Some(at(point(px(left), px(top)), Anchor::TopLeft, el))
     }
 
     // ---- slash / add menu
@@ -577,12 +577,12 @@ impl Editor {
         let (pos, corner) = if let Some(p) = beside {
             // The panel lines up 8px above the row, inside the window.
             let top = (f32::from(p.y) - 8.).min(vh - 8. - view_h - 2.).max(8.);
-            (point(p.x, px(top)), Corner::TopLeft)
+            (point(p.x, px(top)), Anchor::TopLeft)
         } else if vh - f32::from(anchor_bottom.y) < 240. {
-            (anchor_top, Corner::BottomLeft)
+            (anchor_top, Anchor::BottomLeft)
         } else {
             // The menu hangs right off the line box, no gap.
-            (anchor_bottom, Corner::TopLeft)
+            (anchor_bottom, Anchor::TopLeft)
         };
         let thumb = (content_h > view_h).then(|| {
             let track = view_h - 4.;
@@ -597,7 +597,7 @@ impl Editor {
             .relative()
             .w(px(SLASH_W))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_scroll_wheel(cx.listener(|_, _, _, cx| cx.notify()))
+            .on_scroll(cx.listener(|_, _, _, cx| cx.notify()))
             .child(list)
             .children(thumb);
         out.push(at(self.rel(pos), corner, el));
@@ -609,11 +609,11 @@ impl Editor {
         } else {
             (self.size_picker(kind, cx), picker_height(kind))
         };
-        let menu_top = if corner == Corner::TopLeft { pos.y } else { pos.y - px(view_h + 2.) };
+        let menu_top = if corner == Anchor::TopLeft { pos.y } else { pos.y - px(view_h + 2.) };
         let off = -f32::from(self.slash_scroll.offset().y);
         let top = (f32::from(menu_top) + 1. + row_top - off + 16. - ph / 2.).min(vh - 8. - ph).max(8.);
         let left = pos.x + px(1. + SLASH_W - SCROLLBAR_GUTTER - 2.);
-        out.push(at(self.rel(point(left, px(top))), Corner::TopLeft, picker));
+        out.push(at(self.rel(point(left, px(top))), Anchor::TopLeft, picker));
         Some(())
     }
 
@@ -851,7 +851,7 @@ impl Editor {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(m)
             .children(sub_el);
-        Some(at(self.rel(point(r.left(), r.bottom() + px(4.))), Corner::TopLeft, el))
+        Some(at(self.rel(point(r.left(), r.bottom() + px(4.))), Anchor::TopLeft, el))
     }
 
     /// Top of the 在下方添加 row inside the handle menu (mirrors its layout).
@@ -1016,7 +1016,7 @@ impl Editor {
             .child(div().h(px(40.)).px(px(10.)).flex().items_center().child(palette))
             .child(self.zone_probe())
             .children(drop);
-        Some(at(self.rel(pos), Corner::TopLeft, el))
+        Some(at(self.rel(pos), Anchor::TopLeft, el))
     }
 
     /// Callout panel: 字体颜色 8 / 边框颜色 8 / 填充颜色 16, 随机, 恢复默认.
@@ -1189,7 +1189,7 @@ impl Editor {
                     .text_color(Theme::text_placeholder())
                     .child(crate::settings::text("按 ESC 完成输入")),
             );
-        Some(at(self.rel(point(b.left(), b.bottom() + px(4.))), Corner::TopLeft, el))
+        Some(at(self.rel(point(b.left(), b.bottom() + px(4.))), Anchor::TopLeft, el))
     }
 
     // ---- code language picker
@@ -1263,9 +1263,9 @@ impl Editor {
         let x = b.right() - px(267.);
         let below = b.top() + px(34.);
         let (pos, corner) = if below + h > window.viewport_size().height - px(8.) && b.top() + px(4.) - h >= px(8.) {
-            (point(x, b.top() + px(4.)), Corner::BottomLeft)
+            (point(x, b.top() + px(4.)), Anchor::BottomLeft)
         } else {
-            (point(x, below), Corner::TopLeft)
+            (point(x, below), Anchor::TopLeft)
         };
         Some(at(self.rel(pos), corner, el))
     }
@@ -1443,7 +1443,7 @@ impl Editor {
 
         let drop_el: Option<AnyElement> = match dropdown {
             Some(Menu::TurnInto) => {
-                let mut list = menu().id("tb-turn-menu").occlude().w(px(200.)).py(px(MENU_PAD_Y)).max_h(turn_height).overflow_y_scroll().on_scroll_wheel(|_, _, cx| cx.stop_propagation());
+                let mut list = menu().id("tb-turn-menu").occlude().w(px(200.)).py(px(MENU_PAD_Y)).max_h(turn_height).overflow_y_scroll().on_scroll(|_, _, cx| cx.stop_propagation());
                 for (i, it) in TURN_ITEMS.iter().enumerate() {
                     let k = (it.kind)();
                     if self.markdown && matches!(k, BlockKind::Callout { .. }) {
@@ -1498,7 +1498,7 @@ impl Editor {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(bar)
             .children(drop_el);
-        Some(at(self.rel(pos), Corner::TopLeft, el))
+        Some(at(self.rel(pos), Anchor::TopLeft, el))
     }
 }
 
@@ -1825,7 +1825,7 @@ impl Editor {
         let x_color = f32::min(x_align + 44. + 17. + 5. * 32., w - CALLOUT_PANEL_W - 2.).max(0.);
         let drop_el: Option<AnyElement> = match dropdown {
             Some(Menu::TurnInto) => {
-                let mut list = menu().id("ttb-turn-menu").occlude().w(px(200.)).py(px(MENU_PAD_Y)).max_h(turn_height).overflow_y_scroll().on_scroll_wheel(|_, _, cx| cx.stop_propagation());
+                let mut list = menu().id("ttb-turn-menu").occlude().w(px(200.)).py(px(MENU_PAD_Y)).max_h(turn_height).overflow_y_scroll().on_scroll(|_, _, cx| cx.stop_propagation());
                 for (i, it) in TURN_ITEMS.iter().enumerate() {
                     let k = (it.kind)();
                     if matches!(k, BlockKind::Callout { .. }) {
@@ -1903,7 +1903,7 @@ impl Editor {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(bar)
             .children(drop_el);
-        Some(at(self.rel(point(x, y)), Corner::TopLeft, el))
+        Some(at(self.rel(point(x, y)), Anchor::TopLeft, el))
     }
 
     /// 单元格背景颜色 (230 × 142): 2 × 8 swatches and 恢复默认.
@@ -2027,6 +2027,6 @@ impl Editor {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(m)
             .children(sub_el);
-        Some(at(self.rel(point(r.left(), r.bottom() + px(4.))), Corner::TopLeft, el))
+        Some(at(self.rel(point(r.left(), r.bottom() + px(4.))), Anchor::TopLeft, el))
     }
 }

@@ -18,6 +18,10 @@ fn saved(id: &str) -> Option<String> {
 }
 /// The system-wide hotkeys: one stroke, kept apart from the app's.
 fn is_global(id: &str) -> bool { id == "global" || id == LAST_ID }
+/// The host OS, the way GPUI spells keystrokes for it ("cmd-", "win-", "super-").
+pub const HOST_OS: OperatingSystem = if cfg!(target_os = "macos") { OperatingSystem::Mac } else if cfg!(target_os = "windows") { OperatingSystem::Windows } else { OperatingSystem::Linux };
+pub fn parse_key(stroke: &str) -> Result<Keystroke, InvalidKeystrokeError> { Keystroke::parse_with_os(stroke, HOST_OS) }
+fn unparse(k: &impl AsKeystroke) -> String { k.as_keystroke().unparse(HOST_OS) }
 pub fn init(cx: &mut App) {
     let base = cx.key_bindings().borrow().bindings().cloned().collect::<Vec<_>>();
     #[cfg(not(target_os = "macos"))]
@@ -29,7 +33,7 @@ pub fn init(cx: &mut App) {
 
 #[cfg(any(test, not(target_os = "macos")))]
 fn pc_binding(binding: KeyBinding) -> Option<KeyBinding> {
-    let keys = binding.keystrokes().iter().map(|k| k.unparse().replace("win-", "cmd-").replace("super-", "cmd-")).collect::<Vec<_>>().join(" ");
+    let keys = binding.keystrokes().iter().map(|k| unparse(k).replace("win-", "cmd-").replace("super-", "cmd-")).collect::<Vec<_>>().join(" ");
     // Cocoa's control-key navigation conflicts with PC editing shortcuts.
     if matches!(keys.as_str(), "ctrl-a" | "ctrl-b" | "ctrl-d" | "ctrl-e" | "ctrl-f" | "ctrl-h" | "ctrl-n" | "ctrl-p" | "ctrl-backspace") { return None; }
     // Ctrl+Backspace deletes a word on PC platforms; do not override it with macOS line deletion.
@@ -43,12 +47,18 @@ fn pc_binding(binding: KeyBinding) -> Option<KeyBinding> {
         "alt-left" | "alt-right" | "alt-shift-left" | "alt-shift-right" | "alt-backspace" | "alt-delete" => key.replacen("alt-", "ctrl-", 1),
         _ => key.replace("cmd-", "ctrl-"),
     }).collect::<Vec<String>>().join(" ") };
-    KeyBinding::load(&keys, binding.action().boxed_clone(), binding.predicate(), false, binding.action_input(), &DummyKeyboardMapper).ok()
+    load(&keys, &binding)
+}
+
+/// `keys` for `like`'s action and context, parsed as written: no keyboard
+/// layout mapping.
+fn load(keys: &str, like: &KeyBinding) -> Option<KeyBinding> {
+    KeyBinding::load_unmapped(keys, like.action().boxed_clone(), like.predicate(), like.action_input(), HOST_OS).ok()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::pc_binding;
+    use super::{pc_binding, unparse};
     use gpui::KeyBinding;
     #[test]
     fn pc_word_deletion_has_no_line_deletion_collision() {
@@ -58,7 +68,7 @@ mod tests {
             (KeyBinding::new("alt-delete", DeleteWordForward, Some("Editor")), "ctrl-delete"),
         ] {
             let mapped = pc_binding(binding).unwrap();
-            assert_eq!(mapped.keystrokes()[0].unparse(), expected);
+            assert_eq!(unparse(&mapped.keystrokes()[0]), expected);
         }
         assert!(pc_binding(KeyBinding::new("cmd-backspace", DeleteToLineStart, Some("Editor"))).is_none());
         assert!(pc_binding(KeyBinding::new("ctrl-backspace", Backspace, Some("Editor"))).is_none());
@@ -68,8 +78,8 @@ mod tests {
         use crate::editor::keymap::{Copy, InlineCode};
         let copy = pc_binding(KeyBinding::new("cmd-c", Copy, Some("Editor"))).unwrap();
         let code = pc_binding(KeyBinding::new("cmd-ctrl-c", InlineCode, Some("Editor"))).unwrap();
-        assert_eq!(copy.keystrokes().iter().map(|k| k.unparse()).collect::<Vec<_>>(), ["ctrl-c"]);
-        assert_eq!(code.keystrokes().iter().map(|k| k.unparse()).collect::<Vec<_>>(), ["ctrl-shift-c"]);
+        assert_eq!(copy.keystrokes().iter().map(unparse).collect::<Vec<_>>(), ["ctrl-c"]);
+        assert_eq!(code.keystrokes().iter().map(unparse).collect::<Vec<_>>(), ["ctrl-shift-c"]);
         assert_ne!(copy.keystrokes(), code.keystrokes());
     }
 }
@@ -150,7 +160,7 @@ pub fn hint(action: &str, default: &'static str) -> &'static str {
     let mut cache = HINTS.lock().unwrap();
     if let Some(h) = cache.get(&key) { return h }
     let text = key.split(' ').map(|stroke| {
-        let Ok(k) = Keystroke::parse(stroke) else { return stroke.to_string() };
+        let Ok(k) = parse_key(stroke) else { return stroke.to_string() };
         let m = k.modifiers;
         let names = if cfg!(not(target_os = "macos")) { [(m.control, "Ctrl"), (m.alt, "Alt"), (m.shift, "Shift"), (m.platform, if cfg!(target_os = "windows") { "Win" } else { "Super" })] } else { [(m.platform, "⌘"), (m.alt, "⌥"), (m.shift, "Shift"), (m.control, "Control")] };
         let mut parts: Vec<String> = names.into_iter().filter(|(on, _)| *on).map(|(_, s)| s.to_string()).collect();
@@ -166,7 +176,7 @@ pub fn rebuild(cx: &mut App) {
     *CUSTOM.write().unwrap() = cx.global::<Shortcuts>().custom.clone();
     let s = cx.global::<Shortcuts>();
     let bindings: Vec<_> = s.base.iter().filter(|b| !s.custom.get(b.action().name()).is_some_and(|key| key.is_empty())).map(|b| {
-        s.custom.get(b.action().name()).and_then(|key| KeyBinding::load(key, b.action().boxed_clone(), b.predicate(), false, b.action_input(), &DummyKeyboardMapper).ok()).unwrap_or_else(|| b.clone())
+        s.custom.get(b.action().name()).and_then(|key| load(key, b)).unwrap_or_else(|| b.clone())
     }).collect();
     cx.clear_key_bindings(); cx.bind_keys(bindings);
 }
@@ -242,7 +252,7 @@ fn default_key(s: &Shortcuts, id: &str) -> String {
     if id == "global" { return GLOBAL_DEFAULT.into(); }
     if id == LAST_ID { return LAST_DEFAULT.into(); }
     if id.ends_with("::NewDoc") { return if cfg!(not(target_os = "macos")) { "ctrl-n" } else { "cmd-n" }.into(); }
-    s.base.iter().find(|b| b.action().name() == id).map(|b| b.keystrokes().iter().map(|k| k.unparse()).collect::<Vec<_>>().join(" ")).unwrap_or_default()
+    s.base.iter().find(|b| b.action().name() == id).map(|b| b.keystrokes().iter().map(unparse).collect::<Vec<_>>().join(" ")).unwrap_or_default()
 }
 /// The key an action runs on now.
 pub fn key_of(cx: &App, id: &str) -> String {
@@ -267,7 +277,7 @@ pub fn rows(cx: &App) -> Vec<(String, String, String)> {
 pub fn pretty(key: &str) -> String {
     if key.is_empty() { return tr("未设置", "Not set").into(); }
     key.split(' ').map(|stroke| {
-        let Ok(ks) = Keystroke::parse(stroke) else { return stroke.to_string() };
+        let Ok(ks) = parse_key(stroke) else { return stroke.to_string() };
         let m = ks.modifiers;
         let win = cfg!(not(target_os = "macos"));
         let names = if win { [(m.control, "Ctrl"), (m.alt, "Alt"), (m.shift, "Shift"), (m.platform, if cfg!(target_os = "windows") { "Win" } else { "Super" })] } else { [(m.control, "⌃"), (m.alt, "⌥"), (m.shift, "⇧"), (m.platform, "⌘")] };
@@ -284,7 +294,7 @@ pub fn pretty(key: &str) -> String {
     }).collect::<Vec<_>>().join("  →  ")
 }
 fn sequence(key: &str) -> anyhow::Result<Vec<Keystroke>> {
-    key.split_whitespace().map(|k| Keystroke::parse(k).map_err(Into::into)).collect()
+    key.split_whitespace().map(|k| parse_key(k).map_err(Into::into)).collect()
 }
 fn overlaps(a: &[Keystroke], b: &[Keystroke]) -> bool {
     !a.is_empty() && !b.is_empty() && (a.starts_with(b) || b.starts_with(a))
@@ -297,7 +307,7 @@ fn conflicts(s: &Shortcuts, id: &str, key: &str) -> Vec<String> {
     for b in &s.base {
         let name = b.action().name();
         if name == id || found.iter().any(|n| n == name) { continue; }
-        let other = s.custom.get(name).cloned().unwrap_or_else(|| b.keystrokes().iter().map(|k| k.unparse()).collect::<Vec<_>>().join(" "));
+        let other = s.custom.get(name).cloned().unwrap_or_else(|| b.keystrokes().iter().map(unparse).collect::<Vec<_>>().join(" "));
         let same_context = contexts.contains(&b.predicate().map(|p| p.to_string()));
         if (label(name).is_some() || same_context || is_global(id)) && sequence(&other).is_ok_and(|other| overlaps(&parsed, &other)) {
             found.push(name.to_string());
@@ -359,7 +369,7 @@ impl Workspace {
         self.shortcut_recording = Some(id.to_string());
         self.shortcut_error = None;
         crate::quick_note::suspend_hotkey();
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         cx.clear_key_bindings();
         cx.notify();
     }
@@ -420,7 +430,7 @@ impl Workspace {
             self.shortcut_error = Some((id, first_group_hint().into()));
         } else if self.shortcut_strokes.len() >= if is_global(&id) { 1 } else { 4 } {
             self.shortcut_error = Some((id, tr("已达到组合键上限，请保存或按退格修改", "Save or press Backspace to edit the sequence").into()));
-        } else { self.shortcut_strokes.push(ev.keystroke.unparse()); }
+        } else { self.shortcut_strokes.push(unparse(&ev.keystroke)); }
         cx.notify(); true
     }
 

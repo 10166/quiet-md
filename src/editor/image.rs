@@ -525,7 +525,7 @@ impl ImageCache for DocImages {
                         Some(d) => {
                             s.image = Some(d);
                             s.ready = Some(Instant::now());
-                            let _ = cx.update(|cx| { for view in s.waiters.drain(..) { cx.notify(view); } });
+                            cx.update(|cx| { for view in s.waiters.drain(..) { cx.notify(view); } });
                         }
                         // Skipped off screen: asked for again when drawn.
                         None => { map.remove(&r); }
@@ -824,7 +824,7 @@ impl R<'_> {
                             .bg(gpui::white())
                             .border_1()
                             .border_color(if active { Theme::primary() } else { theme::ca(craft::N1000, 0.24) })
-                            .shadow(vec![BoxShadow { color: Theme::shadow(), offset: point(px(0.), px(1.)), blur_radius: px(2.), spread_radius: px(0.) }]),
+                            .shadow(vec![BoxShadow { color: Theme::shadow(), offset: point(px(0.), px(1.)), blur_radius: px(2.), spread_radius: px(0.), inset: false }]),
                     )
                     .on_mouse_down(
                         MouseButton::Left,
@@ -1085,7 +1085,7 @@ impl Editor {
     fn start_resize(&mut self, id: BlockId, left: bool, cursor: CursorStyle, x: Pixels, window: &mut Window, cx: &mut Context<Self>) {
         let Some((g, container)) = self.image_geo(id) else { return };
         let center = self.core.block(id).is_some_and(|b| b.align == Align::Center);
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         self.menu = None;
         self.slash = None;
         self.core.clear_block_sel();
@@ -1182,7 +1182,7 @@ impl Editor {
             cx.emit(EditorEvent::Changed);
         }
         if reselect {
-            window.focus(&self.focus);
+            window.focus(&self.focus, cx);
             self.core.clear_block_sel();
             self.core.cell_sel = None;
             self.core.sel = Selection::caret(Pos::new(c.id, 0));
@@ -1471,7 +1471,7 @@ impl Editor {
                 window.prevent_default();
             })
             .child(bar);
-        Some(at(self.rel(point(px(x), px(y))), Corner::TopLeft, el))
+        Some(at(self.rel(point(px(x), px(y))), Anchor::TopLeft, el))
     }
 
     /// 添加描述 / 编辑描述: shows the description and puts the caret in it.
@@ -1488,7 +1488,7 @@ impl Editor {
         }
         self.img.caption_focus = Some(id);
         if let Some(f) = self.caption_field(id) {
-            window.focus(&f.read(cx).focus_handle(cx));
+            window.focus(&f.read(cx).focus_handle(cx), cx);
         }
         cx.notify();
     }
@@ -1537,7 +1537,7 @@ impl Editor {
             moved: false,
             rotated: None,
         });
-        window.focus(&self.img.lb_focus);
+        window.focus(&self.img.lb_focus, cx);
         cx.notify();
     }
 
@@ -1545,7 +1545,7 @@ impl Editor {
         let Some(lb) = &mut self.img.lightbox else { return };
         if lb.closing.is_none() {
             lb.closing = Some(Instant::now());
-            window.focus(&self.focus);
+            window.focus(&self.focus, cx);
             cx.notify();
         }
     }
@@ -1773,7 +1773,7 @@ impl Editor {
                 && lb.closing.is_none()
             {
                 lb.closing = Some(Instant::now());
-                window.focus(&self.focus);
+                window.focus(&self.focus, cx);
             }
             window.request_animation_frame();
             return;
@@ -1799,6 +1799,8 @@ impl Editor {
         };
         let k = ease_out((lb.chrome_t.elapsed().as_secs_f32() / FADE).min(1.));
         let chrome = if lb.chrome { k } else { 1. - k };
+        // Idle with the controls faded out: no pointer until the mouse moves.
+        if !lb.chrome && k >= 1. { cx.hide_cursor_until_mouse_moves(); }
         let (sw, sh) = (w * lb.scale, h * lb.scale);
         let (left, top) = (vw / 2. + lb.tx - sw / 2., vh / 2. + lb.ty - sh / 2.);
         let can_drag = sw > vw + 0.5 || sh > vh + 0.5;
@@ -1936,7 +1938,6 @@ impl Editor {
             .h(px(vh))
             .bg(theme::rgbaf(0, 0, 0, 0.8))
             .opacity(fade)
-            .when(!lb.chrome && k >= 1., |d| d.cursor(CursorStyle::None))
             .on_action(cx.listener(|e, _: &LbClose, window, cx| e.close_lightbox(window, cx)))
             .on_action(cx.listener(|e, _: &LbPrev, _, cx| e.lb_go(-1, cx)))
             .on_action(cx.listener(|e, _: &LbNext, _, cx| e.lb_go(1, cx)))
@@ -1992,7 +1993,7 @@ impl Editor {
                     cx.notify();
                 }),
             )
-            .on_scroll_wheel(cx.listener(|e, ev: &ScrollWheelEvent, _, cx| {
+            .on_scroll(cx.listener(|e, ev: &ScrollEvent, _, cx| {
                 let (dx, dy, lines) = match ev.delta {
                     ScrollDelta::Pixels(p) => (f32::from(p.x), f32::from(p.y), false),
                     ScrollDelta::Lines(l) => (l.x, l.y, true),
@@ -2105,7 +2106,7 @@ impl Editor {
         self.core.clear_block_sel();
         self.core.cell_sel = None;
         self.core.sel = Selection::caret(Pos::new(last, 0));
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         self.changed(window, cx);
     }
 
@@ -2196,7 +2197,7 @@ pub(super) fn clipboard_image_data(img: &gpui::Image) -> Result<(std::borrow::Co
         ImageFormat::Gif => "gif",
         ImageFormat::Webp => "webp",
         ImageFormat::Bmp => "bmp",
-        ImageFormat::Svg => return Err(BAD_FORMAT),
+        ImageFormat::Svg | ImageFormat::Ico | ImageFormat::Pnm => return Err(BAD_FORMAT),
         ImageFormat::Tiff => {
             let im = image::ImageReader::with_format(std::io::Cursor::new(&img.bytes), image::ImageFormat::Tiff)
                 .decode().map_err(|_| BAD_DIMS)?;

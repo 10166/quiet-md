@@ -86,7 +86,8 @@ pub fn paint_texture(img: std::sync::Arc<RenderImage>, b: Bounds<Pixels>, window
     let (w, h) = (FILM_W as f32 * s, FILM_H as f32 * s);
     let at = point(b.left() + px((bw - w) / 2.), b.top() + px((bh - h) / 2.));
     window.with_content_mask(Some(ContentMask { bounds: b }), |window| {
-        let _ = window.paint_image(Bounds::new(at, size(px(w), px(h))), Corners::default(), img, 0, false);
+        let ib = Bounds::new(at, size(px(w), px(h)));
+        let _ = window.paint_image(ib, ib, Corners::default(), img, 0, false);
     });
 }
 
@@ -152,8 +153,8 @@ fn paint_backdrop(b: Bounds<Pixels>, t: f32, window: &mut Window) {
         let cy = y + h * (cy + 0.05 * (TAU * t / ly + ph).cos());
         let d = w * d * (1. + 0.10 * (TAU * t / (lx + ly) + ph).sin());
         let c = Hsla::from(rgb(color)).opacity(if dark { 0.16 } else { k });
-        window.paint_shadows(Bounds::new(point(px(cx - d / 2.), px(cy - d / 2.)), size(px(d), px(d))), Corners::all(px(d / 2.)),
-            &[BoxShadow { color: c, offset: point(px(0.), px(0.)), blur_radius: px(d * 0.45), spread_radius: px(0.) }]);
+        window.paint_drop_shadows(Bounds::new(point(px(cx - d / 2.), px(cy - d / 2.)), size(px(d), px(d))), Corners::all(px(d / 2.)),
+            &[BoxShadow { color: c, offset: point(px(0.), px(0.)), blur_radius: px(d * 0.45), spread_radius: px(0.), inset: false }]);
     }
     // Grain: one tile of noise repeated, a texel per point.
     let tile = GRAIN_N as f32;
@@ -161,7 +162,8 @@ fn paint_backdrop(b: Bounds<Pixels>, t: f32, window: &mut Window) {
     while ty < y + h {
         let mut tx = x;
         while tx < x + w {
-            let _ = window.paint_image(Bounds::new(point(px(tx), px(ty)), size(px(tile), px(tile))), Corners::default(), img.clone(), 0, false);
+            let ib = Bounds::new(point(px(tx), px(ty)), size(px(tile), px(tile)));
+            let _ = window.paint_image(ib, ib, Corners::default(), img.clone(), 0, false);
             tx += tile;
         }
         ty += tile;
@@ -395,7 +397,7 @@ impl Onboarding {
 
     fn new(scripted: bool, incoming: crate::local_files::Incoming, replay: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
-        window.focus(&focus);
+        window.focus(&focus, cx);
         let fps = FLOW_FPS;
         let ticker = cx.spawn(async move |this, cx| loop {
             cx.background_executor().timer(Duration::from_secs_f32(1. / fps)).await;
@@ -465,7 +467,7 @@ impl Onboarding {
     fn start_recording(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.recording = true;
         self.hotkey_error = None;
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         cx.clear_key_bindings();
         cx.notify();
     }
@@ -503,7 +505,7 @@ impl Onboarding {
         if plain && k.key == "escape" { return self.stop_recording(cx) }
         if matches!(k.key.as_str(), "shift" | "alt" | "ctrl" | "cmd" | "fn" | "control" | "platform" | "function") { return }
         let m = k.modifiers;
-        let key = k.unparse();
+        let key = k.unparse(crate::shortcuts::HOST_OS);
         if !(m.platform || m.control || m.alt) { self.hotkey_error = Some(tr("请包含 ⌘、⌃ 或 ⌥", "Include ⌘, ⌃ or ⌥")); }
         else if key == "cmd-alt-space" || key == "alt-cmd-space" { self.hotkey_error = Some(tr("⌘ ⌥ Space 用于打开上次的文档，请换一个", "⌘ ⌥ Space opens the last document; pick another")); }
         else { self.hotkey = key; self.hotkey_error = None; return self.stop_recording(cx) }
@@ -650,7 +652,7 @@ impl Onboarding {
                 cx.notify();
             }))
             .child(div().w(px(160.)).py(px(ui::MENU_PAD_Y)).flex().flex_col().children(rows));
-        let menu = anchored().anchor(Corner::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu);
+        let menu = anchored().anchor(Anchor::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu);
         // A replay is itself drawn deferred, over the notes, and deferred
         // drawing cannot nest: there the menu is simply the page's last child.
         Some(if self.replay { menu.into_any_element() } else { deferred(menu).with_priority(2).into_any_element() })

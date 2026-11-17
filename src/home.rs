@@ -536,14 +536,14 @@ impl Workspace {
     fn open_row_menu(&mut self, id: &str, key: &str, cx: &mut Context<Self>) {
         let b = self.more_bounds.borrow().get(key).copied();
         let Some(b) = b else { return };
-        self.row_menu = Some(RowMenu { id: id.to_string(), pos: point(b.right(), b.bottom() + px(2.)), corner: Corner::TopRight, sub: false, batch: false });
+        self.row_menu = Some(RowMenu { id: id.to_string(), pos: point(b.right(), b.bottom() + px(2.)), corner: Anchor::TopRight, sub: false, batch: false });
         cx.notify();
     }
 
     pub(crate) fn home_more(&self, e: &Entry, key: String, cx: &mut Context<Self>) -> Stateful<Div> {
         let id = e.id.clone();
         let (rec, k2) = (self.more_bounds.clone(), key.clone());
-        let open = self.row_menu.as_ref().is_some_and(|m| m.id == e.id && m.pos.x > px(0.) && m.corner == Corner::TopRight);
+        let open = self.row_menu.as_ref().is_some_and(|m| m.id == e.id && m.pos.x > px(0.) && m.corner == Anchor::TopRight);
         div()
             .id(SharedString::from(key.clone()))
             .relative()
@@ -743,8 +743,8 @@ impl Workspace {
         let cols = self.home.cols();
         let sort = self.home.sort_col();
         // The title is sized at about three times a column.
-        let title_cell = || div().flex_grow().flex_shrink().flex_basis(relative(0.)).min_w(px(200.));
-        let col_cell = || div().flex_grow().flex_shrink().flex_basis(relative(0.)).max_w(px(240.)).min_w(px(120.));
+        let title_cell = || div().flex_grow_1().flex_shrink_1().flex_basis(relative(0.)).min_w(px(200.));
+        let col_cell = || div().flex_grow_1().flex_shrink_1().flex_basis(relative(0.)).max_w(px(240.)).min_w(px(120.));
         // The list: 13pt tertiary headers over a hairline; the
         // sorted column in the text colour, semibold, with its arrow.
         let mut header = div()
@@ -812,7 +812,7 @@ impl Workspace {
                 .when(check.is_none(), |d| d.on_mouse_down(
                     MouseButton::Right,
                     cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
-                        w.row_menu = Some(RowMenu { id: id2.clone(), pos: ev.position, corner: Corner::TopLeft, sub: false, batch: false });
+                        w.row_menu = Some(RowMenu { id: id2.clone(), pos: ev.position, corner: Anchor::TopLeft, sub: false, batch: false });
                         cx.notify();
                     }),
                 ))
@@ -868,11 +868,13 @@ impl Workspace {
                     }))
             }).collect()
         }))
-        // The last row's own 16 plus 16 more: 32 below the cards, like the
-        // list view's 24 and clear of the window's rounded corner.
+        // The last row's own 16 plus 32 more: 48 below the cards at the end,
+        // clear of the window's rounded corner.
         // The top padding sits inside the list's clip, so a folder's papers can
-        // rise above the first row without being cut off.
-        .flex_1().min_h_0().pt(px(14.)).pb(px(16.)).track_scroll(grid_scroll.clone());
+        // rise above the first row without being cut off. (28 and 32: GPUI
+        // 0.2's uniform_list counted its padding twice, and the cards sit and
+        // end where that put them.)
+        .flex_1().min_h_0().pt(px(28.)).pb(px(32.)).track_scroll(grid_scroll);
         let scroll = grid_scroll.0.borrow().base_handle.clone();
         div().relative().flex_1().min_h_0().mt(px(-4.)).flex().flex_col()
             .on_mouse_move(cx.listener(|w, ev: &MouseMoveEvent, _, cx| w.track_home_press(ev, cx)))
@@ -943,7 +945,7 @@ impl Workspace {
                     .when(check.is_none(), |d| d.on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
-                            w.row_menu = Some(RowMenu { id: id2.clone(), pos: ev.position, corner: Corner::TopLeft, sub: false, batch: false });
+                            w.row_menu = Some(RowMenu { id: id2.clone(), pos: ev.position, corner: Anchor::TopLeft, sub: false, batch: false });
                             cx.notify();
                         }),
                     ))
@@ -969,7 +971,7 @@ impl Workspace {
         if self.view != crate::app::View::Home {
             return out;
         }
-        let place = |pos: Point<Pixels>, corner: Corner, menu: Stateful<Div>| {
+        let place = |pos: Point<Pixels>, corner: Anchor, menu: Stateful<Div>| {
             deferred(anchored().anchor(corner).position(pos).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element()
         };
         if self.home.sort_menu
@@ -996,7 +998,7 @@ impl Workspace {
                     .child(menu_label(crate::settings::tr("文件夹优先", "Folders first"), g.clone(), gpui::white()).flex_1())
                     .when(self.home.folders_first && self.home.sort != HomeSort::Manual, |d| d.child(menu_glyph("check", 14., g)))
                     .on_click(cx.listener(|w, _, _, cx| { if w.home.sort == HomeSort::Manual { return; } w.home.folders_first = !w.home.folders_first; w.save_home(); w.home.sort_menu = false; cx.notify(); })));
-                out.push(place(point(b.right(), b.bottom() + px(4.)), Corner::TopRight, menu));
+                out.push(place(point(b.right(), b.bottom() + px(4.)), Anchor::TopRight, menu));
             }
         out
     }

@@ -128,7 +128,7 @@ pub fn type_icon(k: Kind, s: f32) -> Div {
 /// The same icon painted into `b` (the inline chip).
 pub fn paint_type_icon(k: Kind, b: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
     for (path, color) in [("editor-icons/file-page.svg", theme::c(kind_color(k))), ("editor-icons/file-fold.svg", theme::rgbaf(255, 255, 255, 0.45)), (glyph(k), gpui::white())] {
-        let _ = window.paint_svg(b, path.into(), TransformationMatrix::unit(), color, cx);
+        let _ = window.paint_svg(b, path.into(), None, TransformationMatrix::unit(), color, cx);
     }
 }
 
@@ -844,7 +844,7 @@ impl Editor {
                 window.prevent_default();
             })
             .child(bar);
-        Some(at(self.rel(point(px(x), px(y))), Corner::TopLeft, el))
+        Some(at(self.rel(point(px(x), px(y))), Anchor::TopLeft, el))
     }
 
     /// The hover card of an inline attachment: 下载 | 文本视图 · 卡片视图 ·
@@ -886,7 +886,7 @@ impl Editor {
                     window.prevent_default();
                     if e.core.inline_to_file(p, v).is_some() {
                         e.hide_button_card(cx);
-                        window.focus(&e.focus);
+                        window.focus(&e.focus, cx);
                         e.changed(window, cx);
                     }
                 }),
@@ -904,7 +904,7 @@ impl Editor {
                 window.prevent_default();
             })
             .child(bar);
-        Some(at(self.rel(point(r.center().x - px(w / 2.), r.top() - px(4.))), Corner::BottomLeft, el))
+        Some(at(self.rel(point(r.center().x - px(w / 2.), r.top() - px(4.))), Anchor::BottomLeft, el))
     }
 
     // ---- inserting
@@ -956,7 +956,7 @@ impl Editor {
                         e.core.sel = Selection::caret(Pos::new(p, 0));
                     }
                 }
-                window.focus(&e.focus);
+                window.focus(&e.focus, cx);
                 e.changed(window, cx);
             });
         })

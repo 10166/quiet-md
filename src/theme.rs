@@ -271,7 +271,7 @@ pub mod craft {
 /// Shadows stay black; on the dark page they need more weight to show.
 fn shadow(a: f32, y: f32, blur: f32, spread: f32) -> BoxShadow {
     let a = if dark() { (a * 3.).min(0.6) } else { a };
-    BoxShadow { color: rgbaf(0, 0, 0, a), offset: point(px(0.), px(y)), blur_radius: px(blur), spread_radius: px(spread) }
+    BoxShadow { color: rgbaf(0, 0, 0, a), offset: point(px(0.), px(y)), blur_radius: px(blur), spread_radius: px(spread), inset: false }
 }
 
 /// Menus and dropdowns: macOS 26 menu panel, soft and wide.

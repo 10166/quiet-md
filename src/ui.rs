@@ -656,13 +656,6 @@ fn truncated(line: &ShapedLine, runs: &[TextRun], suffix: &str, font_size: Pixel
     window.text_system().shape_line(s, font_size, &out, None)
 }
 
-impl IntoElement for UiText {
-    type Element = Self;
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
 impl Element for UiText {
     type RequestLayoutState = UiTextLayout;
     type PrepaintState = Option<ShapedLine>;
@@ -686,7 +679,7 @@ impl Element for UiText {
         let font_size = style.font_size.to_pixels(window.rem_size());
         let line_height = style.line_height.to_pixels(font_size.into(), window.rem_size());
         let runs = if self.text.is_empty() { vec![] } else { self.runs(&style) };
-        let ellipsis = style.text_overflow.as_ref().map(|TextOverflow::Truncate(s)| s.clone());
+        let ellipsis = style.text_overflow.as_ref().map(|(TextOverflow::Truncate(s) | TextOverflow::TruncateStart(s) | TextOverflow::TruncateMiddle(s))| s.clone());
         let full = Rc::new(RefCell::new(None));
         let (text, r, f, clip) = (self.text.clone(), runs.clone(), full.clone(), ellipsis.is_some());
         let id = window.request_measured_layout(Style::default(), move |known, avail, window, _| {
@@ -736,7 +729,7 @@ impl Element for UiText {
         cx: &mut App,
     ) {
         if let Some(line) = line {
-            let _ = line.paint(bounds.origin, layout.line_height, window, cx);
+            let _ = line.paint(bounds.origin, layout.line_height, TextAlign::Left, None, window, cx);
         }
     }
 }
@@ -750,13 +743,6 @@ pub fn ui_para(text: impl Into<SharedString>) -> UiPara {
 pub struct UiPara {
     text: SharedString,
     inner: Option<StyledText>,
-}
-
-impl IntoElement for UiPara {
-    type Element = Self;
-    fn into_element(self) -> Self {
-        self
-    }
 }
 
 impl Element for UiPara {
@@ -821,7 +807,7 @@ fn squircle_points(b: Bounds<Pixels>, radius: f32, i: f32) -> Vec<Point<Pixels>>
     let r = (radius - i).max(0.).min(w / 2.).min(h / 2.);
     const N: usize = 24;
     let mut out = Vec::with_capacity(4 * (N + 1));
-    // Corner centres with the directions to the corner's start and end edges.
+    // Anchor centres with the directions to the corner's start and end edges.
     for (cx, cy, ax, ay, bx, by) in [(x + w - r, y + r, 0., -1., 1., 0.), (x + w - r, y + h - r, 1., 0., 0., 1.), (x + r, y + h - r, 0., 1., -1., 0.), (x + r, y + r, -1., 0., 0., -1.)] {
         for k in 0..=N {
             let t = std::f32::consts::FRAC_PI_2 * k as f32 / N as f32;
@@ -832,7 +818,7 @@ fn squircle_points(b: Bounds<Pixels>, radius: f32, i: f32) -> Vec<Point<Pixels>>
     out
 }
 
-pub(crate) fn squircle_path(b: Bounds<Pixels>, radius: f32, i: f32, mut pb: PathBuilder) -> Option<Path<Pixels>> {
+pub(crate) fn squircle_path(b: Bounds<Pixels>, radius: f32, i: f32, mut pb: PathBuilder) -> Option<Path> {
     // lyon panics on a collapsed outline (a box not laid out yet).
     if f32::from(b.size.width) <= 2. * i + 1. || f32::from(b.size.height) <= 2. * i + 1. || radius <= i { return None }
     let pts = squircle_points(b, radius, i);

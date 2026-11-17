@@ -566,7 +566,7 @@ impl Workspace {
                 cx.notify();
             }))
             .child(div().id("theme-menu-list").w(px(200.)).max_h(px(302.)).overflow_y_scroll().py(px(ui::MENU_PAD_Y)).flex().flex_col().children(rows));
-        Some(deferred(anchored().anchor(Corner::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
+        Some(deferred(anchored().anchor(Anchor::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
     }
 
     /// A choice as a dropdown button, like 界面语言's: the picked label, a menu of the rest.
@@ -606,7 +606,7 @@ impl Workspace {
                 cx.notify();
             }))
             .child(div().min_w(px(160.)).py(px(ui::MENU_PAD_Y)).flex().flex_col().children(rows));
-        Some(deferred(anchored().anchor(Corner::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
+        Some(deferred(anchored().anchor(Anchor::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
     }
 
     fn pick_pref(&mut self, i: usize, cx: &mut Context<Self>) {
@@ -652,7 +652,7 @@ impl Workspace {
                 cx.notify();
             }))
             .child(div().w(px(160.)).py(px(ui::MENU_PAD_Y)).flex().flex_col().children(rows));
-        Some(deferred(anchored().anchor(Corner::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
+        Some(deferred(anchored().anchor(Anchor::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
     }
 
     /// Keys while the language dropdown is open; true when used.
@@ -1040,7 +1040,7 @@ pub(crate) fn update_pill(cx: &mut Context<Workspace>) -> Option<AnyElement> {
     };
     let fill = if let State::Downloading(m) = &state { Some(crate::update::progress(m)) } else { None };
     let busy = matches!(state, State::Downloading(_) | State::Installing(_));
-    Some(div().id("update-pill").no_drag().flex_shrink().min_w_0().h(px(24.)).px(px(10.)).relative().overflow_hidden().flex().items_center().justify_center().rounded_full()
+    Some(div().id("update-pill").no_drag().flex_shrink_1().min_w_0().h(px(24.)).px(px(10.)).relative().overflow_hidden().flex().items_center().justify_center().rounded_full()
         .text_size(px(theme::ui_font_small())).line_height(px(theme::ui_font_small() + 4.)).font_weight(FontWeight::MEDIUM)
         .when(!busy, |d| d.cursor_pointer().bg(Theme::primary()).text_color(gpui::white()).hover(|s| s.opacity(0.9)))
         .when(busy, |d| d.bg(Theme::sidebar_hover()).text_color(Theme::text_caption()))

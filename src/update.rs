@@ -72,7 +72,7 @@ pub fn init(cx: &mut App) {
     cx.spawn(async |cx| {
         cx.background_executor().timer(Duration::from_secs(10)).await;
         loop {
-            if cx.update(|cx| if crate::settings::prefs().auto_update { check(false, cx) }).is_err() { break }
+            cx.update(|cx| if crate::settings::prefs().auto_update { check(false, cx) });
             cx.background_executor().timer(Duration::from_secs(12 * 3600)).await;
         }
     }).detach();
@@ -101,7 +101,7 @@ pub fn check(manual: bool, cx: &mut App) {
     let task = cx.background_executor().spawn(async { fetch_manifest() });
     cx.spawn(async move |cx| {
         let result = task.await;
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             let state = match result {
                 Ok(Some(m)) => State::Available(m),
                 Ok(None) => State::Current,
@@ -141,12 +141,12 @@ pub fn download(cx: &mut App) {
     // Redraw the progress (read off the partial file) while the download runs.
     cx.spawn(async |cx| loop {
         cx.background_executor().timer(Duration::from_millis(300)).await;
-        if !cx.update(|cx| if matches!(state(cx), State::Downloading(_)) { cx.refresh_windows(); true } else { false }).unwrap_or(false) { break }
+        if !cx.update(|cx| if matches!(state(cx), State::Downloading(_)) { cx.refresh_windows(); true } else { false }) { break }
     }).detach();
     let task = cx.background_executor().spawn({ let m = m.clone(); async move { fetch_package(&m) } });
     cx.spawn(async move |cx| {
         let result = task.await;
-        let _ = cx.update(|cx| set(match result { Ok(path) => State::Ready(m, path), Err(e) => State::Failed(e) }, cx));
+        cx.update(|cx| set(match result { Ok(path) => State::Ready(m, path), Err(e) => State::Failed(e) }, cx));
     }).detach();
 }
 

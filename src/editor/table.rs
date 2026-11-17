@@ -141,7 +141,7 @@ impl Editor {
     /// extends) and follow the pointer along the bar. On an already selected
     /// segment it picks the selected lines up to move them instead.
     fn bar_down(&mut self, table: BlockId, cols: bool, i: usize, p: Point<Pixels>, shift: bool, window: &mut Window, cx: &mut Context<Self>) {
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         self.menu = None;
         self.slash = None;
         self.toolbar_hidden = false;
@@ -344,7 +344,7 @@ impl Editor {
         self.core.block_sel = None;
         self.core.table_insert(table, cols, at);
         self.tables.insert = None;
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         self.changed(window, cx);
     }
 }
@@ -408,13 +408,6 @@ struct Sticky {
     child: AnyElement,
     st: Rc<StickyState>,
     lead: Option<(BlockId, Stuck)>,
-}
-
-impl IntoElement for Sticky {
-    type Element = Self;
-    fn into_element(self) -> Self {
-        self
-    }
 }
 
 impl Element for Sticky {

@@ -103,7 +103,10 @@ fn set_app_icon() {
 pub(crate) fn main_window_options(scripted: bool, at: Option<Bounds<Pixels>>, cx: &mut App) -> WindowOptions {
     // Scripted dev runs must not steal keyboard focus from whatever the
     // user is typing into.
-    let bounds = at.unwrap_or_else(|| Bounds::centered(None, quick_note::main_window_size(cx), cx));
+    let mut bounds = at.unwrap_or_else(|| Bounds::centered(None, quick_note::main_window_size(cx), cx));
+    // A half-point origin (an odd leftover height) makes AppKit grow the
+    // window by a point when it aligns the frame to pixels.
+    bounds.origin = bounds.origin.map(|v| v.round());
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_background: crate::theme::window_background(),
@@ -115,6 +118,9 @@ pub(crate) fn main_window_options(scripted: bool, at: Option<Bounds<Pixels>>, cx
             traffic_light_position: Some(point(px(20.), px(app::HEADER_H / 2. - 7.))),
         }),
         window_min_size: Some(size(px(app::DOC_MIN_W), px(480.))),
+        // AppKit does not drag from the transparent title bar: the app marks its
+        // own drag areas (ui::TitleBarExt) and moves the window itself.
+        app_owns_titlebar_drag: true,
         focus: !scripted,
         ..Default::default()
     }
@@ -178,7 +184,7 @@ fn main() {
     if !scripted && !onboard && let Err(err) = guides::initialize(&root) {
         logging::fatal(&format!("无法初始化文档库 / Could not set up the library at {}", root.display()), &err);
     }
-    let app = Application::new().with_assets(assets::Assets);
+    let app = gpui_platform::application().with_assets(assets::Assets);
     // Markdown files opened from the Finder or the command line are edited in place.
     let incoming = local_files::Incoming::from_args();
     let urls = incoming.clone();
@@ -189,6 +195,9 @@ fn main() {
     app.run(move |cx: &mut App| {
         #[cfg(target_os = "macos")]
         set_app_icon();
+        // The editor and fields hide the pointer themselves while typing
+        // (`pointer_hidden`); GPUI would also hide it for shortcuts.
+        cx.set_cursor_hide_mode(CursorHideMode::Never);
         editor::math::load_fonts(cx);
         editor::image::init_pictures(cx);
         input::bind_keys(cx);
@@ -201,7 +210,7 @@ fn main() {
         themes::load(&settings::prefs().theme_id(), false, || cx.text_system().all_font_names());
         let quick_enabled = !scripted;
         if onboard { onboarding::open(scripted, incoming, cx); } else { start(existed, scripted, None, incoming, cx); }
-        cx.on_window_closed(move |cx| {
+        cx.on_window_closed(move |cx, _| {
             // Closing first launch's window before it finished quits: there is no library yet.
             if (!quick_enabled || !cfg!(target_os = "macos") || onboarding::pending()) && cx.windows().is_empty() {
                 cx.quit();

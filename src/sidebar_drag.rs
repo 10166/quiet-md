@@ -239,7 +239,7 @@ impl Workspace {
             self.folder_drag.icon_press = false;
             self.folder_drag.icon_alt = false;
             self.row_menu = None; self.create_menu = None;
-            window.focus(&self.focus);
+            window.focus(&self.focus, cx);
         }
         self.project_folder_drop();
         cx.notify();

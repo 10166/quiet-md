@@ -136,7 +136,7 @@ impl Incoming {
     pub fn deliver(self, cx: &mut App) {
         cx.spawn(async move |cx| loop {
             if !self.0.borrow().is_empty() {
-                let _ = cx.update(|cx| {
+                cx.update(|cx| {
                     let target = cx.active_window().and_then(|w| w.downcast::<Workspace>())
                         .or_else(|| cx.windows().into_iter().find_map(|w| w.downcast::<Workspace>()));
                     let Some(target) = target else { return };
