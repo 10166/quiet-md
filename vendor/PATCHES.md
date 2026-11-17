@@ -81,6 +81,7 @@ $V refresh                    # 用当前快照重写所有补丁的 diff（只�
 | 0031 board-paths | 34、35 | `gpui/path_builder.rs`、`window.rs` | `Path::transformed`（等比缩放加平移，对单调二次曲线是精确的）、`empty`、`is_empty`、`from_polygons`；`PathBuilder::build_polygons`（轮廓按容差展平成多边形，保留每条轮廓）；`Window::with_element_opacity` 改为 `pub`。画板按元素缓存路径、随视图平移缩放复用；框架裁剪和箭头标签挖空在展平的轮廓上做（`src/board/render_geom.rs`），上游的 `Path` 不再保留轮廓顺序，也没有三角形 |
 | 0032 cosmic-bundled-fonts | 43、38 | `gpui_wgpu/cosmic_text_system.rs` | `add_fonts` 加入的字形替换系统里同字族、同样式的已有字形（Fedora 的 COLRv1 Noto Color Emoji 让位给内置的 CBDT 版）；Xiaolai 没有 `m` 字形也加载。Linux 和网页 |
 | 0033 glyph-outline | 37、38 | `gpui/platform.rs`、`text_system.rs`、`gpui_apple/text_system.rs`、`gpui_windows/direct_write.rs`（加 `Win32_Graphics_Direct2D_Common`）、`gpui_wgpu/cosmic_text_system.rs`、`gpui_web/text_system.rs` | `WindowTextSystem::glyph_outline` 和 `GlyphOutlineCmd`：字形轮廓（字体单位、y 向上）。macOS 用 font-kit（合成斜体同样错切），Windows 用 DirectWrite `GetGlyphRunOutline`，Linux 和网页用 swash；网页的画布回退字体没有。画板的 CPU 渲染（vello）和旋转文字用它。macOS 加载没有 `m` 字形的 Xiaolai |
+| 0034 image-into-frames | 新 | `gpui/assets.rs` | `RenderImage::into_frames`：取回图片的帧。画板的 vello 帧每次画面变化新建一张图片，上一张 `drop_image` 后把它的缓冲取回，下一帧 vello 直接画进去（`src/board/render_vello.rs`），省掉每帧新分配和拷贝 12 MB |
 
 ## 没有再带的旧补丁
 

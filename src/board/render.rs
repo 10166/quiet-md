@@ -12,8 +12,8 @@
 //!
 //! Backends, the same on every platform: this GPUI painter, and above
 //! `VELLO_ABOVE` visible elements (for thumbnails above `THUMB_VELLO`) the
-//! vello_cpu painter of `render_vello.rs`, its frame shown with
-//! `Window::paint_pixels`; the frame is reused
+//! vello_cpu painter of `render_vello.rs`, its frame shown as a GPUI
+//! image; the frame is reused
 //! while scene, view and theme stay the same. Both draw from the same
 //! caches (display list, bounds, frame clip) and the same paint order,
 //! kept while the scene is unchanged (tools/perf/board-results.md).
@@ -70,7 +70,14 @@ fn backend() -> Backend {
 fn profiling() -> bool { static P: LazyLock<bool> = LazyLock::new(|| std::env::var_os("FDL_BOARD_PROF").is_some()); *P }
 /// Auto: vello from this many visible elements on, back to GPUI below
 /// `VELLO_BELOW` (tools/perf/board-results.md); thumbnails from `THUMB_VELLO`.
+/// Measured on macOS; vello's fixed cost per frame is higher on Windows.
+#[cfg(target_os = "macos")]
+const VELLO_ABOVE: usize = 600;
+#[cfg(target_os = "macos")]
+const VELLO_BELOW: usize = 400;
+#[cfg(not(target_os = "macos"))]
 const VELLO_ABOVE: usize = 800;
+#[cfg(not(target_os = "macos"))]
 const VELLO_BELOW: usize = 500;
 const THUMB_VELLO: usize = 64;
 
