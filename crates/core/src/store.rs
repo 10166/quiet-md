@@ -293,6 +293,10 @@ pub struct Store {
     /// and remembered in `.quiet/index.json`, but nothing in a file refers
     /// to them: links are relative paths.
     index: HashMap<String, Meta>,
+    /// Index entries for files this build does not know (a newer build's
+    /// document kinds), written back unchanged so their ids and settings
+    /// survive this build's writes (an older build dropped 画板 this way).
+    foreign: DiskIndex,
     trash: HashMap<String, Trashed>,
     /// The old layout (FORMAT 3: `docs/<id>.xml`, folders only in the index,
     /// the app's files at the top), kept until the user agrees to the move.
@@ -501,6 +505,12 @@ fn load_json<T: serde::de::DeserializeOwned + Default>(path: &std::path::Path, w
 }
 
 /// A JSON file as another copy of the app left it, if it can be read right now.
+/// The entries of `.quiet/index.json` for files of kinds this build does not know.
+fn foreign_of(disk: &DiskIndex) -> DiskIndex {
+    disk.iter().filter(|(k, _)| !k.ends_with('/') && !k.split('/').any(|p| p.is_empty() || p.starts_with('.')) && DocKind::of_name(k).is_none())
+        .map(|(k, a)| (k.clone(), a.clone())).collect()
+}
+
 fn reread<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Option<T> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
@@ -748,7 +758,7 @@ impl Store {
         }
         let base = if flat { root.clone() } else { internal.clone() };
         let trash = load_json(&base.join("trash").join("index.json"), "回收站索引", &mut warnings);
-        let mut store = Store { file_changes: vec![], root, index: HashMap::new(), trash, flat, warnings, migrated: None, loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), batch: Default::default() };
+        let mut store = Store { file_changes: vec![], root, index: HashMap::new(), foreign: DiskIndex::new(), trash, flat, warnings, migrated: None, loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), batch: Default::default() };
         if flat {
             store.index = load_json(&base.join("index.json"), "文档索引", &mut store.warnings);
             store.flat_folders()?;
@@ -756,6 +766,7 @@ impl Store {
             let disk: DiskIndex = load_json(&internal.join("index.json"), "文档索引", &mut store.warnings);
             let local = store.read_local();
             store.index = store.from_disk(&disk, &local);
+            store.foreign = foreign_of(&disk);
             store.load_parsed();
         }
         if let Ok(entries) = std::fs::read_dir(store.recovery_dir()) {
@@ -832,6 +843,13 @@ impl Store {
             index.insert(id.clone(), m);
         }
         index
+    }
+
+    /// What `.quiet/index.json` holds: this build's entries and the ones it keeps for others.
+    fn disk_index(&self) -> DiskIndex {
+        let mut disk = self.to_disk();
+        for (k, a) in &self.foreign { disk.entry(k.clone()).or_insert_with(|| a.clone()); }
+        disk
     }
 
     fn to_disk(&self) -> DiskIndex {
@@ -999,18 +1017,41 @@ impl Store {
         if self.flat {
             if let Some(index) = reread(&self.index_file()) { self.index = index; }
         } else if let Some(disk) = reread::<DiskIndex>(&self.index_file()) {
+            let before = std::mem::take(&mut self.index);
             let local = self.read_local();
             self.index = self.from_disk(&disk, &local);
+            self.foreign = foreign_of(&disk);
+            self.reclaim_open(before);
         }
         if let Some(trash) = reread(&self.trash_index_file()) { self.trash = trash; }
         Ok(lock)
+    }
+
+    /// An editor still open on a document whose entry another copy of the app
+    /// dropped (an older build that does not know its kind) keeps its id while
+    /// its file is where it was: the index re-read gave the file a new id, or none.
+    fn reclaim_open(&mut self, before: HashMap<String, Meta>) {
+        let open: Vec<String> = self.loaded.borrow().keys().filter(|id| !self.index.contains_key(*id)).cloned().collect();
+        let mut changed = false;
+        for id in open {
+            let Some(old) = before.get(&id).filter(|m| !m.local() && m.folder.is_none() && !m.rel.is_empty()) else { continue };
+            let other = self.index.iter().find(|(_, m)| !m.local() && m.folder.is_none() && m.rel == old.rel).map(|(k, _)| k.clone());
+            match other {
+                Some(other) => { self.index.remove(&other); }
+                None if self.abs(&old.rel).exists() => {}
+                None => continue,
+            }
+            self.index.insert(id, old.clone());
+            changed = true;
+        }
+        if changed { derive_tree(&mut self.index); }
     }
 
     fn save_index(&self) -> Result<()> {
         if self.batch.lock.is_some() { self.batch.index.set(true); return Ok(()); }
         // The old layout keeps everything in its index, as older builds expect.
         if self.flat { return save_json(&self.index_file(), &self.index); }
-        save_json(&self.index_file(), &self.to_disk())?;
+        save_json(&self.index_file(), &self.disk_index())?;
         self.save_local(&self.local_state())
     }
 
@@ -1169,6 +1210,7 @@ impl Store {
     fn relocate(&mut self, moves: &[(String, String)]) -> Result<()> {
         anyhow::ensure!(!self.flat, "旧格式的文档库没有真实文件夹");
         let mut new_rel: HashMap<String, String> = HashMap::new();
+        let mut dirs: Vec<(String, &str)> = vec![];
         for (id, to) in moves {
             let m = self.index.get(id).ok_or_else(|| anyhow::anyhow!("文档或文件夹不存在"))?;
             anyhow::ensure!(!m.local(), "本机文件不能移入文档库的文件夹");
@@ -1178,6 +1220,7 @@ impl Store {
                 for (k, c) in &self.index {
                     if let Some(rest) = c.rel.strip_prefix(&prefix) && !c.local() { new_rel.insert(k.clone(), format!("{to}/{rest}")); }
                 }
+                dirs.push((prefix, to));
             }
             new_rel.insert(id.clone(), to.clone());
         }
@@ -1213,6 +1256,9 @@ impl Store {
             done.push((from, dest));
         }
         for (k, rel) in &new_rel { if let Some(m) = self.index.get_mut(k) { m.rel = rel.clone(); } }
+        // Files of kinds this build does not know went with their folders.
+        self.foreign = std::mem::take(&mut self.foreign).into_iter()
+            .map(|(k, a)| (dirs.iter().find_map(|(p, to)| k.strip_prefix(p.as_str()).map(|rest| format!("{to}/{rest}"))).unwrap_or(k), a)).collect();
         derive_tree(&mut self.index);
         for (k, text, doc) in docs {
             let out = self.serialize_doc(&k, &doc, None);
@@ -1422,7 +1468,7 @@ impl Store {
         let disk = if self.is_markdown(id) || self.loaded.borrow().contains_key(id) { std::fs::read_to_string(self.path(id)).ok() } else { None };
         let (xml, copies) = self.serialize_with_copies(id, doc, disk.as_deref());
         if let Some(previous) = self.loaded.borrow().get(id) {
-            let disk = disk.as_deref().ok_or_else(|| anyhow::anyhow!("无法读取文档"))?;
+            let disk = disk.as_deref().ok_or_else(|| anyhow::anyhow!("文档文件已不在原处，可能已被移动或删除"))?;
             let message = if self.index.get(id).is_some_and(Meta::local) { "文件已在别处被修改，未覆盖磁盘内容。请另存副本或重新打开文件" } else { "文档已被另一个实例修改，未覆盖磁盘内容。请另存副本或重新载入磁盘版本" };
             anyhow::ensure!(disk == previous || disk == xml, "{message}");
         }
@@ -2252,6 +2298,54 @@ mod tests {
     }
 
     #[test]
+    fn index_keeps_entries_of_unknown_kinds() {
+        // A newer build's file kind: this build neither lists it nor drops its entry.
+        let lib = Lib::new("foreign");
+        let mut s = lib.open();
+        let (id, doc) = s.create().unwrap();
+        let folder = s.create_folder("草图", None).unwrap();
+        std::fs::write(lib.0.join("草图/新东西.future"), "{}").unwrap();
+        let index = lib.0.join(".quiet/index.json");
+        let mut disk: DiskIndex = serde_json::from_slice(&std::fs::read(&index).unwrap()).unwrap();
+        disk.insert("草图/新东西.future".into(), Attached { id: "keep-me".into(), pinned: true, ..Attached::of("", &Meta::default()) });
+        std::fs::write(&index, serde_json::to_vec(&disk).unwrap()).unwrap();
+        let entry = |key: &str| serde_json::from_slice::<DiskIndex>(&std::fs::read(&index).unwrap()).unwrap().get(key).map(|a| (a.id.clone(), a.pinned));
+        assert!(s.list().iter().all(|e| e.id != "keep-me"));
+        s.save(&id, &doc).unwrap();
+        assert_eq!(entry("草图/新东西.future"), Some(("keep-me".into(), true)));
+        // Renaming its folder takes the entry along.
+        s.rename(&folder, "图").unwrap();
+        assert_eq!((entry("草图/新东西.future"), entry("图/新东西.future")), (None, Some(("keep-me".into(), true))));
+    }
+
+    #[test]
+    fn an_open_board_survives_a_build_that_drops_it() {
+        // An older build rewrites the index without the 画板; the open editor still saves.
+        let lib = Lib::new("dropped");
+        let mut s = lib.open();
+        let b = crate::whiteboard::Board::from_file(include_str!("../tests/fixtures/board/all-elements.excalidraw")).unwrap();
+        let id = s.create_board_in("流程", &b, None).unwrap();
+        let mut d = s.load_for_edit(&id, false).unwrap();
+        let index = lib.0.join(".quiet/index.json");
+        let rewrite = |f: &dyn Fn(&mut DiskIndex)| {
+            let mut disk: DiskIndex = serde_json::from_slice(&std::fs::read(&index).unwrap()).unwrap();
+            f(&mut disk);
+            std::fs::write(&index, serde_json::to_vec(&disk).unwrap()).unwrap();
+        };
+        let edit = |d: &mut Document, o: f64| { let crate::model::BlockKind::Board(bd) = &mut d.blocks[0].kind else { panic!("not a board") }; std::sync::Arc::make_mut(bd).elements[0].opacity = o; };
+        rewrite(&|disk| { disk.remove("流程.excalidraw"); });
+        edit(&mut d, 50.);
+        s.save(&id, &d).unwrap();
+        // Or found again by a later `list`, under a new id.
+        rewrite(&|disk| { disk.get_mut("流程.excalidraw").unwrap().id = "found-again".into(); });
+        edit(&mut d, 40.);
+        s.save(&id, &d).unwrap();
+        let ids: Vec<String> = s.list().into_iter().filter(|e| e.meta.kind == DocKind::Board).map(|e| e.id).collect();
+        assert_eq!(ids, vec![id.clone()]);
+        assert_eq!(crate::whiteboard::write_file(&s.load(&id).unwrap()), std::fs::read_to_string(lib.0.join("流程.excalidraw")).unwrap());
+    }
+
+    #[test]
     fn markdown_documents_stay_markdown() {
         let lib = Lib::new("markdown");
         let mut s = lib.open();
@@ -2654,7 +2748,7 @@ mod tests {
         let index = std::fs::read(trash.join("index.json")).unwrap();
         std::fs::rename(&trash, lib.0.join(".quiet/trash-away")).unwrap();
         std::fs::write(&trash, b"").unwrap();
-        let mut s = Store { file_changes: vec![], root: lib.0.clone(), index: HashMap::new(), flat: false, migrated: None, trash: serde_json::from_slice(&index).unwrap(), warnings: vec![], loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), batch: Default::default() };
+        let mut s = Store { file_changes: vec![], root: lib.0.clone(), index: HashMap::new(), foreign: DiskIndex::new(), flat: false, migrated: None, trash: serde_json::from_slice(&index).unwrap(), warnings: vec![], loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), batch: Default::default() };
         assert_eq!(s.list_trash().len(), 1);
         assert_eq!(s.trash.len(), 1);
     }
