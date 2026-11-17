@@ -20,7 +20,7 @@ pub enum ToastKind {
 /// Toast: a white rounded card 32px below the top, centred, with a filled
 /// status circle (green check / red x / accent i). It lasts 3s and fades over
 /// its last .3s; None once it is over.
-pub fn toast_el(kind: ToastKind, msg: &SharedString, t0: std::time::Instant, window: &mut Window) -> Option<AnyElement> {
+pub fn toast_el(kind: ToastKind, msg: &SharedString, t0: web_time::Instant, window: &mut Window) -> Option<AnyElement> {
     let e = t0.elapsed().as_secs_f32();
     if e >= 3. {
         return None;
@@ -845,8 +845,8 @@ pub fn squircle_outline(radius: f32, width: f32, color: Hsla) -> impl IntoElemen
 /// A capsule filled to `fraction` from the left, its edge a moving wave (the
 /// update pill's download progress). Redraws every frame while shown.
 pub fn wave_fill(fraction: f32, color: Hsla) -> impl IntoElement {
-    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-    let t = START.get_or_init(std::time::Instant::now).elapsed().as_secs_f32();
+    static START: std::sync::OnceLock<web_time::Instant> = std::sync::OnceLock::new();
+    let t = START.get_or_init(web_time::Instant::now).elapsed().as_secs_f32();
     canvas(|bounds, _, _| bounds, move |_, b, window, _| {
         window.request_animation_frame();
         let f = fraction.clamp(0., 1.);

@@ -26,6 +26,7 @@ crates = [
     "crates/gpui_windows",
     "crates/gpui_linux",
     "crates/gpui_wgpu",
+    "crates/gpui_web",
 ]
 
 # Directories dropped from every copied crate (not built for a non-member path

@@ -2,6 +2,7 @@
 //! (see `sidebar.rs`) and the editor on the right, with the
 //! 64px top bar (breadcrumb title + save status) above the page.
 
+use fdl_core::vfs::PathExt as _;
 use crate::docinfo::DocInfo;
 use crate::docmenu::DocSub;
 use crate::editor::view::{Editor, EditorEvent};
@@ -15,7 +16,8 @@ use gpui::{prelude::FluentBuilder, *};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// Autosave waits for this pause in editing, but never longer than
 /// SAVE_MAX_DELAY after the oldest change not yet on disk.
@@ -180,7 +182,7 @@ pub fn switch_library(root: std::path::PathBuf, cx: &mut App) {
         return;
     }
     let mine = crate::store::Store::internal_dir().join("preferences.json");
-    if !mine.exists() { let _ = std::fs::create_dir_all(mine.parent().unwrap()).and_then(|_| std::fs::copy(&prefs, &mine)); }
+    if !mine.fs_exists() { let _ = fdl_core::vfs::create_dir_all(mine.parent().unwrap()).and_then(|_| fdl_core::vfs::copy(&prefs, &mine)); }
     cx.restart();
 }
 
@@ -376,7 +378,7 @@ pub struct Workspace {
 
 /// A macOS notification (only logged when scripted).
 fn notify_system(title: &str, body: &str) {
-    if crate::devtools::scripted() {
+    if crate::devtools::scripted() || cfg!(target_family = "wasm") {
         return eprintln!("notification: {title} / {body}");
     }
     let q = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
@@ -1533,7 +1535,8 @@ impl Render for Workspace {
             self.min_w = min_w;
             window.set_window_min_size(size(px(min_w), px(480.)));
             let vs = window.viewport_size();
-            if f32::from(vs.width) < min_w - 0.5 && !window.is_fullscreen() { window.resize(size(px(min_w), vs.height)); }
+            // The web build's window is the page: never resized from here.
+            if f32::from(vs.width) < min_w - 0.5 && !window.is_fullscreen() && !cfg!(target_family = "wasm") { window.resize(size(px(min_w), vs.height)); }
         }
         let sidebar = if self.sidebar_open { Some(if matches!(self.view, View::Settings | View::Trash) { self.render_settings_sidebar(window, cx) } else { self.render_sidebar(window, cx) }) } else { None };
         let row_menu = self.render_row_menu(window, cx);
@@ -1796,7 +1799,7 @@ pub(crate) fn check_save_safety(phase: &str, cx: &mut App) {
                 ws.unsaved = true;
             }).unwrap();
             if name != "C" {
-                std::fs::write(store.file_path(&id).unwrap(), crate::docxml::serialize(&doc(&format!("disk-{name}")))).unwrap();
+                fdl_core::vfs::write(store.file_path(&id).unwrap(), crate::docxml::serialize(&doc(&format!("disk-{name}")))).unwrap();
             }
             windows.push((handle, id));
         }

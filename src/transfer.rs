@@ -3,6 +3,7 @@
 //! or DocxXML files picked straight away. The Word / PDF settings and
 //! 打印选项 only choose what happens to comments, so they are left out.
 
+use fdl_core::vfs::{PathExt as _, KindExt as _};
 use crate::app::Workspace;
 use crate::settings::display_title;
 use crate::model::{Block, BlockKind, Document, RichText};
@@ -46,14 +47,14 @@ pub(crate) fn scan_folder(dir: &Path, depth: usize) -> Option<Scanned> {
     let name = dir.file_name()?.to_string_lossy().into_owned();
     let mut t = Scanned { name, dir: dir.to_path_buf(), dirs: vec![], docs: vec![], files: 0 };
     if depth > 32 { return Some(t); }
-    let mut items: Vec<_> = std::fs::read_dir(dir).ok()?.flatten().collect();
+    let mut items: Vec<_> = fdl_core::vfs::read_dir(dir).ok()?.flatten().collect();
     items.sort_by_key(|e| e.file_name().to_string_lossy().to_lowercase());
     for e in items {
         let p = e.path();
         let n = e.file_name().to_string_lossy().into_owned();
         let Ok(ft) = e.file_type() else { continue };
         if n.starts_with('.') || ft.is_symlink() { continue; }
-        if ft.is_dir() {
+        if ft.fs_is_dir() {
             if matches!(n.as_str(), "node_modules" | "target") { continue; }
             if let Some(sub) = scan_folder(&p, depth + 1).filter(|s| s.files > 0) { t.files += sub.files; t.dirs.push(sub); }
         } else if crate::local_files::is_markdown_path(&p) || p.extension().is_some_and(|x| x.eq_ignore_ascii_case("xml")) {
@@ -213,7 +214,7 @@ fn resolve_images(blocks: &mut [Block], base: &Path) {
 /// A Markdown / TXT file as a page: titled after the file, its leading
 /// `# 标题` dropped when it repeats the name.
 pub fn markdown_document(path: &Path) -> std::io::Result<Document> {
-    let bytes = std::fs::read(path)?;
+    let bytes = fdl_core::vfs::read(path)?;
     let text = String::from_utf8_lossy(&bytes);
     let text = text.trim_start_matches('\u{feff}');
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().trim().to_string();
@@ -267,16 +268,16 @@ impl Workspace {
             let out = crate::markdown::export(&doc, &crate::markdown::Options { sub_pages: &subs, assets: all.then_some(assets.as_str()), ..Default::default() });
             let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
             let mut missing = out.missing;
-            let written = std::fs::write(&path, &out.text).and_then(|_| {
+            let written = fdl_core::vfs::write(&path, &out.text).and_then(|_| {
                 for (src, rel) in &out.files {
                     let to = dir.join(rel);
                     if let Some(p) = to.parent() {
-                        std::fs::create_dir_all(p)?;
+                        fdl_core::vfs::create_dir_all(p)?;
                     }
                     // A missing image only loses itself, but is reported.
                     if crate::store::export_path(&src.to_string_lossy()).ok_or_else(|| anyhow::anyhow!("Asset outside library"))
                         .and_then(|p| crate::store::read_bounded(&p, crate::store::EXPORT_FILE_LIMIT))
-                        .and_then(|bytes| Ok(std::fs::write(&to, bytes)?)).is_err() {
+                        .and_then(|bytes| Ok(fdl_core::vfs::write(&to, bytes)?)).is_err() {
                         missing += 1;
                     }
                 }
@@ -312,7 +313,7 @@ impl Workspace {
                 let mut p = path.into_os_string();
                 p.push(".pdf");
                 path = PathBuf::from(p);
-                if path.exists() {
+                if path.fs_exists() {
                     let msg = crate::localized_format!("已有同名文件：{}", "A file with this name already exists: {}", path.display());
                     let _ = this.update(cx, |w, cx| w.show_toast_kind(ToastKind::Error, &msg, cx));
                     return;
@@ -320,9 +321,9 @@ impl Workspace {
             }
             let _ = this.update(cx, |w, cx| w.show_toast_kind(ToastKind::Info, crate::settings::text("正在导出文档"), cx));
             let html = crate::html::to_html(&doc, &crate::html::Options { sub_pages: &subs });
-            let _ = std::fs::remove_file(&path);
+            let _ = fdl_core::vfs::remove_file(&path);
             let res = printing::run(html, name, Job::Pdf(path.clone()), view, cx).await;
-            let ok = matches!(res, Ok(true)) && path.is_file();
+            let ok = matches!(res, Ok(true)) && path.fs_is_file();
             let _ = this.update(cx, |w, cx| {
                 if ok {
                     w.toast = None;
@@ -686,10 +687,10 @@ impl Workspace {
         use crate::model::*;
         let root = crate::store::Store::root_dir();
         assert!(std::env::var_os("FDL_SCRIPT").is_some() && std::env::var_os("QUIET_MD_HOME").is_some());
-        std::fs::create_dir_all(root.join("assets")).unwrap();
-        std::fs::write(root.join("assets/report.pdf"), b"attachment-content").unwrap();
+        fdl_core::vfs::create_dir_all(root.join("assets")).unwrap();
+        fdl_core::vfs::write(root.join("assets/report.pdf"), b"attachment-content").unwrap();
         let outside = root.parent().unwrap().join("outside-private.txt");
-        std::fs::write(&outside, b"PRIVATE-MUST-NOT-EXPORT").unwrap();
+        fdl_core::vfs::write(&outside, b"PRIVATE-MUST-NOT-EXPORT").unwrap();
         let file = FileBlock { src_kind: "path".into(), src: "assets/report.pdf".into(), name: "Report".into(), view: FileView::Card };
         let mut text = RichText::plain("Attachment: ");
         text.push("\u{fffc}", Marks { inline: Some(crate::docxml::to_inline(InlineKind::File(file))), ..Default::default() });
@@ -717,10 +718,10 @@ mod tests {
 
     #[test]
     fn imports_markdown_file() {
-        let dir = std::env::temp_dir().join(format!("fdl-import-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = fdl_core::vfs::temp_dir().join(format!("fdl-import-{}", fdl_core::vfs::process_id()));
+        fdl_core::vfs::create_dir_all(&dir).unwrap();
         let path = dir.join("周报.md");
-        std::fs::write(&path, "\u{feff}# 周报\n\n第一段\n\n- a\n- b\n\n![图](https://e.com/a.png)\n\n## 小结\n").unwrap();
+        fdl_core::vfs::write(&path, "\u{feff}# 周报\n\n第一段\n\n- a\n- b\n\n![图](https://e.com/a.png)\n\n## 小结\n").unwrap();
         let doc = markdown_document(&path).unwrap();
         assert_eq!(doc.title.text, "周报");
         let kinds: Vec<_> = doc.blocks.iter().map(|b| std::mem::discriminant(&b.kind)).collect();
@@ -730,6 +731,6 @@ mod tests {
         assert!(matches!(&doc.blocks[3].kind, BlockKind::Image { src, .. } if src == "https://e.com/a.png"));
         assert!(matches!(doc.blocks[4].kind, BlockKind::Heading { level: 2, .. }));
         assert_eq!(percent_decode("a%20b%E5%9B%BE.png"), "a b图.png");
-        let _ = std::fs::remove_dir_all(dir);
+        let _ = fdl_core::vfs::remove_dir_all(dir);
     }
 }

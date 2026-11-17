@@ -212,7 +212,7 @@ fn state_path() -> std::path::PathBuf {
 }
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(|| {
-    let s = if cfg!(test) { None } else { std::fs::read(state_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()) };
+    let s = if cfg!(test) { None } else { fdl_core::vfs::read(state_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()) };
     Mutex::new(s.unwrap_or_default())
 });
 
@@ -221,7 +221,7 @@ fn save(s: &State) {
         return;
     }
     if let Ok(b) = serde_json::to_vec_pretty(s) {
-        let _ = std::fs::write(state_path(), b);
+        let _ = fdl_core::vfs::write(state_path(), b);
     }
 }
 

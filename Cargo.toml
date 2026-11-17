@@ -27,7 +27,6 @@ anyhow = "1.0.104"
 async-lock = "3.4"
 dirs = "7.0.0"
 gpui = { path = "vendor/zed/crates/gpui" }
-gpui_platform = { path = "vendor/zed/crates/gpui_platform", features = ["font-kit", "wayland", "x11"] }
 quick-xml = "0.37"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
@@ -36,6 +35,7 @@ uuid = { version = "1.28.0", features = ["v4"] }
 image = { version = "0.25", default-features = false, features = ["png", "tiff"] }
 raw-window-handle = "0.6"
 rustc-hash = "2.1"
+web-time = { version = "1", features = ["serde"] }
 katex-rs = { version = "0.3", default-features = false }
 regex = "1"
 html5ever = "0.27"
@@ -46,6 +46,21 @@ log = "0.4"
 sys-locale = "0.3.2"
 jpeg-decoder = { version = "0.3", default-features = false }
 png = "0.18"
+
+# The web build (wasm32, a live demo for the site) runs single-threaded on stable.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+gpui_platform = { path = "vendor/zed/crates/gpui_platform", features = ["font-kit", "wayland", "x11"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+gpui_platform = { path = "vendor/zed/crates/gpui_platform", default-features = false }
+gpui_web = { path = "vendor/zed/crates/gpui_web", default-features = false }
+futures = "0.3"
+uuid = { version = "1.28.0", features = ["v4", "js"] }
+sys-locale = { version = "0.3.2", features = ["js"] }
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["Window", "Navigator", "Location", "Document", "Element", "Request", "Response", "Url", "UrlSearchParams"] }
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.24"
@@ -78,6 +93,16 @@ codegen-units = 1
 strip = "symbols"
 debug = "line-tables-only"
 split-debuginfo = "packed"
+
+# The web demo (web/build.sh): small over fast, then wasm-opt -Oz.
+[profile.web]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+debug = false
+panic = "abort"
 
 # `objc`'s msg_send! checks `feature = "cargo-clippy"`, which rustc no longer
 # knows about.

@@ -67,6 +67,8 @@ mod trash;
 mod tree;
 mod ui;
 mod update;
+#[cfg(target_family = "wasm")]
+mod web;
 
 use fdl_core::{docxml, lang, markdown, model, palette, paste, store, time};
 
@@ -148,7 +150,8 @@ pub(crate) fn start(existed: bool, scripted: bool, into: Option<&mut Window>, in
         Err(err) => logging::fatal("无法打开文档库 / Could not open the library", &err),
     }
     if let Some(r) = cx.global::<shared_store::SharedStore>().with(|s| s.migrated.take()) { changelog::migrated(&r); }
-    if !scripted { quick_note::install(cx); }
+    // The web build has no global shortcut to register.
+    if !scripted && !cfg!(target_family = "wasm") { quick_note::install(cx); }
     app::set_menus(cx);
     update::init(cx);
     let took = into.map(|window| window.replace_root(cx, app::Workspace::new));
@@ -166,6 +169,27 @@ pub(crate) fn start(existed: bool, scripted: bool, into: Option<&mut Window>, in
     took
 }
 
+/// Fonts, keys, preferences and theme: the same for the desktop and the web build.
+pub(crate) fn init_app(cx: &mut App) {
+    // The editor and fields hide the pointer themselves while typing
+    // (`pointer_hidden`); GPUI would also hide it for shortcuts.
+    cx.set_cursor_hide_mode(CursorHideMode::Never);
+    editor::math::load_fonts(cx);
+    editor::image::init_pictures(cx);
+    input::bind_keys(cx);
+    editor::keymap::bind_keys(cx);
+    editor::image::bind_keys(cx);
+    app::bind_keys(cx);
+    settings::load();
+    settings::apply_appearance(&settings::prefs().appearance);
+    settings::sync_dark(cx);
+    themes::load(&settings::prefs().theme_id(), false, || cx.text_system().all_font_names());
+}
+
+#[cfg(target_family = "wasm")]
+fn main() { web::main() }
+
+#[cfg(not(target_family = "wasm"))]
 fn main() {
     logging::init();
     let scripted = devtools::scripted();
@@ -195,19 +219,7 @@ fn main() {
     app.run(move |cx: &mut App| {
         #[cfg(target_os = "macos")]
         set_app_icon();
-        // The editor and fields hide the pointer themselves while typing
-        // (`pointer_hidden`); GPUI would also hide it for shortcuts.
-        cx.set_cursor_hide_mode(CursorHideMode::Never);
-        editor::math::load_fonts(cx);
-        editor::image::init_pictures(cx);
-        input::bind_keys(cx);
-        editor::keymap::bind_keys(cx);
-        editor::image::bind_keys(cx);
-        app::bind_keys(cx);
-        settings::load();
-        settings::apply_appearance(&settings::prefs().appearance);
-        settings::sync_dark(cx);
-        themes::load(&settings::prefs().theme_id(), false, || cx.text_system().all_font_names());
+        init_app(cx);
         let quick_enabled = !scripted;
         if onboard { onboarding::open(scripted, incoming, cx); } else { start(existed, scripted, None, incoming, cx); }
         cx.on_window_closed(move |cx, _| {

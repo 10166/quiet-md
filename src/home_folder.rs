@@ -9,6 +9,7 @@
 //! another while the front leans back; a dragged card turns into a paper,
 //! the folder opens its mouth under it, and a drop slides it in behind the
 //! glass while the folder dips.
+use fdl_core::vfs::PathExt as _;
 use crate::app::{RowMenu, Workspace};
 use crate::settings::display_title;
 use crate::sidebar_drag::{Fade, Spring};
@@ -16,7 +17,8 @@ use crate::store::Entry;
 use crate::theme::{self, Theme, craft, ca};
 use crate::ui::{TipExt, icon, ui_text};
 use gpui::{prelude::FluentBuilder, *};
-use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Instant};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use web_time::Instant;
 
 /// The tab's share of a folder card's height: the folder's body is a document
 /// card's size, the tab rises above it (`home.rs` lowers the cards beside it).
@@ -563,7 +565,7 @@ impl FileDrop {
     fn new(paths: Vec<std::path::PathBuf>) -> Self {
         let (mut md, mut xml, mut dirs, mut other) = (0, 0, 0, 0);
         for p in &paths {
-            if p.is_dir() { dirs += 1; }
+            if p.fs_is_dir() { dirs += 1; }
             else if crate::local_files::is_markdown_path(p) { md += 1; }
             else if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("xml")) { xml += 1; }
             else { other += 1; }
@@ -656,7 +658,7 @@ impl Workspace {
         d.land.to = 1.;
         d.dip.v += 5.5;
         if let Some(f) = d.over.as_ref().and_then(|k| self.home.folders.fx.get_mut(k)) { f.dip.v += 5.5; }
-        let (dirs, files): (Vec<_>, Vec<_>) = d.paths.iter().cloned().partition(|p| p.is_dir());
+        let (dirs, files): (Vec<_>, Vec<_>) = d.paths.iter().cloned().partition(|p| p.fs_is_dir());
         let files: Vec<_> = files.into_iter().filter(|p| crate::local_files::is_markdown_path(p) || p.extension().is_some_and(|x| x.eq_ignore_ascii_case("xml"))).collect();
         if !files.is_empty() { self.import_paths(&files, target.clone(), false, window, cx); }
         for dir in &dirs { self.import_folder(dir, target.clone(), false, window, cx); }
@@ -733,7 +735,7 @@ impl Workspace {
         let pose = Pose { w, h, lift, open: o, yl: 0.49 * h + lean, yr: 0.54 * h + lean, inset: -(3. * o + 7. * m), papers };
         let tag = d.tag();
         // The front paper's name: the first file of the kind it shows.
-        let first = d.paths.iter().find(|p| match tag { Some("MD") => crate::local_files::is_markdown_path(p), Some(_) => p.extension().is_some_and(|x| x.eq_ignore_ascii_case("xml")), None => p.is_dir() })
+        let first = d.paths.iter().find(|p| match tag { Some("MD") => crate::local_files::is_markdown_path(p), Some(_) => p.extension().is_some_and(|x| x.eq_ignore_ascii_case("xml")), None => p.fs_is_dir() })
             .or(d.paths.first()).and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let summary = d.summary();
         let record = d.zone.clone();

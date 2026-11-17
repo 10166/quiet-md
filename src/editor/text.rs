@@ -638,7 +638,10 @@ fn span_color(spec: &TextSpec, m: &Marks) -> Hsla {
 
 use crate::editor_ui::{CJK_PUNCT_FONT, is_cjk_punct};
 
+#[cfg(not(target_family = "wasm"))]
 const QUOTE_FONT: &str = "Helvetica Neue";
+#[cfg(target_family = "wasm")]
+const QUOTE_FONT: &str = crate::theme::UI_FONT;
 
 /// Shaped in place of an equation's U+FFFC: same UTF-8 length, a glyph of
 /// the text font (so the line's ascent is unchanged).

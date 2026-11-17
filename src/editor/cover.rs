@@ -226,7 +226,7 @@ impl Editor {
             {
                 let _ = this.update_in(cx, |e, _, cx| {
                     let ext = p.extension().and_then(|s| s.to_str()).unwrap_or_default().to_string();
-                    let stored = std::fs::read(&p).map_err(|_| super::image::BAD_FORMAT).and_then(|b| super::image::store_image(&b, &ext));
+                    let stored = fdl_core::vfs::read(&p).map_err(|_| super::image::BAD_FORMAT).and_then(|b| super::image::store_image(&b, &ext));
                     match stored {
                         Ok(p) => e.set_cover(Some(Cover { src: p.to_string_lossy().to_string(), x: 0., y: 0. }), cx),
                         Err(msg) => e.toast(msg, cx),

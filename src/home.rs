@@ -166,7 +166,9 @@ fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote:
             let media = div().relative().flex_none().w_full().max_w_full().overflow_hidden().when_some(*width, |d, w| d.w(px(w * s)))
                 .map(|mut d| { d.style().aspect_ratio = Some(ratio); d });
             node = node.child(if let Some(path) = path {
-                media.child(picture(&path, thumb_long(width.unwrap_or(690.).min(690.), ratio) * s).absolute().inset_0().size_full().min_w_0().min_h_0().rounded(px(bs::RADIUS * s)).object_fit(ObjectFit::Contain)).into_any_element()
+                // The web demo fetches pictures on first use: an empty frame until then.
+                if fdl_core::vfs::pending(&path) { media.into_any_element() } else {
+                media.child(picture(&path, thumb_long(width.unwrap_or(690.).min(690.), ratio) * s).absolute().inset_0().size_full().min_w_0().min_h_0().rounded(px(bs::RADIUS * s)).object_fit(ObjectFit::Contain)).into_any_element() }
             } else {
                 media.rounded(px(bs::RADIUS * s)).bg(bs::code_surface()).flex().items_center().justify_center().child(icon("image-broken", 24. * s, Theme::text_disabled())).into_any_element()
             });
@@ -326,7 +328,7 @@ pub struct Home {
     sort: HomeSort,
     folders_first: bool,
     pub sort_menu: bool,
-    thumbs: RefCell<HashMap<String, (u64, Thumb, std::time::Instant)>>,
+    thumbs: RefCell<HashMap<String, (u64, Thumb, web_time::Instant)>>,
     /// Last-frame bounds of the controls the popovers hang from.
     anchors: Rc<RefCell<HashMap<&'static str, Bounds<Pixels>>>>,
     /// Folder cards and dragging into them (`home_folder.rs`).
@@ -484,7 +486,7 @@ impl Workspace {
         // If the preview contains no sibling subpages, modified + settings uniquely
         // identifies it without rebuilding the whole tree on every frame.
         if let Some((m, t, used)) = self.home.thumbs.borrow_mut().get_mut(&e.id)
-            && !t.has_subpages && *m == base_stamp { *used = std::time::Instant::now(); return t.clone(); }
+            && !t.has_subpages && *m == base_stamp { *used = web_time::Instant::now(); return t.clone(); }
         // A child-page list shows the other pages in the document's folder, as in
         // the open document (`sync_sub_pages`).
         let tree = crate::tree::Tree::new(&self.entries);
@@ -495,7 +497,7 @@ impl Workspace {
         for child in &children { (&child.id, &child.title, &child.icon).hash(&mut full_stamp); }
         let full_stamp = full_stamp.finish();
         if let Some((m, t, used)) = self.home.thumbs.borrow_mut().get_mut(&e.id)
-            && *m == full_stamp { *used = std::time::Instant::now(); return t.clone(); }
+            && *m == full_stamp { *used = web_time::Instant::now(); return t.clone(); }
         // The derived rows exist only in this preview tree and never enter the editor/store.
         fn subpages(blocks: &mut [crate::model::Block], entries: &[&Entry], budget: &mut usize) {
             for b in blocks {
@@ -529,7 +531,7 @@ impl Workspace {
             let oldest = thumbs.iter().min_by_key(|(_, (_, _, used))| *used).map(|(id, _)| id.clone());
             if let Some(id) = oldest { thumbs.remove(&id); }
         }
-        thumbs.insert(e.id.clone(), (stamp, t.clone(), std::time::Instant::now()));
+        thumbs.insert(e.id.clone(), (stamp, t.clone(), web_time::Instant::now()));
         t
     }
 

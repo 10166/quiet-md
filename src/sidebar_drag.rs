@@ -3,7 +3,8 @@ use crate::store::Entry;
 use crate::theme::{self, Theme};
 use crate::ui::{icon, ui_text};
 use gpui::{prelude::FluentBuilder, *};
-use std::{cell::Cell, collections::{HashMap, HashSet, VecDeque}, rc::Rc, time::Instant};
+use std::{cell::Cell, collections::{HashMap, HashSet, VecDeque}, rc::Rc};
+use web_time::Instant;
 
 const PITCH: f32 = 31.;
 /// Whether clicking a folder open or shut animates (the drawer below): 外观 ›
@@ -470,7 +471,8 @@ impl Workspace {
         // The visible list's bottom edge, in this list's coordinates (last frame's layout).
         let visible = self.folder_drag.bounds.get();
         let vis_bottom = visible.map_or(f32::MAX, |b| f32::from(self.list_scroll.bounds().bottom() - b.top()));
-        let vis_top = visible.map_or(f32::MIN, |_| -f32::from(self.list_scroll.offset().y));
+        // The top edge the same way: the rows start below 我的文档's header, not at the scroll top.
+        let vis_top = visible.map_or(f32::MIN, |b| f32::from(self.list_scroll.bounds().top() - b.top()));
         // ---- Step every spring; nothing below this block mutates.
         let fd = &mut self.folder_drag;
         let index: HashMap<&str, usize> = rows.iter().enumerate().map(|(i, r)| (r.entry.id.as_str(), i)).collect();
@@ -665,7 +667,9 @@ impl Workspace {
         let extra: f32 = fd.drawers.iter().map(|d| if d.opening { d.h - d.rows.len() as f32 * PITCH } else { d.h }).sum();
         fd.drawers.retain(|d| !d.done);
         let drawn: Vec<[f32; 3]> = (0..rows.len()).map(|i| { let p = fd.springs[&rows[i].entry.id].p; [p[0], p[1] + shift[i], p[2]] }).collect();
-        let on_screen = |y: f32| y + crate::sidebar::ROW_H >= vis_top && y <= vis_bottom;
+        // Last frame's layout: rows a fast scroll brings in this frame are drawn too.
+        const MARGIN: f32 = 8. * PITCH;
+        let on_screen = |y: f32| y + crate::sidebar::ROW_H + MARGIN >= vis_top && y <= vis_bottom + MARGIN;
         // The receiving folder's wash springs to its subtree's bounds and fades in and out.
         let zone = receiving.zip(receiving_end).map(|(start, end)| {
             let top = drawn[start][1];

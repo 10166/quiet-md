@@ -13,7 +13,8 @@ use gpui::{prelude::FluentBuilder, *};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// Width of the row bar / height of the column bar.
 const BAR: f32 = 10.;

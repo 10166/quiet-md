@@ -14,7 +14,7 @@ pub const LAST_ID: &str = "global-last";
 pub const LAST_DEFAULT: &str = "cmd-alt-space";
 pub fn last_key() -> String { saved(LAST_ID).unwrap_or_else(|| LAST_DEFAULT.into()) }
 fn saved(id: &str) -> Option<String> {
-    std::fs::read(path()).ok().and_then(|b| serde_json::from_slice::<BTreeMap<String,String>>(&b).ok()).and_then(|m| m.get(id).cloned())
+    fdl_core::vfs::read(path()).ok().and_then(|b| serde_json::from_slice::<BTreeMap<String,String>>(&b).ok()).and_then(|m| m.get(id).cloned())
 }
 /// The system-wide hotkeys: one stroke, kept apart from the app's.
 fn is_global(id: &str) -> bool { id == "global" || id == LAST_ID }
@@ -22,11 +22,21 @@ fn is_global(id: &str) -> bool { id == "global" || id == LAST_ID }
 pub const HOST_OS: OperatingSystem = if cfg!(target_os = "macos") { OperatingSystem::Mac } else if cfg!(target_os = "windows") { OperatingSystem::Windows } else { OperatingSystem::Linux };
 pub fn parse_key(stroke: &str) -> Result<Keystroke, InvalidKeystrokeError> { Keystroke::parse_with_os(stroke, HOST_OS) }
 fn unparse(k: &impl AsKeystroke) -> String { k.as_keystroke().unparse(HOST_OS) }
+/// Mac key conventions (⌘ bindings and hints): macOS, or the web build in a
+/// Mac browser.
+pub fn mac() -> bool {
+    #[cfg(target_family = "wasm")] {
+        static MAC: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *MAC.get_or_init(|| web_sys::window().map(|w| w.navigator()).is_some_and(|n| n.platform().is_ok_and(|p| p.starts_with("Mac")) || n.user_agent().is_ok_and(|a| a.contains("Mac OS X") && !a.contains("Mobile"))))
+    }
+    #[cfg(not(target_family = "wasm"))] { cfg!(target_os = "macos") }
+}
+
 pub fn init(cx: &mut App) {
     let base = cx.key_bindings().borrow().bindings().cloned().collect::<Vec<_>>();
     #[cfg(not(target_os = "macos"))]
-    let base = base.into_iter().filter_map(pc_binding).collect();
-    let custom = std::fs::read(path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let base = if mac() { base } else { base.into_iter().filter_map(pc_binding).collect() };
+    let custom = fdl_core::vfs::read(path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     cx.set_global(Shortcuts { base, custom });
     rebuild(cx);
 }
@@ -143,7 +153,7 @@ fn first_group_hint() -> &'static str {
 /// A UI label's keys for this platform: `windows_keys` on non-macOS platforms (cached,
 /// labels are `'static`), the text itself elsewhere.
 pub fn keys(s: &'static str) -> &'static str {
-    if !cfg!(not(target_os = "macos")) { return s }
+    if mac() { return s }
     static CACHE: std::sync::Mutex<BTreeMap<&'static str, &'static str>> = std::sync::Mutex::new(BTreeMap::new());
     let mut cache = CACHE.lock().unwrap();
     cache.entry(s).or_insert_with(|| Box::leak(windows_keys(s).into_boxed_str()))
@@ -162,7 +172,7 @@ pub fn hint(action: &str, default: &'static str) -> &'static str {
     let text = key.split(' ').map(|stroke| {
         let Ok(k) = parse_key(stroke) else { return stroke.to_string() };
         let m = k.modifiers;
-        let names = if cfg!(not(target_os = "macos")) { [(m.control, "Ctrl"), (m.alt, "Alt"), (m.shift, "Shift"), (m.platform, if cfg!(target_os = "windows") { "Win" } else { "Super" })] } else { [(m.platform, "⌘"), (m.alt, "⌥"), (m.shift, "Shift"), (m.control, "Control")] };
+        let names = if !mac() { [(m.control, "Ctrl"), (m.alt, "Alt"), (m.shift, "Shift"), (m.platform, if cfg!(target_os = "windows") { "Win" } else { "Super" })] } else { [(m.platform, "⌘"), (m.alt, "⌥"), (m.shift, "Shift"), (m.control, "Control")] };
         let mut parts: Vec<String> = names.into_iter().filter(|(on, _)| *on).map(|(_, s)| s.to_string()).collect();
         parts.push(match k.key.as_str() { "space" => "Space".into(), "enter" => "Enter".into(), k if k.chars().count() == 1 => k.to_uppercase(), k => { let mut c = k.chars(); c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default() } });
         parts.join(" + ")
@@ -279,7 +289,7 @@ pub fn pretty(key: &str) -> String {
     key.split(' ').map(|stroke| {
         let Ok(ks) = parse_key(stroke) else { return stroke.to_string() };
         let m = ks.modifiers;
-        let win = cfg!(not(target_os = "macos"));
+        let win = !mac();
         let names = if win { [(m.control, "Ctrl"), (m.alt, "Alt"), (m.shift, "Shift"), (m.platform, if cfg!(target_os = "windows") { "Win" } else { "Super" })] } else { [(m.control, "⌃"), (m.alt, "⌥"), (m.shift, "⇧"), (m.platform, "⌘")] };
         let mut out: Vec<String> = names.into_iter().filter(|(on, _)| *on).map(|(_, s)| s.to_string()).collect();
         out.push(match ks.key.as_str() {
@@ -349,10 +359,10 @@ pub(crate) fn set_global(key: &str, cx: &mut App) -> anyhow::Result<()> { change
 fn write(custom: &BTreeMap<String, String>) -> anyhow::Result<()> {
     use std::io::Write;
     let tmp = path().with_extension("json.tmp");
-    let mut f = std::fs::File::create(&tmp)?;
+    let mut f = fdl_core::vfs::File::create(&tmp)?;
     f.write_all(&serde_json::to_vec_pretty(custom)?)?;
     f.sync_all()?;
-    std::fs::rename(tmp, path())?;
+    fdl_core::vfs::rename(tmp, path())?;
     Ok(())
 }
 impl Workspace {

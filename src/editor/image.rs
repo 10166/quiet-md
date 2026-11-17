@@ -3,6 +3,7 @@
 //! (downloaded to a local cache) and the error toasts (image-spec,
 //! crop-spec).
 
+use fdl_core::vfs::PathExt as _;
 use super::core::{DropPlace, EditKind, Pos, Selection, TITLE};
 use super::overlays::{Probe, at};
 use super::render::{Env, R};
@@ -20,7 +21,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// Smallest image width and crop box side (`ZM`).
 pub(super) const MIN: f32 = 32.;
@@ -299,7 +301,7 @@ fn decode(path: &Path, cap: u32) -> Decoded {
     let (im, w, h) = match if cap > 0 { decode_png(path, cap) } else { None } {
         Some(p) => p,
         None => {
-            let bytes = std::fs::read(path)?;
+            let bytes = fdl_core::vfs::read(path)?;
             let format = image::guess_format(&bytes)?;
             let jpeg = if format == image::ImageFormat::Jpeg && cap > 0 {
                 std::panic::catch_unwind(|| decode_jpeg(&bytes, cap)).ok().flatten()
@@ -329,7 +331,7 @@ fn decode(path: &Path, cap: u32) -> Decoded {
 /// With the file's own size; None for what is left to `image` (interlaced,
 /// or not larger than `cap`).
 fn decode_png(path: &Path, cap: u32) -> Option<(image::DynamicImage, u32, u32)> {
-    let mut d = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).ok()?));
+    let mut d = png::Decoder::new(std::io::BufReader::new(fdl_core::vfs::File::open(path).ok()?));
     d.set_transformations(png::Transformations::normalize_to_color8());
     let mut r = d.read_info().ok()?;
     let info = r.info();
@@ -575,7 +577,7 @@ impl ImageUi {
                 return Src::Failed;
             }
             let p = self.remote_path(src);
-            if self.dims.borrow().contains_key(&p) || p.exists() {
+            if self.dims.borrow().contains_key(&p) || p.fs_exists() {
                 return Src::Local(p);
             }
             // 设置 › 网络与隐私: with downloads off, only an image the user
@@ -587,7 +589,9 @@ impl ImageUi {
             return Src::Pending;
         }
         match image_path(src) {
-            Some(p) if self.dims.borrow().contains_key(&p) || p.exists() => Src::Local(p),
+            Some(p) if self.dims.borrow().contains_key(&p) || p.fs_exists() => Src::Local(p),
+            // The web demo fetches pictures on first use.
+            Some(p) if fdl_core::vfs::pending(&p) => Src::Pending,
             Some(_) => Src::Missing,
             None => Src::Failed,
         }
@@ -1686,7 +1690,7 @@ impl Editor {
             let Ok(Ok(Some(dest))) = rx.await else { return };
             bg.spawn(async move {
                 if crop == FULL {
-                    let _ = std::fs::copy(&path, &dest);
+                    let _ = fdl_core::vfs::copy(&path, &dest);
                 } else if let Ok(im) = image::ImageReader::open(&path).and_then(|r| r.with_guessed_format()).map_err(anyhow::Error::from).and_then(|r| Ok(r.decode()?)) {
                     let (w, h) = (im.width() as f32, im.height() as f32);
                     let (x, y) = ((crop[0] * w).round() as u32, (crop[1] * h).round() as u32);
@@ -2139,7 +2143,7 @@ impl Editor {
 
 fn download(url: &str, dest: &Path) -> bool {
     if let Some(d) = dest.parent() {
-        let _ = std::fs::create_dir_all(d);
+        let _ = fdl_core::vfs::create_dir_all(d);
     }
     let tmp = dest.with_extension("part");
     let fetched = std::process::Command::new("curl")
@@ -2153,9 +2157,9 @@ fn download(url: &str, dest: &Path) -> bool {
         .is_ok_and(|s| s.success());
     let ok = fetched
         && image::ImageReader::open(&tmp).ok().and_then(|r| r.with_guessed_format().ok()).and_then(|r| r.into_dimensions().ok()).is_some()
-        && std::fs::rename(&tmp, dest).is_ok();
+        && fdl_core::vfs::rename(&tmp, dest).is_ok();
     if !ok {
-        let _ = std::fs::remove_file(&tmp);
+        let _ = fdl_core::vfs::remove_file(&tmp);
     }
     ok
 }
@@ -2244,19 +2248,19 @@ fn store_image_named(bytes: &[u8], ext: &str, name: Option<&str>) -> Result<Path
         .map(|n| n.trim().trim_start_matches('.').to_string()).filter(|n| !n.is_empty());
     let file = match name { Some(n) => format!("{}-{n}.{ext}", &id[..8]), None => format!("{id}.{ext}") };
     let path = Store::assets_dir().join(file);
-    std::fs::write(&path, bytes).map_err(|_| BAD_DIMS)?;
+    fdl_core::vfs::write(&path, bytes).map_err(|_| BAD_DIMS)?;
     Ok(path)
 }
 
 fn image_block_from_file(p: &Path) -> Result<Block, &'static str> {
     let ext = p.extension().and_then(|s| s.to_str()).unwrap_or_default().to_ascii_lowercase();
-    if !p.is_file() || !FORMATS.contains(&ext.as_str()) {
+    if !p.fs_is_file() || !FORMATS.contains(&ext.as_str()) {
         return Err(BAD_FORMAT);
     }
-    if std::fs::metadata(p).map(|m| m.len()).unwrap_or(0) > MAX_BYTES {
+    if fdl_core::vfs::metadata(p).map(|m| m.len()).unwrap_or(0) > MAX_BYTES {
         return Err(TOO_BIG);
     }
-    let bytes = std::fs::read(p).map_err(|_| BAD_DIMS)?;
+    let bytes = fdl_core::vfs::read(p).map_err(|_| BAD_DIMS)?;
     image_block_named(&bytes, &ext, p.file_stem().and_then(|s| s.to_str()))
 }
 
@@ -2269,7 +2273,7 @@ fn remote_name(url: &str) -> String {
 
 /// The downloaded copy of a remote image, if it has been fetched.
 pub fn cached_remote(url: &str) -> Option<PathBuf> {
-    Some(Store::assets_dir().join("remote").join(remote_name(url))).filter(|p| p.is_file())
+    Some(Store::assets_dir().join("remote").join(remote_name(url))).filter(|p| p.fs_is_file())
 }
 
 /// Pasted HTML images: `data:` URIs and local files become owned assets;
@@ -2328,8 +2332,8 @@ mod tests {
     /// the hollow copy keeps id and size.
     #[test]
     fn pictures_decode_at_their_shown_size() {
-        let dir = std::env::temp_dir().join(format!("qmd-pic-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = fdl_core::vfs::temp_dir().join(format!("qmd-pic-{}", fdl_core::vfs::process_id()));
+        fdl_core::vfs::create_dir_all(&dir).unwrap();
         let p = photo(&dir, 4032, 3024);
         for (c, long) in [(2048, 2016), (512, 504), (384, 384)] {
             let im = decode(&p, c).unwrap();
@@ -2344,7 +2348,7 @@ mod tests {
         let png = dir.join("wide.png");
         image::RgbaImage::new(3000, 1000).save(&png).unwrap();
         assert_eq!(decode(&png, 1024).unwrap().size(0).width.0, 1024);
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = fdl_core::vfs::remove_dir_all(&dir);
     }
 
     /// PNGs shrink row by row to the same size as `thumbnail_exact`, and close
@@ -2352,8 +2356,8 @@ mod tests {
     /// left to `image`.
     #[test]
     fn pngs_shrink_while_streaming() {
-        let dir = std::env::temp_dir().join(format!("qmd-png-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = fdl_core::vfs::temp_dir().join(format!("qmd-png-{}", fdl_core::vfs::process_id()));
+        fdl_core::vfs::create_dir_all(&dir).unwrap();
         let px = |x: u32, y: u32| image::Rgba([(x * 255 / 2999) as u8, (y * 255 / 1199) as u8, ((x + y) % 256) as u8, (255 - y * 255 / 1199) as u8]);
         let rgba = image::RgbaImage::from_fn(3000, 1200, px);
         let opaque = image::DynamicImage::ImageRgba8(rgba.clone()).to_rgb8();
@@ -2376,7 +2380,7 @@ mod tests {
         }
         assert!(decode_png(&dir.join("rgb.png"), 4096).is_none());
         assert!(decode_png(&dir.join("missing.png"), 512).is_none());
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = fdl_core::vfs::remove_dir_all(&dir);
     }
 
     #[test]

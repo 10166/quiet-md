@@ -4,6 +4,7 @@
 //! along. ⌘⌥⇧O and Settings › About replay it without touching the library. Nothing is written until 开始使用;
 //! closing the window before that quits without a library.
 
+use fdl_core::vfs::{PathExt as _, KindExt as _};
 use crate::settings::tr;
 use crate::theme::{self, Theme};
 use crate::ui;
@@ -11,7 +12,8 @@ use gpui::*;
 use gpui::prelude::FluentBuilder;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 static PENDING: AtomicBool = AtomicBool::new(false);
 
@@ -202,7 +204,7 @@ struct Found {
 
 /// Markdown files under `dir`, without hidden folders, up to a budget of entries.
 fn count_md(dir: &Path, depth: usize, budget: &mut usize) -> usize {
-    let Ok(rd) = std::fs::read_dir(dir) else { return 0 };
+    let Ok(rd) = fdl_core::vfs::read_dir(dir) else { return 0 };
     let mut n = 0;
     for e in rd.flatten() {
         if *budget == 0 { break }
@@ -211,14 +213,14 @@ fn count_md(dir: &Path, depth: usize, budget: &mut usize) -> usize {
         let name = name.to_string_lossy();
         if name.starts_with('.') || name == "node_modules" { continue }
         let Ok(ft) = e.file_type() else { continue };
-        if ft.is_dir() && depth > 0 { n += count_md(&e.path(), depth - 1, budget); }
-        else if ft.is_file() && crate::local_files::is_markdown_path(&e.path()) { n += 1; }
+        if ft.fs_is_dir() && depth > 0 { n += count_md(&e.path(), depth - 1, budget); }
+        else if ft.fs_is_file() && crate::local_files::is_markdown_path(&e.path()) { n += 1; }
     }
     n
 }
 
 fn subdirs(dir: &Path) -> Vec<PathBuf> {
-    std::fs::read_dir(dir).map(|rd| rd.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir()) && !e.file_name().to_string_lossy().starts_with('.')).map(|e| e.path()).collect()).unwrap_or_default()
+    fdl_core::vfs::read_dir(dir).map(|rd| rd.flatten().filter(|e| e.file_type().is_ok_and(|t| t.fs_is_dir()) && !e.file_name().to_string_lossy().starts_with('.')).map(|e| e.path()).collect()).unwrap_or_default()
 }
 
 /// Notes other apps keep on this computer, read only and off the main
@@ -231,7 +233,7 @@ fn discover(library: PathBuf) -> Vec<Found> {
     let mobile = home.join("Library/Mobile Documents");
     let mut candidates: Vec<(&'static str, PathBuf)> = vec![];
     // Obsidian lists its vaults in obsidian.json (macOS, Windows and Linux alike), and keeps iCloud vaults in its container.
-    if let Some(cfg) = dirs::config_dir().and_then(|d| std::fs::read(d.join("obsidian/obsidian.json")).ok())
+    if let Some(cfg) = dirs::config_dir().and_then(|d| fdl_core::vfs::read(d.join("obsidian/obsidian.json")).ok())
         && let Ok(v) = serde_json::from_slice::<serde_json::Value>(&cfg)
         && let Some(vaults) = v.get("vaults").and_then(|v| v.as_object()) {
         for vault in vaults.values() {
@@ -240,7 +242,7 @@ fn discover(library: PathBuf) -> Vec<Found> {
     }
     for d in subdirs(&mobile.join("iCloud~md~obsidian/Documents")) { candidates.push(("Obsidian", d)); }
     // Logseq names each graph's folder in ~/.logseq/graphs: `logseq_local_++Users++me++notes.transit`.
-    for g in std::fs::read_dir(home.join(".logseq/graphs")).into_iter().flatten().flatten() {
+    for g in fdl_core::vfs::read_dir(home.join(".logseq/graphs")).into_iter().flatten().flatten() {
         let name = g.file_name().to_string_lossy().into_owned();
         if let Some(p) = name.strip_prefix("logseq_local_").and_then(|n| n.strip_suffix(".transit")) { candidates.push(("Logseq", PathBuf::from(p.replace("++", "/")))); }
     }
@@ -249,9 +251,9 @@ fn discover(library: PathBuf) -> Vec<Found> {
     candidates.push(("Typora", mobile.join("iCloud~abnerworks~Typora/Documents")));
     let mut out: Vec<Found> = vec![];
     for (app, path) in candidates {
-        if !path.is_dir() || path.starts_with(&library) || library.starts_with(&path) { continue }
-        let key = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
-        if out.iter().any(|f| std::fs::canonicalize(&f.path).unwrap_or_else(|_| f.path.clone()) == key) { continue }
+        if !path.fs_is_dir() || path.starts_with(&library) || library.starts_with(&path) { continue }
+        let key = fdl_core::vfs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        if out.iter().any(|f| fdl_core::vfs::canonicalize(&f.path).unwrap_or_else(|_| f.path.clone()) == key) { continue }
         let mut budget = 20_000;
         let count = count_md(&path, 6, &mut budget);
         if count == 0 { continue }
@@ -280,7 +282,7 @@ pub(crate) fn ubiquitous(path: &Path) -> bool {
     #[link(name = "Foundation", kind = "framework")]
     unsafe extern "C" { static NSURLIsUbiquitousItemKey: *mut Object; }
     let mut p = path;
-    while !p.exists() { match p.parent() { Some(q) => p = q, None => return false } }
+    while !p.fs_exists() { match p.parent() { Some(q) => p = q, None => return false } }
     let s = p.to_string_lossy();
     unsafe {
         let ns: *mut Object = msg_send![class!(NSString), alloc];
@@ -332,7 +334,7 @@ fn short_path(p: &Path) -> String {
 /// A picked folder as a library: an existing one or an empty folder is used
 /// as it is; anything else gets a Quiet.md folder inside.
 pub(crate) fn library_in(dir: PathBuf) -> PathBuf {
-    let empty = std::fs::read_dir(&dir).map(|mut r| r.all(|e| e.is_ok_and(|e| e.file_name().to_string_lossy().starts_with('.')))).unwrap_or(true);
+    let empty = fdl_core::vfs::read_dir(&dir).map(|mut r| r.all(|e| e.is_ok_and(|e| e.file_name().to_string_lossy().starts_with('.')))).unwrap_or(true);
     if crate::store::Store::is_library(&dir) || empty { dir } else { dir.join("Quiet.md") }
 }
 

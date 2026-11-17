@@ -147,7 +147,7 @@ pub struct Editor {
     /// Text drag: the pointer's last position and when the page last scrolled
     /// under it (`text_autoscroll`).
     drag_at: Option<Point<Pixels>>,
-    drag_scrolled: Option<std::time::Instant>,
+    drag_scrolled: Option<web_time::Instant>,
     /// The window was active when the page first scrolled under the drag.
     drag_active: Option<bool>,
     /// A press in the gap between blocks, for `gap_release`.
@@ -221,12 +221,12 @@ pub struct Editor {
     /// Blocks moved by their handle.
     pub(super) block_drag: Option<super::drag::BlockDrag>,
     /// Blocks just dropped, flashing since.
-    pub(super) drop_flash: Option<(Vec<BlockId>, std::time::Instant)>,
+    pub(super) drop_flash: Option<(Vec<BlockId>, web_time::Instant)>,
     /// The fold arrow turning after a click: block → start.
-    pub(super) fold_anim: Option<(BlockId, std::time::Instant)>,
+    pub(super) fold_anim: Option<(BlockId, web_time::Instant)>,
     /// Column widths easing to the document's after a column was added:
     /// grid → (widths before, start).
-    pub(super) col_anim: HashMap<BlockId, (Vec<f32>, std::time::Instant)>,
+    pub(super) col_anim: HashMap<BlockId, (Vec<f32>, web_time::Instant)>,
     /// Table chrome: insert-point hover, bar / resize drags, bar geometry.
     pub(super) tables: super::table::TableUi,
     /// Name / description fields of code blocks and images (`caption.rs`).
@@ -998,7 +998,7 @@ impl Editor {
             {
                 let _ = this.update_in(cx, |e, window, cx| {
                     let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("png").to_string();
-                    if let Ok(bytes) = std::fs::read(&p) {
+                    if let Ok(bytes) = fdl_core::vfs::read(&p) {
                         e.insert_image_bytes(&bytes, &ext, window, cx);
                     }
                 });
@@ -2400,7 +2400,7 @@ impl Editor {
         }
         // Last frame's layout already shows the rows scrolled in: extend to them.
         self.drag_to(at, cx);
-        let now = std::time::Instant::now();
+        let now = web_time::Instant::now();
         let dt = self.drag_scrolled.map_or(0., |t| (now - t).as_secs_f32().min(0.05));
         self.drag_scrolled = Some(now);
         self.list.scroll_by(px(dir * 600. * dt));

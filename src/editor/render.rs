@@ -589,7 +589,7 @@ impl R<'_> {
                         e.core.toggle_fold(id);
                         e.core.fix_selection();
                         e.keep_read_only_fold();
-                        e.fold_anim = Some((id, std::time::Instant::now()));
+                        e.fold_anim = Some((id, web_time::Instant::now()));
                         if selection == (e.core.sel, e.core.block_sel) {
                             e.changed_preserving_viewport(window, cx);
                         } else {
@@ -1658,7 +1658,7 @@ fn code_rows(cache: &HashMap<BlockId, super::text::TextLayout>) -> HashMap<Block
 
 impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let t0 = std::time::Instant::now();
+        let t0 = web_time::Instant::now();
         let el = self.render_editor(window, cx);
         crate::devtools::RENDER_NS.fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
         el

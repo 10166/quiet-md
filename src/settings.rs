@@ -3,6 +3,7 @@
 //! each page a column of grouped rows. Only what a
 //! user really needs to change lives here.
 
+use fdl_core::vfs::PathExt as _;
 use crate::{app::{View, Workspace}, theme::{self, craft, Theme}, themes, ui};
 use crate::ui::{TitleBarExt, TipExt};
 use crate::sidebar as sb;
@@ -64,7 +65,7 @@ pub fn browsers() -> Vec<&'static str> {
         .into_iter()
         .filter(|name| {
             let app = format!("{name}.app");
-            Path::new("/Applications").join(&app).exists() || user.as_ref().is_some_and(|u| u.join(&app).exists())
+            Path::new("/Applications").join(&app).fs_exists() || user.as_ref().is_some_and(|u| u.join(&app).fs_exists())
         })
         .take(BROWSERS_SHOWN)
         .collect()
@@ -125,7 +126,7 @@ pub struct Preferences {
 
 /// A week between asks to move the library to real folders.
 const MIGRATE_ASK_EVERY: u64 = 7 * 24 * 3600;
-fn unix_now() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
+fn unix_now() -> u64 { web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
 
 /// 稍后 on the move to real folders: remember when.
 pub fn migrate_later() {
@@ -175,7 +176,7 @@ pub(crate) fn show_lang(lang: Lang) {
 }
 
 pub fn load() {
-    let p = std::fs::read(path()).ok().and_then(|b| serde_json::from_slice::<Preferences>(&b).ok()).unwrap_or_default();
+    let p = fdl_core::vfs::read(path()).ok().and_then(|b| serde_json::from_slice::<Preferences>(&b).ok()).unwrap_or_default();
     apply(p);
 }
 
@@ -228,12 +229,12 @@ pub fn prefs() -> Preferences {
 pub(crate) fn save(p: &Preferences) -> anyhow::Result<()> {
     use std::io::Write;
     let root = crate::store::Store::internal_dir();
-    std::fs::create_dir_all(&root)?;
+    fdl_core::vfs::create_dir_all(&root)?;
     let tmp = root.join("preferences.json.tmp");
-    let mut f = std::fs::File::create(&tmp)?;
+    let mut f = fdl_core::vfs::File::create(&tmp)?;
     f.write_all(&serde_json::to_vec_pretty(p)?)?;
     f.sync_all()?;
-    std::fs::rename(tmp, path())?;
+    fdl_core::vfs::rename(tmp, path())?;
     apply(p.clone());
     Ok(())
 }
@@ -274,7 +275,7 @@ fn open_in_editor(p: &std::path::Path, cx: &mut App) {
 
 /// Theme files are watched: saving one in an editor redraws at once.
 pub(crate) fn watch_themes(cx: &mut Context<Workspace>) {
-    static LAST: Mutex<Option<Vec<(std::path::PathBuf, std::time::SystemTime, u64)>>> = Mutex::new(None);
+    static LAST: Mutex<Option<Vec<(std::path::PathBuf, web_time::SystemTime, u64)>>> = Mutex::new(None);
     *LAST.lock().unwrap() = Some(themes::stamp());
     cx.spawn(async |this, cx| loop {
         cx.background_executor().timer(std::time::Duration::from_millis(800)).await;
@@ -1624,6 +1625,7 @@ fn diagnostic_for(message: &str, english: bool) -> String {
 
 #[cfg(test)]
 mod localization_tests {
+    use fdl_core::vfs::PathExt as _;
     use super::{localize, diagnostic_for, display_title};
 
     #[test]
@@ -1635,11 +1637,11 @@ mod localization_tests {
             }
         }
         fn walk(dir: &std::path::Path, pattern: &regex::Regex) {
-            for entry in std::fs::read_dir(dir).unwrap() {
+            for entry in fdl_core::vfs::read_dir(dir).unwrap() {
                 let path = entry.unwrap().path();
-                if path.is_dir() { walk(&path, pattern); }
+                if path.fs_is_dir() { walk(&path, pattern); }
                 else if path.extension().is_some_and(|ext| ext == "rs") {
-                    let source = std::fs::read_to_string(path).unwrap();
+                    let source = fdl_core::vfs::read_to_string(path).unwrap();
                     for hit in pattern.captures_iter(source.split("#[cfg(test)]").next().unwrap()) { check(&hit[1]); }
                 }
             }
