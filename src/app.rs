@@ -318,6 +318,11 @@ pub struct Workspace {
     pub doc_sub: Option<DocSub>,
     /// Last-frame bounds of the open submenu (clicks there keep the menu open).
     pub doc_sub_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// Rendered width of the open 「…」 menu, for placing its submenus (#225).
+    pub doc_menu_w: Rc<Cell<Option<f32>>>,
+    /// The same for the sidebar row menu, whose 下载 submenu sits beside it
+    /// (#225).
+    pub row_menu_w: Rc<Cell<Option<f32>>>,
     pub doc_info: Option<DocInfo>,
     /// 版本历史 drawer, open for `HistoryView::id`.
     pub history: Option<crate::history::HistoryView>,
@@ -363,6 +368,7 @@ pub struct Workspace {
     pub shortcuts: bool,
     pub(crate) focus: FocusHandle,
     save_task: Option<Task<()>>,
+    conflict_detail: String,
     /// When the oldest edit not yet on disk was made: a save waits for a
     /// pause in typing, but never longer than `SAVE_MAX_DELAY` after it.
     dirty_since: Option<Instant>,
@@ -437,6 +443,7 @@ impl Workspace {
                 if window.is_window_active() {
                     if let Some(id) = &this.current { crate::quick_note::used(id, cx); }
                     if !this.store.file_task_busy() { this.entries = this.store.list(); this.sort(); }
+                    this.refresh_external_markdown(window, cx);
                     crate::update::check_if_stale(cx); cx.notify();
                 }
                 else if !this.store.file_task_busy() { this.cancel_home_drag(cx); this.end_folder_drag(true, cx); this.cancel_shortcut_recording(cx); this.flush(cx); }
@@ -555,6 +562,8 @@ impl Workspace {
             doc_menu: false,
             doc_sub: None,
             doc_sub_bounds: Rc::new(Cell::new(None)),
+            doc_menu_w: Rc::new(Cell::new(None)),
+            row_menu_w: Rc::new(Cell::new(None)),
             doc_info: None,
             history: None,
             preview: None,
@@ -584,6 +593,7 @@ impl Workspace {
             export_md: None,
             focus: cx.focus_handle(),
             save_task: None,
+            conflict_detail: String::new(),
             dirty_since: None,
             unsaved: false,
             after_save: None,
@@ -703,6 +713,7 @@ impl Workspace {
                 this.search.update(cx, |s, cx| s.set_text(q, cx));
                 this.search_sel = this.default_search_sel(cx);
             }
+            EditorEvent::OpenRelative(url) => this.open_relative(url, window, cx),
             EditorEvent::OpenDoc(id) => this.open(id, window, cx),
             EditorEvent::OpenDocAt(id, ordinal) => this.open_at(id, *ordinal, window, cx),
             EditorEvent::HideRefs => this.ask_refs(false, cx),
@@ -1019,6 +1030,15 @@ impl Workspace {
         cx.notify();
     }
 
+    pub(crate) fn refresh_external_markdown(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if !self.unsaved && self.preview.is_none() && !self.store.file_task_busy()
+            && let (Some(id), Some(ed)) = (self.current.clone(), self.editor.clone())
+            && self.document_peers(&id, window, cx).is_empty()
+            && let Ok(Some(doc)) = self.store.changed_markdown(&id) {
+            ed.update(cx, |e, cx| e.receive_document(&crate::editor::core::Core::new(doc), cx));
+        }
+    }
+
     pub(crate) fn document_peers(&self, id: &str, window: &Window, cx: &mut Context<Self>) -> Vec<Entity<Editor>> {
         cx.windows().into_iter().filter(|w| w.window_id() != window.window_handle().window_id())
             .filter_map(|w| w.downcast::<Workspace>())
@@ -1103,7 +1123,9 @@ impl Workspace {
     /// Write the open document to disk if it has unsaved changes. False when
     /// that failed: the changes stay pending (a later save retries them) and
     /// the top bar shows the error.
-    pub fn flush(&mut self, cx: &mut Context<Self>) -> bool {
+    pub fn flush(&mut self, cx: &mut Context<Self>) -> bool { self.flush_inner(cx, true) }
+
+    fn flush_inner(&mut self, cx: &mut Context<Self>, merge: bool) -> bool {
         self.save_task = None;
         // 版本历史 preview: the editor holds an older snapshot, so writing it
         // would overwrite the live document with history.
@@ -1117,7 +1139,14 @@ impl Workspace {
         };
         let doc = &ed.read(cx).core.doc;
         let (title, icon, body, reminders, links) = (doc.title.text.clone(), doc.icon.clone(), doc.plain_text(), doc.reminders(), doc.doc_links());
-        match self.store.save(&id, doc) {
+        let saved = self.store.save(&id, doc);
+        if merge && saved.is_err() && cx.windows().len() == 1
+            && let Some(doc) = self.store.merge_changed_markdown(&id, doc) {
+            ed.update(cx, |e, cx| e.receive_document(&crate::editor::core::Core::new(doc), cx));
+            return self.flush_inner(cx, false);
+        }
+        self.conflict_detail.clear();
+        match saved {
             Ok(meta) => {
                 if let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
                     e.title = title;
@@ -1136,7 +1165,10 @@ impl Workspace {
                 self.unsaved = false;
                 self.sort();
             }
-            Err(e) => self.status = SaveStatus::Failed(crate::localized_format!("保存失败：{}", "Could not save: {}", crate::settings::diagnostic(&e.to_string()))),
+            Err(e) => {
+                self.conflict_detail = self.store.conflict_detail(&id, doc).unwrap_or_default();
+                self.status = SaveStatus::Failed(crate::localized_format!("保存失败：{}", "Could not save: {}", crate::settings::diagnostic(&e.to_string())));
+            }
         }
         // A failed save tries again SAVE_MAX_DELAY after this attempt, not on every keystroke.
         self.dirty_since = self.unsaved.then(Instant::now);
@@ -1234,7 +1266,7 @@ impl Workspace {
     /// The error of the last failed save, for the 保存失败 dialog.
     pub(crate) fn save_error(&self) -> String {
         match &self.status {
-            SaveStatus::Failed(e) => e.clone(),
+            SaveStatus::Failed(e) => format!("{e}{}", self.conflict_detail),
             _ => crate::settings::text("保存失败").to_string(),
         }
     }
@@ -1509,7 +1541,10 @@ impl Workspace {
 
                     )
                     .when_some(save_error, |d, error| d.child(
-                        div().min_w_0().max_w(px(220.)).text_size(px(12.)).line_height(px(18.))
+                        div().id("save-error").cursor_pointer().on_click(cx.listener(|w, _, _, cx| {
+                            w.confirm = Some(Confirm::SaveFailed);
+                            cx.notify();
+                        })).min_w_0().max_w(px(220.)).text_size(px(12.)).line_height(px(18.))
                             .text_color(theme::c(craft::R400)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(error),
                     )),
             )

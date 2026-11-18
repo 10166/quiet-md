@@ -224,6 +224,14 @@ pub struct Settings {
     /// Main window size, remembered like the quick note window's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_size: Option<[f32; 2]>,
+    /// Main window position and the display it was on, so reopening returns
+    /// to the same spot. The origin is in that display's top-left coordinates,
+    /// and the display is named by its UUID — the one identifier that survives
+    /// a restart; a display that is gone makes the window re-centre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_origin: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_display: Option<String>,
     /// 阅读位置: the list offset each document was left at, so switching back
     /// returns to the same place. Kept out of `index.json`: it is window
     /// state, not document metadata.
@@ -320,7 +328,7 @@ struct Parsed { title: String, icon: Option<String>, body: std::sync::Arc<str>, 
 /// are this machine's mtimes, so it lives in the cache folder, not in the
 /// (possibly synced) library. Bump `PARSED_CACHE` when what `list` takes from
 /// a file changes; a release discards it anyway.
-const PARSED_CACHE: u32 = 1;
+const PARSED_CACHE: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct ParsedCache { version: String, docs: HashMap<PathBuf, CachedDoc> }
@@ -339,6 +347,21 @@ struct CachedDoc {
 fn parsed_cache_version() -> String { format!("{}-{PARSED_CACHE}", env!("CARGO_PKG_VERSION")) }
 
 /// Beside the other things this computer keeps about `root`, in the cache folder.
+fn merge_separate_lines(base: &str, ours: &str, theirs: &str) -> Option<String> {
+    let lines = |s: &str| s.split_inclusive('\n').map(str::to_owned).collect::<Vec<_>>();
+    let (base, ours, theirs) = (lines(base), lines(ours), lines(theirs));
+    fn change<'a>(base: &[String], side: &'a [String]) -> (std::ops::Range<usize>, &'a [String]) {
+        let first = base.iter().zip(side).take_while(|(a, b)| a == b).count();
+        let tail = base[first..].iter().rev().zip(side[first..].iter().rev()).take_while(|(a, b)| a == b).count();
+        (first..base.len()-tail, &side[first..side.len()-tail])
+    }
+    let mut edits = [change(&base, &ours), change(&base, &theirs)];
+    edits.sort_by_key(|(range, _)| range.start);
+    let [(a, x), (b, y)] = edits;
+    if a.end > b.start || a.start == b.start { return None }
+    Some([&base[..a.start], x, &base[a.end..b.start], y, &base[b.end..]].concat().concat())
+}
+
 fn parsed_cache_path(root: &Path) -> PathBuf {
     let tmp = crate::vfs::temp_dir();
     let base = if cfg!(test) || root.starts_with(&tmp) { tmp.join("quiet-md-local") } else { dirs::cache_dir().unwrap_or(tmp).join("quiet-md") };
@@ -434,6 +457,10 @@ struct Local {
     quick_note_size: Option<[f32; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     window_size: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    window_origin: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    window_display: Option<String>,
 }
 
 /// `library.json`: where the library is when it isn't the default.
@@ -1440,6 +1467,51 @@ impl Store {
         Ok(doc)
     }
 
+    pub fn conflict_detail(&self, id: &str, doc: &Document) -> Option<String> {
+        if !self.is_markdown(id) { return None }
+        let loaded = self.loaded.borrow();
+        let base = loaded.get(id)?;
+        let disk = self.read_doc_text(id).ok()?;
+        if &disk == base { return None }
+        let local = self.serialize_doc(id, doc, Some(base));
+        let mut detail = String::new();
+        for line in crate::diff::diff(&disk, &local, true).into_iter().filter(|l| l.kind != crate::diff::Kind::Same).take(6) {
+            detail.push_str(if line.kind == crate::diff::Kind::Added { "\n+ " } else { "\n− " });
+            detail.extend(line.text.chars().take(80));
+        }
+        Some(detail)
+    }
+
+    /// Reconcile independent line edits against the exact Markdown opened in the editor.
+    /// Ambiguous replacements and pending asset copies use the ordinary recovery dialog.
+    pub fn merge_changed_markdown(&self, id: &str, local: &Document) -> Option<Document> {
+        if !self.is_markdown(id) { return None }
+        let disk = self.read_doc_text(id).ok()?;
+        let loaded = self.loaded.borrow();
+        let base = loaded.get(id)?;
+        if base == &disk { return None }
+        let (ours, copies) = self.serialize_with_copies(id, local, Some(base));
+        if !copies.is_empty() { return None }
+        let merged = merge_separate_lines(base, &ours, &disk)?;
+        let mut doc = self.parse_doc(id, &merged).ok()?;
+        doc.title = local.title.clone();
+        // A rich-text document cannot represent every byte of Markdown.
+        // Only accept a merge the ordinary save path can reproduce exactly.
+        if self.serialize_doc(id, &doc, Some(&disk)) != merged { return None }
+        drop(loaded);
+        self.loaded.borrow_mut().insert(id.to_owned(), disk);
+        Some(doc)
+    }
+
+    pub fn changed_markdown(&self, id: &str) -> Result<Option<Document>> {
+        if !self.is_markdown(id) { return Ok(None) }
+        let disk = self.read_doc_text(id)?;
+        if self.loaded.borrow().get(id).is_none_or(|base| *base == disk) { return Ok(None) }
+        let doc = self.parse_doc(id, &disk)?;
+        self.loaded.borrow_mut().insert(id.to_owned(), disk);
+        Ok(Some(doc))
+    }
+
     /// Release a closed editor's conflict-detection baseline, after its last window saved.
     pub fn forget_loaded(&self, id: &str) { self.loaded.borrow_mut().remove(id); }
 
@@ -2043,6 +2115,8 @@ impl Store {
         if self.flat { return reread(&self.internal().join("settings.json")).unwrap_or_default(); }
         let mut s: Settings = reread(&self.internal().join("settings.json")).unwrap_or_default();
         let local = self.read_local();
+        s.window_origin = local.window_origin;
+        s.window_display = local.window_display;
         s.window_size = local.window_size;
         s.quick_note_size = local.quick_note_size;
         s
@@ -2051,9 +2125,11 @@ impl Store {
     pub fn save_settings(&self, s: &Settings) -> Result<()> {
         if self.flat { return write_atomic(&self.internal().join("settings.json"), &serde_json::to_vec_pretty(s)?); }
         let mut local = self.read_local();
+        local.window_origin = s.window_origin;
+        local.window_display.clone_from(&s.window_display);
         (local.window_size, local.quick_note_size) = (s.window_size, s.quick_note_size);
         self.save_local(&local)?;
-        let shared = Settings { window_size: None, quick_note_size: None, ..s.clone() };
+        let shared = Settings { window_origin: None, window_display: None, window_size: None, quick_note_size: None, ..s.clone() };
         crate::vfs::create_dir_all(self.internal())?;
         write_atomic(&self.internal().join("settings.json"), &serde_json::to_vec_pretty(&shared)?)
     }

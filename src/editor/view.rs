@@ -28,6 +28,7 @@ pub enum EditorEvent {
     Catalogue(bool),
     /// A 子页面列表 item or an @文档 link was clicked.
     OpenDoc(String),
+    OpenRelative(String),
     /// A 反向引用 line: that document, scrolled to its nth block.
     OpenDocAt(String, usize),
     /// The reference list's close button.
@@ -2003,7 +2004,30 @@ impl Editor {
                 self.core.paste_blocks(blocks);
             }
         } else if let Some(s) = text.filter(|s| !s.is_empty()) {
-            self.core.paste_markdown(&s);
+            // Text that is nothing but local image paths — WeChat puts a
+            // path in the pasteboard instead of image data (#252) —
+            // pastes the files in as library assets. Any line that is not
+            // one keeps the whole paste textual.
+            let lines: Vec<&str> = s.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+            let files = (!lines.is_empty() && rich_target)
+                .then(|| lines.iter().map(|l| super::image::local_image_path(l)).collect::<Option<Vec<_>>>())
+                .flatten()
+                .filter(|f| !f.is_empty());
+            if let Some(files) = files {
+                let mut blocks = Vec::new();
+                for file in files {
+                    match super::image::image_block_from_file(&file) {
+                        Ok(b) => blocks.push(b),
+                        Err(msg) => self.toast(msg, cx),
+                    }
+                }
+                if !blocks.is_empty() {
+                    blocks.push(Block::text(""));
+                    self.core.paste_blocks(blocks);
+                }
+            } else {
+                self.core.paste_markdown(&s);
+            }
         }
         if let Some(msg) = self.core.notice.take() {
             self.toast(msg, cx);

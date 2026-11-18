@@ -2366,7 +2366,7 @@ pub(crate) fn store_image_named(bytes: &[u8], ext: &str, name: Option<&str>) -> 
     Ok(path)
 }
 
-fn image_block_from_file(p: &Path) -> Result<Block, &'static str> {
+pub(crate) fn image_block_from_file(p: &Path) -> Result<Block, &'static str> {
     let ext = p.extension().and_then(|s| s.to_str()).unwrap_or_default().to_ascii_lowercase();
     if !p.fs_is_file() || !FORMATS.contains(&ext.as_str()) {
         return Err(BAD_FORMAT);
@@ -2376,6 +2376,21 @@ fn image_block_from_file(p: &Path) -> Result<Block, &'static str> {
     }
     let bytes = fdl_core::vfs::read(p).map_err(|_| BAD_DIMS)?;
     image_block_named(&bytes, &ext, p.file_stem().and_then(|s| s.to_str()))
+}
+
+/// One line of pasted text that is nothing but a local image file path
+/// (`file://` counts): the file to take in, if it is really an image
+/// that exists. WeChat puts such a line in the pasteboard instead of
+/// image data (#252).
+pub(crate) fn local_image_path(line: &str) -> Option<PathBuf> {
+    let s = line.trim();
+    let decoded = s.strip_prefix("file://").map(crate::markdown::percent_decode);
+    let s = decoded.as_deref().unwrap_or(s);
+    #[cfg(windows)]
+    let s = if decoded.is_some() && s.starts_with('/') && s.as_bytes().get(2) == Some(&b':') { &s[1..] } else { s };
+    let p = Path::new(s);
+    let ext = p.extension().and_then(|x| x.to_str()).unwrap_or_default().to_ascii_lowercase();
+    (p.is_absolute() && FORMATS.contains(&ext.as_str()) && p.is_file()).then(|| p.to_path_buf())
 }
 
 /// File name of a remote image's download in `assets/remote`.

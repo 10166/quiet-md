@@ -726,7 +726,7 @@ fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) ->
             strike: m.strike,
             underline: m.underline,
             code: m.code,
-            link: file_link.or_else(|| m.link.clone().filter(|url| crate::paste::link_ok(url))),
+            link: file_link.or_else(|| m.link.clone().filter(|url| crate::paste::link_ok(url) || crate::paste::relative_link(url) || url.starts_with("quiet-wiki:"))),
             math: m.inline.as_ref().and_then(Inline::equation).is_some(),
         };
         match runs.last_mut() {
@@ -737,6 +737,12 @@ fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) ->
     let mut out = String::new();
     for (m, s) in runs {
         if s.is_empty() {
+            continue;
+        }
+        if let Some(raw) = m.link.as_deref().and_then(|l| l.strip_prefix("quiet-wiki:")) {
+            let (target, label) = raw.split_once('|').unwrap_or((raw, raw));
+            if s == label { out.push_str(&format!("[[{raw}]]")); }
+            else { out.push_str(&format!("[[{target}|{s}]]")); }
             continue;
         }
         // Emphasis markers must hug the text: keep outer spaces outside.
@@ -755,7 +761,16 @@ fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) ->
             let tick = if body.contains('`') { "``" } else { "`" };
             format!("{tick}{body}{tick}")
         } else {
-            escape(body)
+            static EMBED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r"!\[\[[^\[\]\r\n]+\]\]|!\[[^\[\]\r\n]*\]\([^()\r\n]+\)").unwrap());
+            let mut escaped = String::new();
+            let mut end = 0;
+            for span in EMBED.find_iter(body) {
+                escaped.push_str(&escape(&body[end..span.start()]));
+                escaped.push_str(span.as_str());
+                end = span.end();
+            }
+            escaped.push_str(&escape(&body[end..]));
+            escaped
         };
         if m.underline {
             x = format!("<u>{x}</u>");

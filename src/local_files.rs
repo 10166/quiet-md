@@ -72,6 +72,50 @@ impl Workspace {
         cx.notify();
     }
 
+    pub(crate) fn open_relative(&mut self, url: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(source) = self.current.as_deref().and_then(|id| self.store.file_path(id)) else { return };
+        let wiki = url.strip_prefix("quiet-wiki:");
+        let raw = wiki.map(|s| s.split('|').next().unwrap_or(s)).unwrap_or(url);
+        let (name, anchor) = raw.split_once('#').unwrap_or((raw, ""));
+        let name = crate::markdown::percent_decode(name);
+        let Some(dir) = source.parent() else { return };
+        let mut path = if name.is_empty() { source.clone() } else { dir.join(&name) };
+        if wiki.is_some() && path.extension().is_none() { path.set_extension("md"); }
+        if wiki.is_some() && !path.fs_is_file() && let Some(root) = self.store.folder_dir(None) {
+            let mut from_root = root.join(&name);
+            if from_root.extension().is_none() { from_root.set_extension("md"); }
+            if from_root.fs_is_file() { path = from_root; }
+        }
+        let Some(path) = path.fs_canonicalize().ok().filter(|p| p.fs_is_file()) else {
+            self.show_toast_kind(ToastKind::Error, tr("文件不存在", "File not found"), cx);
+            return;
+        };
+        if !is_markdown_path(&path) {
+            if matches!(path.extension().and_then(|s| s.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("pdf" | "html" | "htm" | "ppt" | "pptx" | "docx" | "xlsx" | "txt" | "png" | "jpg" | "jpeg")) {
+                cx.open_with_system(&path);
+            } else { cx.reveal_path(&path); }
+            return;
+        }
+        let existing = self.entries.iter().find(|e| self.store.file_path(&e.id).is_some_and(|p| p == path)).map(|e| e.id.clone());
+        let id = existing.or_else(|| self.store.open_local(&path).ok());
+        let Some(id) = id else { return };
+        self.entries = self.store.list();
+        self.sort();
+        if self.try_open(&id, window, cx) && !anchor.is_empty() && let Some(ed) = &self.editor {
+            let key = crate::markdown::percent_decode(anchor).to_lowercase();
+            ed.update(cx, |e, cx| {
+                let mut found = None;
+                e.core.doc.for_each_block(|b| {
+                    if found.is_none() && matches!(b.kind, crate::model::BlockKind::Heading { .. }) {
+                        let label = b.text.text.trim().to_lowercase();
+                        if label == key || label.replace(' ', "-") == key { found = Some(b.id); }
+                    }
+                });
+                if let Some(id) = found { e.scroll_to_block(id, cx); }
+            });
+        }
+    }
+
     /// 导入到文档库: a Markdown copy at the top of 我的文档.
     fn import_local(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.row_menu = None;
@@ -101,7 +145,7 @@ impl Workspace {
         let row = |id: &'static str, glyph: &'static str, label: &'static str| crate::ui::menu_row(id, SharedString::from(id)).child(icon(glyph, 16., Theme::icon())).child(label);
         let pos = if m.pos.x < px(0.) { point(-m.pos.x, m.pos.y + px(22.)) } else { m.pos };
         let shown = if cfg!(target_os = "macos") { tr("在访达中显示", "Show in Finder") } else if cfg!(target_os = "windows") { tr("在文件资源管理器中显示", "Show in File Explorer") } else { tr("在文件管理器中显示", "Show in File Manager") };
-        vec![deferred(anchored().position(pos).snap_to_window_with_margin(px(8.)).child(popover().id("local-row-menu").occlude().w(px(200.)).py(px(crate::ui::MENU_PAD_Y))
+        vec![deferred(anchored().position(pos).snap_to_window_with_margin(px(8.)).child(popover().id("local-row-menu").occlude().min_w(px(200.)).py(px(crate::ui::MENU_PAD_Y))
             .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.row_menu = None; cx.notify(); }))
             .child(row("lr-import", "folder-input", tr("导入到文档库", "Import into library")).on_click(cx.listener(move |w, _, window, cx| w.import_local(&import, window, cx))))
             .child(row("lr-rename", "square-pen", tr("重命名", "Rename")).on_click(cx.listener(move |w, _, window, cx| w.start_rename(&rename, window, cx))))

@@ -256,6 +256,12 @@ pub fn link_ok(h: &str) -> bool {
     ["http://", "https://", "mailto:", "ftp://"].iter().any(|p| l.starts_with(p))
 }
 
+/// Relative Markdown file references, including fragments on the current page.
+pub fn relative_link(s: &str) -> bool {
+    !s.is_empty() && !s.contains([':', '\\']) && !s.starts_with('/') && !s.chars().any(char::is_control)
+        && (s.starts_with(['.', '#']) || s.contains('/') || s.split('#').next().and_then(|p| std::path::Path::new(p).extension()).is_some())
+}
+
 fn container(n: &Handle, ctx: &Ctx, out: &mut Vec<Block>) {
     let mut para = RichText::default();
     for c in n.children.borrow().iter() {
@@ -1356,7 +1362,29 @@ pub fn md_inline(s: &str) -> RichText {
                 continue;
             }
         }
+        if let Some(body) = rest.strip_prefix("![[") && let Some((inner, _)) = body.split_once("]]")
+            && !inner.contains(['[', ']', '\n']) {
+            let end = inner.len() + 5;
+            plain.push_str(&rest[..end]);
+            i += end;
+            continue;
+        }
+        if c == '[' && prev != Some('!') && let Some((inside, _)) = rest.strip_prefix("[[").and_then(|s| s.split_once("]]"))
+            && !inside.contains(['[', ']', '\n']) {
+            let (target, label) = inside.split_once('|').unwrap_or((inside, inside));
+            if !target.trim().is_empty() && !label.is_empty() {
+                flush(&mut plain, &mut out);
+                out.push(label, Marks { link: Some(format!("quiet-wiki:{inside}")), ..Default::default() });
+                i += inside.len() + 4;
+                continue;
+            }
+        }
         // Links `[text](url)`.
+        if c == '!' && rest.starts_with("![") && let Some((_, _, used)) = link_at(&rest[1..]) {
+            plain.push_str(&rest[..used + 1]);
+            i += used + 1;
+            continue;
+        }
         if c == '[' {
             let open = 0;
             if let Some((label, url, used)) = link_at(&rest[open..]) {
@@ -1521,8 +1549,8 @@ fn link_at(s: &str) -> Option<(&str, &str, usize)> {
     let inner = rest.strip_prefix('(')?;
     let end = inner.find(')')?;
     let target = inner[..end].trim();
-    let url = target.split_whitespace().next().unwrap_or("").trim_matches(['<', '>']);
-    if url.is_empty() || !(link_ok(url) || url.starts_with("www.")) {
+    let url = if let Some(inner) = target.strip_prefix('<').and_then(|s| s.split_once('>')) { inner.0 } else { target.split_whitespace().next().unwrap_or("").trim_matches(['<', '>']) };
+    if url.is_empty() || !(link_ok(url) || relative_link(url) || url.starts_with("www.")) {
         return None;
     }
     Some((&s[1..close], url, close + 1 + 1 + end + 1))
