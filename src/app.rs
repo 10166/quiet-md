@@ -606,8 +606,10 @@ impl Workspace {
         ws.sort();
         ws.load_home();
         // An empty library opens on 主页's empty state; only a quick note
-        // window starts a document of its own.
-        match document.or_else(|| (!quick).then(|| ws.entries.first().map(|e| e.id.clone())).flatten()) {
+        // window starts a document of its own. The site's live demo starts on
+        // 主页 too, so visitors see the whole notebook first.
+        let web = cfg!(target_family = "wasm");
+        match document.or_else(|| (!quick && !web).then(|| ws.entries.first().map(|e| e.id.clone())).flatten()) {
             Some(id) => ws.open(&id, window, cx),
             None if quick => ws.new_doc(window, cx),
             None => ws.view = View::Home,

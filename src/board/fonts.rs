@@ -106,7 +106,8 @@ fn xiaolai_added() -> bool {
 
 /// The family name GPUI looks a family up by.
 pub fn family_name(family: u32) -> &'static str {
-    let arial = if cfg!(target_os = "linux") { "Liberation Sans" } else { "Arial" };
+    // The web build reaches no system fonts: Inter, which it carries, stands in.
+    let arial = if cfg!(target_os = "linux") { "Liberation Sans" } else if cfg!(target_family = "wasm") { "Inter" } else { "Arial" };
     match family {
         ff::HELVETICA => if cfg!(target_os = "macos") { "Helvetica" } else { arial },
         ff::LIBERATION_SANS => arial,

@@ -14,6 +14,8 @@ Quiet.md 本体编译成 wasm32，跑在浏览器里，给官网的「示例笔�
   （`CanvasFontFallback::EmojiAndCjk`）。`.SystemUIFont` 指向 Inter（vendor 补丁 0029）。
 - **图片**：库包不含 `.assets/`，图片放在库包旁边，第一次显示时才下载（`vfs::add_lazy`，下载中按「加载中」显示）。
 - **快捷键**：在 Mac 浏览器里按 macOS 的规则（⌘），其它系统按 PC 的规则（`shortcuts::mac()`）。
+- **启动**：停在主页（桌面版打开最近改过的文档），让人先看到整个笔记本。
+- **画板**：图片不开线程解码，下载到了再解；画板字体里没有 14 MB 的 Xiaolai（build.rs），中文用浏览器的字体。
 - 没有的：全局快捷键、自动更新、打印、系统通知、快速查看、在访达中显示。入口在 `src/web.rs`。
 
 ## 构建
@@ -35,7 +37,7 @@ FAST=1 web/build.sh <目录>              # 调试：release profile、不跑 wa
 
 1. 图片压成 1400px JPEG（`sips`），用资料目录里的 `build_library.sh`（`FLAT=1`）导入成文档库；
 2. 用 devtools 版打开一次生成 `.quiet/index.json`，再 `web/curate.py <库> "<顶层名>" …` 定侧栏顺序；
-3. 偏好里关掉 `auto_update` 和 `quick_hotkey`；
+3. 偏好里关掉 `auto_update` 和 `quick_hotkey`；韩梅梅的两块画板（资料目录的 `extras.py` 生成）放在顶层、排第 4、5 位（官网窗口里主页的第二行），图片转成 1200px JPEG 并改掉画板里的路径；
 4. `web/bundle.py <库> site/public/demo/libraries/<名字>.qmdb`（同时写出 `libraries/<名字>/.assets/`）。库包用 zlib 压缩（开头是 `QMZ1`），因为静态托管不压缩 `.qmdb`。
 
 页面用 `/demo/?lib=<名字>` 打开某个库。新加一个人：生成库包，`site/public/notebooks/<名字>/`
