@@ -987,6 +987,22 @@ impl Workspace {
                     .when(std::env::var_os("QUIET_MD_HOME").is_none(), |d| d.child(button("change-library", tr("更改…", "Change…")).on_click(cx.listener(|w, _, _, cx| w.pick_library(cx)))))).into_any_element(),
                 row(tr("回收站", "Trash"), Some(crate::localized_format!("删除的文档保留 {} 天后自动清除。", "Deleted documents are kept for {} days.", crate::store::TRASH_DAYS).into()),
                     button("open-trash", tr("打开", "Open")).on_click(cx.listener(|w, _, _, cx| w.show_view(View::Trash, cx)))).into_any_element(),
+                // #237: files no document (the Trash included) mentions.
+                row(tr("未使用资源", "Unused assets"), Some(tr("不再被任何文档（含回收站、版本历史）引用的图片副本；检查后确认移出。", "Image copies no document mentions — the Trash and the version history included; check, then confirm.").into()),
+                    button("sweep-assets", tr("检查", "Check")).on_click(cx.listener(|w, _, window, cx| {
+                        let root = crate::store::Store::root_dir();
+                        // The open editor holds what the disk does not yet: unsaved
+                        // text, and the snapshots Undo can still bring back.
+                        let live = w.editor.as_ref().map(|e| e.read(cx).core.asset_refs()).unwrap_or_default();
+                        cx.spawn_in(window, async move |this, cx| {
+                            let sweep = cx.background_executor().spawn(async move { crate::store::Store::unused_assets_at(root, live) }).await;
+                            let _ = this.update_in(cx, |w, _, cx| match sweep {
+                                Ok(files) if files.is_empty() => w.show_toast(crate::settings::text("没有未使用资源"), cx),
+                                Ok(files) => { w.confirm = Some(crate::app::Confirm::RemoveUnused(files.iter().map(|(n, _)| n.clone()).collect())); cx.notify(); }
+                                Err(_) => w.show_toast_kind(crate::ui::ToastKind::Error, crate::settings::text("无法读取文档库，未清理"), cx),
+                            });
+                        }).detach();
+                    }))).into_any_element(),
                 row(tr("版本历史", "Version history"),
                     desc(tr("每篇文档保留的历史版本数（1–30 份）", "Snapshots kept for each document (1–30)")),
                     div().flex_none().flex().items_center().gap(px(12.))
@@ -1348,6 +1364,11 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "已彻底删除" => "Permanently deleted",
         "清空" => "Empty",
         "已清空回收站" => "Trash emptied",
+        "清理未使用资源" => "Remove unused assets",
+        "没有未使用资源" => "No unused assets",
+        "没有可清理的资源" => "Nothing to remove",
+        "移出" => "Move out",
+        "无法读取文档库，未清理" => "Could not read the library; nothing was removed",
         "确认清空回收站？" => "Empty the Trash?",
         "删除的内容将进入回收站，30 天后自动彻底删除" => "Deleted items will be moved to Trash and permanently deleted after 30 days.",
         "确认恢复？" => "Restore this document?",
