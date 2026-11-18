@@ -16,7 +16,8 @@
 //! Windows (as browsers resolve it); Liberation Sans (9, not user-pickable
 //! upstream) isn't bundled (the copy upstream ships is the GPL-licensed 1.x)
 //! and draws with Arial, which it is metric-compatible with. Xiaolai (14 MB
-//! compressed) is unpacked and registered the first time a text needs it.
+//! compressed) is unpacked and registered the first time a text needs it; the
+//! web build has none (build.rs), so its boards draw CJK with the fallbacks.
 
 use fdl_core::board::consts::font_family as ff;
 use fdl_core::board::font_subset::mapped_chars;
