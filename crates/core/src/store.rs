@@ -224,6 +224,14 @@ pub struct Settings {
     /// Main window size, remembered like the quick note window's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_size: Option<[f32; 2]>,
+    /// Main window position and the display it was on, so reopening returns
+    /// to the same spot. The origin is in that display's top-left coordinates,
+    /// and the display is named by its UUID — the one identifier that survives
+    /// a restart; a display that is gone makes the window re-centre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_origin: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_display: Option<String>,
     /// 阅读位置: the list offset each document was left at, so switching back
     /// returns to the same place. Kept out of `index.json`: it is window
     /// state, not document metadata.
