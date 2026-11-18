@@ -128,6 +128,20 @@
   .live p { max-width: 620px; margin: 12px auto 0; font-size: clamp(15px, 1.2vw, 16.5px); line-height: 1.6; color: #2f3633; font-weight: 500; text-wrap: balance; }
   .live .intro p { max-width: 560px; }
   .showcase .stage { padding-top: clamp(16px, 2.6vh, 24px); }
+  /* What people said: posts from X, quoted as posted, in a masonry of glass cards. */
+  .voices { padding-top: clamp(90px, 14vh, 150px); }
+  .wall { columns: 3 300px; column-gap: 16px; max-width: 1080px; margin: clamp(24px, 4vh, 36px) auto 0; text-align: left; }
+  .voice { break-inside: avoid; display: block; text-align: left; margin: 0 0 16px; padding: 16px 18px 18px; border-radius: 18px; color: var(--ink); text-decoration: none;
+    background: rgba(255, 255, 255, .78); border: 1px solid var(--glass-line); backdrop-filter: blur(16px) saturate(1.4); -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    box-shadow: 0 1px 2px rgba(20, 40, 25, .06), 0 8px 24px rgba(20, 40, 25, .08); transition: transform .2s ease, box-shadow .2s ease; }
+  .voice:hover { transform: translateY(-2px); box-shadow: 0 2px 4px rgba(20, 40, 25, .08), 0 14px 32px rgba(20, 40, 25, .12); }
+  .voice .top { display: flex; align-items: center; gap: 10px; }
+  .voice img { width: 36px; height: 36px; border-radius: 50%; flex: none; background: #e7ebe8; }
+  .voice .who-name { min-width: 0; flex: 1; line-height: 1.25; }
+  .voice b { display: block; font-size: 14.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .voice small { display: block; font-size: 13px; color: var(--ink-2); }
+  .voice svg { width: 15px; height: 15px; flex: none; color: var(--ink); opacity: .55; }
+  .voice p { margin: 12px 0 0; max-width: none; font-size: 15px; line-height: 1.6; font-weight: 500; color: var(--ink); white-space: pre-line; text-wrap: pretty; }
   .wash { position: relative; }
   .fade { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .8s cubic-bezier(.2, .8, .2, 1); }
   .fade.in { opacity: 1; transform: none; }
@@ -163,6 +177,7 @@
   /* The live notebooks' headings sit on the photo the same way, with no panel behind. */
   .live h2, .live h3 { color: #fff; text-shadow: 0 2px 18px rgba(10, 40, 90, .45); }
   .live p { color: rgba(255, 255, 255, .95); text-shadow: 0 1px 8px rgba(10, 40, 90, .55); }
+  .live .voice p { color: var(--ink); text-shadow: none; }
 </style>
 </head>
 <body>
@@ -213,6 +228,10 @@
     <div class="wash fade intro"><h2 data-i18n="liveT"></h2><p data-i18n="liveP"></p></div>
     <div class="stage"><div class="window" data-live="han-meimei"><div class="lights"><i></i><i></i><i></i></div><div class="shield"></div></div></div>
   </article>
+  <section class="voices">
+    <div class="wash fade intro"><h2 data-i18n="voicesT"></h2><p data-i18n="voicesP"></p></div>
+    <div class="wall" id="wall"></div>
+  </section>
   </main>
 
   <section class="cta">
@@ -244,6 +263,25 @@
   </footer>
 </div>
 <script src="/notebooks/data.js"></script>
+<script src="/voices/voices.js"></script>
+<script>
+// The wall: one card per post, linking to it. Text goes in as text, never as HTML.
+{
+  const X = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>';
+  const wall = document.getElementById("wall");
+  for (const v of window.VOICES || []) {
+    const a = document.createElement("a");
+    a.className = "voice fade"; a.href = v.url; a.target = "_blank"; a.rel = "noopener";
+    a.innerHTML = `<div class="top">${v.avatar ? '<img loading="lazy" alt="">' : ""}<span class="who-name"><b></b><small></small></span>${X}</div><p></p>`;
+    if (v.avatar) a.querySelector("img").src = v.avatar;
+    a.querySelector("b").textContent = v.name;
+    a.querySelector("small").textContent = "@" + v.handle;
+    a.querySelector("p").textContent = v.text;
+    a.lang = v.lang;
+    wall.append(a);
+  }
+}
+</script>
 <script>
 // Static i18n: ?lang= wins, then the saved choice, then the browser language; Simplified Chinese is the markup default.
 const T = {
@@ -268,10 +306,15 @@ Object.assign(T["zh-Hant"], {"liveT": "翻翻別人的筆記本", "liveP": "科�
 Object.assign(T["en"], {"liveT": "Leaf through someone else’s notebook", "liveP": "Han Meimei, a history-of-science PhD student, has kept this one for years: fifty thousand words, over a hundred pictures. It runs right here in your browser — click in, look around, change anything."});
 Object.assign(T["ja"], {"liveT": "ほかの人のノートをめくってみる", "liveP": "科学史の博士課程で学ぶ韓梅梅が何年も使ってきたノート。5万語、100枚以上の図。ブラウザの中でそのまま動いているので、クリックして自由に見て、書き換えてみてください。"});
 Object.assign(T["fr"], {"liveT": "Feuilletez le carnet de quelqu’un d’autre", "liveP": "Han Meimei, doctorante en histoire des sciences, le tient depuis des années : cinquante mille mots, plus de cent images. Il tourne ici même, dans votre navigateur — cliquez, explorez, modifiez."});
+Object.assign(T["zh-Hans"], {"voicesT": "用过的人怎么说", "voicesP": "来自 X 上的公开评论，原文照录。"});
 Object.assign(T["zh-Hans"], {"ctaT": "开始写你自己的笔记本", "ctaP": "免费、开源，支持 macOS、Windows 和 Linux。笔记永远是你电脑上的普通文件。"});
+Object.assign(T["zh-Hant"], {"voicesT": "用過的人怎麼說", "voicesP": "來自 X 上的公開評論，原文照錄。"});
 Object.assign(T["zh-Hant"], {"ctaT": "開始寫你自己的筆記本", "ctaP": "免費、開源，支援 macOS、Windows 與 Linux。筆記永遠是你電腦上的一般檔案。"});
+Object.assign(T["en"], {"voicesT": "What people are saying", "voicesP": "Posts from X, quoted as they were written."});
 Object.assign(T["en"], {"ctaT": "Start your own notebook", "ctaP": "Free and open source, for macOS, Windows and Linux. Your notes stay plain files on your own computer."});
+Object.assign(T["ja"], {"voicesT": "使った人の声", "voicesP": "X に投稿されたコメントを、原文のまま掲載しています。"});
 Object.assign(T["ja"], {"ctaT": "あなた自身のノートを始めよう", "ctaP": "無料でオープンソース。macOS、Windows、Linux に対応。ノートはいつまでもあなたのパソコン上の普通のファイルです。"});
+Object.assign(T["fr"], {"voicesT": "Ce qu’en disent les utilisateurs", "voicesP": "Des messages publiés sur X, cités tels quels."});
 Object.assign(T["fr"], {"ctaT": "Commencez votre propre carnet", "ctaP": "Gratuit et open source, pour macOS, Windows et Linux. Vos notes restent de simples fichiers sur votre ordinateur."});
 function detect() {
   const q = new URLSearchParams(location.search).get("lang");
