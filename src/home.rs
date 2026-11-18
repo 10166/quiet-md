@@ -709,7 +709,9 @@ impl Workspace {
                 .child(text_btn("home-batch-exit", "x", crate::settings::text("退出"), true).ml(px(8.))
                     .tip(crate::settings::text("退出批量操作"), None)
                     .on_click(cx.listener(|w, _, _, cx| { w.batch = None; w.row_menu = None; cx.notify(); })))
-        } else { toolbar
+        } else { // Menu state at render: the popover's outside-press handler clears it on mouse-down, before a click
+            // would fire, so toggle on mouse-down from this snapshot.
+            let sort_open = self.home.sort_menu; toolbar
             .child(tab("home-tab-recent", crate::settings::text("我的文档"), HomeTab::Recent))
             .child(tab("home-tab-star", crate::settings::text("收藏"), HomeTab::Starred))
             .child(div().flex_1())
@@ -721,7 +723,7 @@ impl Workspace {
                     .hover(|s| s.bg(Theme::fill_hover())).when(self.home.sort_menu, |d| d.bg(Theme::fill_hover_strong()))
                     .child(icon("sort-down", 14., Theme::icon())).child(crate::settings::label(self.home.sort.label()))
                     .child(self.home.track("home-sort"))
-                    .on_click(cx.listener(|w, _, _, cx| { w.home.sort_menu = !w.home.sort_menu; cx.notify(); })),
+                    .on_mouse_down(MouseButton::Left, cx.listener(move |w, _, _, cx| { cx.stop_propagation(); w.home.sort_menu = !sort_open; cx.notify(); })),
             )
             .child(self.view_switch(cx).ml(px(16.))
             ) };
@@ -770,6 +772,7 @@ impl Workspace {
             );
         for c in &cols {
             let sorted = !matches!(self.home.sort, HomeSort::Title | HomeSort::Manual) && *c == sort;
+            let sort_open = self.home.sort_menu;
             header = header.child(
                 col_cell().pl(px(20.)).child(
                     div()
@@ -790,8 +793,9 @@ impl Workspace {
                         .when(sorted, |d| {
                             d.child(icon("sort-down", 12., Theme::icon()))
                                 .cursor_pointer()
-                                .on_click(cx.listener(|w, _, _, cx| {
-                                    w.home.sort_menu = !w.home.sort_menu;
+                                .on_mouse_down(MouseButton::Left, cx.listener(move |w, _, _, cx| {
+                                    cx.stop_propagation();
+                                    w.home.sort_menu = !sort_open;
                                     cx.notify();
                                 }))
                         }),
