@@ -27,7 +27,7 @@ FAST=1 web/build.sh <目录>              # 调试：release profile、不跑 wa
 ```
 
 `site/public/demo/` 是构建产物，不进仓库，随官网一起部署（`cd site && npx wrangler@4 deploy`）。
-压缩后传输约 6 MB wasm + 2 MB 字体。
+压缩后传输约 6 MB wasm + 2 MB 字体。启动只等首屏要用的 5 个字体（正体和等宽正体，`web/index.html` 里和 wasm、库包一起预加载），斜体等其余字体在窗口出来后再补；官网首页在空闲时预取 wasm。
 
 ## 示例文档库
 
@@ -36,15 +36,15 @@ FAST=1 web/build.sh <目录>              # 调试：release profile、不跑 wa
 1. 图片压成 1400px JPEG（`sips`），用资料目录里的 `build_library.sh`（`FLAT=1`）导入成文档库；
 2. 用 devtools 版打开一次生成 `.quiet/index.json`，再 `web/curate.py <库> "<顶层名>" …` 定侧栏顺序；
 3. 偏好里关掉 `auto_update` 和 `quick_hotkey`；
-4. `web/bundle.py <库> site/public/demo/libraries/<名字>.qmdb`（同时写出 `libraries/<名字>/.assets/`）。
+4. `web/bundle.py <库> site/public/demo/libraries/<名字>.qmdb`（同时写出 `libraries/<名字>/.assets/`）。库包用 zlib 压缩（开头是 `QMZ1`），因为静态托管不压缩 `.qmdb`。
 
 页面用 `/demo/?lib=<名字>` 打开某个库。新加一个人：生成库包，`site/public/notebooks/<名字>/`
 放 `index.html`（照现有的抄）和 `home.webp` 截图（devtools 版脚本截 1280×800），在 `notebooks/data.js` 加一项，
-首页照 Maya 那一节（`section.notebook`）加一节。
+首页现在只放韩梅梅一个示例（`main.live` 里一个 `article.showcase`）。
 
 ## 官网页面
 
-- `site/public/index.html`：首页。首屏是原来的标题、介绍和下载；接着是「不是截图，是真的 Quiet.md」的引导，然后先韩梅梅、再 Maya，各一段文案加她的窗口。人物页 `site/public/notebooks/<名字>/index.html` 用同一套样式，只放这一个人。
+- `site/public/index.html`：首页。首屏是原来的标题、介绍和下载；接着是「翻翻别人的笔记本」：标题、一句介绍，下面直接是韩梅梅的窗口（官网只放这一个示例）。人物页 `site/public/notebooks/<名字>/index.html` 用同一套样式，只放这一个人。
 - 窗口照真实的 macOS 26 窗口做（量过系统截图：连续圆角，曲线长 23pt、看上去约等于 16pt 的圆角，红绿灯直径 14pt、间距 23pt、圆心在 (26.75, 23.75)）。红绿灯由网页画，应用在网页版里像 macOS 一样留出 92pt（`theme::TRAFFIC_LIGHTS_W`）。
 - 桌面浏览器里窗口运行真实的应用（`/demo/?lib=<名字>`）。打开页面时什么都不加载，窗口进入视野才加载；同一时间只运行一个，离开视野的会在另一个启动时被释放（滚回来会重新启动）。窗口上盖着一层透明遮罩，滚轮仍然滚页面；点一下就移开，这一下会转交给应用；鼠标移出窗口后遮罩回来。手机上换成 `home.webp` 截图。
 - 窗口边缘可以拖（`site/public/window-resize.js`，样式也在里面）：窗口外侧有白色把手，左右改宽度、窗口保持居中，下边改高度，下面两个角同时改；双击把手恢复。最小 560×420。窗口第一次进入视野时会自己缩窄再弹回一次，下方有一行提示，有人拖过一次后（记在 localStorage 的 `demo-resized`）就不再出现。手机上都没有。
