@@ -347,21 +347,6 @@ struct CachedDoc {
 fn parsed_cache_version() -> String { format!("{}-{PARSED_CACHE}", env!("CARGO_PKG_VERSION")) }
 
 /// Beside the other things this computer keeps about `root`, in the cache folder.
-fn merge_separate_lines(base: &str, ours: &str, theirs: &str) -> Option<String> {
-    let lines = |s: &str| s.split_inclusive('\n').map(str::to_owned).collect::<Vec<_>>();
-    let (base, ours, theirs) = (lines(base), lines(ours), lines(theirs));
-    fn change<'a>(base: &[String], side: &'a [String]) -> (std::ops::Range<usize>, &'a [String]) {
-        let first = base.iter().zip(side).take_while(|(a, b)| a == b).count();
-        let tail = base[first..].iter().rev().zip(side[first..].iter().rev()).take_while(|(a, b)| a == b).count();
-        (first..base.len()-tail, &side[first..side.len()-tail])
-    }
-    let mut edits = [change(&base, &ours), change(&base, &theirs)];
-    edits.sort_by_key(|(range, _)| range.start);
-    let [(a, x), (b, y)] = edits;
-    if a.end > b.start || a.start == b.start { return None }
-    Some([&base[..a.start], x, &base[a.end..b.start], y, &base[b.end..]].concat().concat())
-}
-
 fn parsed_cache_path(root: &Path) -> PathBuf {
     let tmp = crate::vfs::temp_dir();
     let base = if cfg!(test) || root.starts_with(&tmp) { tmp.join("quiet-md-local") } else { dirs::cache_dir().unwrap_or(tmp).join("quiet-md") };
@@ -1467,48 +1452,13 @@ impl Store {
         Ok(doc)
     }
 
-    pub fn conflict_detail(&self, id: &str, doc: &Document) -> Option<String> {
-        if !self.is_markdown(id) { return None }
-        let loaded = self.loaded.borrow();
-        let base = loaded.get(id)?;
-        let disk = self.read_doc_text(id).ok()?;
-        if &disk == base { return None }
-        let local = self.serialize_doc(id, doc, Some(base));
-        let mut detail = String::new();
-        for line in crate::diff::diff(&disk, &local, true).into_iter().filter(|l| l.kind != crate::diff::Kind::Same).take(6) {
-            detail.push_str(if line.kind == crate::diff::Kind::Added { "\n+ " } else { "\n− " });
-            detail.extend(line.text.chars().take(80));
-        }
-        Some(detail)
-    }
-
-    /// Reconcile independent line edits against the exact Markdown opened in the editor.
-    /// Ambiguous replacements and pending asset copies use the ordinary recovery dialog.
-    pub fn merge_changed_markdown(&self, id: &str, local: &Document) -> Option<Document> {
-        if !self.is_markdown(id) { return None }
-        let disk = self.read_doc_text(id).ok()?;
-        let loaded = self.loaded.borrow();
-        let base = loaded.get(id)?;
-        if base == &disk { return None }
-        let (ours, copies) = self.serialize_with_copies(id, local, Some(base));
-        if !copies.is_empty() { return None }
-        let merged = merge_separate_lines(base, &ours, &disk)?;
-        let mut doc = self.parse_doc(id, &merged).ok()?;
-        doc.title = local.title.clone();
-        // A rich-text document cannot represent every byte of Markdown.
-        // Only accept a merge the ordinary save path can reproduce exactly.
-        if self.serialize_doc(id, &doc, Some(&disk)) != merged { return None }
-        drop(loaded);
-        self.loaded.borrow_mut().insert(id.to_owned(), disk);
-        Some(doc)
-    }
-
-    pub fn changed_markdown(&self, id: &str) -> Result<Option<Document>> {
+    /// Accept an external revision only when the caller has a clean editor.
+    pub fn refresh_markdown(&self, id: &str) -> Result<Option<Document>> {
         if !self.is_markdown(id) { return Ok(None) }
         let disk = self.read_doc_text(id)?;
-        if self.loaded.borrow().get(id).is_none_or(|base| *base == disk) { return Ok(None) }
+        if self.loaded.borrow().get(id).is_none_or(|base| base == &disk) { return Ok(None) }
         let doc = self.parse_doc(id, &disk)?;
-        self.loaded.borrow_mut().insert(id.to_owned(), disk);
+        self.loaded.borrow_mut().insert(id.into(), disk);
         Ok(Some(doc))
     }
 
@@ -1518,6 +1468,14 @@ impl Store {
     pub fn save(&mut self, id: &str, doc: &Document) -> Result<Meta> {
         let _lock = self.begin_write()?;
         self.save_now(id, doc)
+    }
+
+    /// A live Markdown editor writes its current body even after an external save.
+    pub fn save_editor(&mut self, id: &str, doc: &Document) -> Result<Meta> {
+        let _lock = self.begin_write()?;
+        if !self.is_markdown(id) { return self.save_now(id, doc) }
+        let disk = self.read_doc_text(id)?;
+        self.write_doc_against(id, doc, Some(disk), true)
     }
 
     /// `save` for callers that already hold the write lock. A new id becomes a
@@ -1541,8 +1499,12 @@ impl Store {
 
     fn write_doc(&mut self, id: &str, doc: &Document) -> Result<Meta> {
         let disk = if self.is_markdown(id) || self.loaded.borrow().contains_key(id) { crate::vfs::read_to_string(self.path(id)).ok() } else { None };
+        self.write_doc_against(id, doc, disk, false)
+    }
+
+    fn write_doc_against(&mut self, id: &str, doc: &Document, disk: Option<String>, overwrite: bool) -> Result<Meta> {
         let (xml, copies) = self.serialize_with_copies(id, doc, disk.as_deref());
-        if let Some(previous) = self.loaded.borrow().get(id) {
+        if !overwrite && let Some(previous) = self.loaded.borrow().get(id) {
             let disk = disk.as_deref().ok_or_else(|| anyhow::anyhow!("文档文件已不在原处，可能已被移动或删除"))?;
             let message = if self.index.get(id).is_some_and(Meta::local) { "文件已在别处被修改，未覆盖磁盘内容。请另存副本或重新打开文件" } else { "文档已被另一个实例修改，未覆盖磁盘内容。请另存副本或重新载入磁盘版本" };
             anyhow::ensure!(disk == previous || disk == xml, "{message}");
@@ -1576,7 +1538,6 @@ impl Store {
                 }
             }
         }
-        self.loaded.borrow_mut().insert(id.to_string(), if same { disk.unwrap_or(xml) } else { xml });
         let title = doc.title.text.trim().to_string();
         let named = self.named_by_file(id);
         let changed = if named { title != self.markdown_title(id) } else { true };
@@ -1588,6 +1549,7 @@ impl Store {
         m.modified = t;
         let m = m.clone();
         self.save_index()?;
+        self.loaded.borrow_mut().insert(id.to_string(), if same { disk.unwrap_or(xml) } else { xml });
         Ok(m)
     }
 
@@ -2483,6 +2445,25 @@ mod tests {
         let e = s.list().into_iter().find(|e| e.meta.rel == "model.md").unwrap();
         assert!(e.meta.markdown);
         assert!(e.body.contains("Written by a model"), "{:?}", e.body);
+    }
+
+    #[test]
+    fn markdown_editor_uses_the_last_saved_body() {
+        let lib = Lib::new("markdown-external-save");
+        let mut s = lib.open();
+        let file = lib.0.join("note.md");
+        crate::vfs::write(&file, "original\n").unwrap();
+        let id = s.open_local(&file).unwrap();
+        let mut editor = s.load_for_edit(&id, false).unwrap();
+        editor.blocks = vec![crate::model::Block::text("from the editor")];
+        crate::vfs::write(&file, "from another app\n").unwrap();
+        s.save_editor(&id, &editor).unwrap();
+        assert_eq!(crate::vfs::read_to_string(&file).unwrap(), "from the editor\n");
+        assert!(s.refresh_markdown(&id).unwrap().is_none());
+        crate::vfs::write(&file, "saved after the editor\n").unwrap();
+        let refreshed = s.refresh_markdown(&id).unwrap().unwrap();
+        assert_eq!(refreshed.blocks[0].text.text, "saved after the editor");
+        assert!(s.refresh_markdown(&id).unwrap().is_none());
     }
 
     #[test]

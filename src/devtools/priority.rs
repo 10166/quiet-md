@@ -37,30 +37,46 @@ pub(super) fn step(phase: &str, ws: &mut Workspace, window: &mut Window, cx: &mu
             let path = dir.join("Source.md");
             let text = std::fs::read_to_string(&path).unwrap();
             std::fs::write(&path, text.replace("outside-one", "external-clean")).unwrap();
-            ws.refresh_external_markdown(window, cx);
+        }
+        "refreshed" => {
             assert!(ws.editor.as_ref().unwrap().read(cx).core.doc.plain_text().contains("external-clean"));
+        }
+        "mirror" => {
+            let id = ws.current.clone().unwrap();
+            cx.defer(move |cx| {
+                cx.open_window(WindowOptions { focus: false, ..Default::default() }, |window, cx| {
+                    cx.new(|cx| Workspace::new_document_window(Some(id), window, cx))
+                }).unwrap();
+            });
         }
         "external" => {
             let path = dir.join("Source.md");
             let text = std::fs::read_to_string(&path).unwrap();
             assert!(text.contains("MARK") && text.contains("[[中文/Other Note#Heading|alias]]"), "{text}");
-            std::fs::write(path, text.replace("external-clean", "outside-two")).unwrap();
+            std::fs::write(path, text.replace("MARK", "DISK")).unwrap();
+            // Edit before yielding back to either window's file watcher.
+            ws.editor.as_ref().unwrap().update(cx, |e, cx| {
+                e.core.checkpoint(crate::editor::core::EditKind::Other);
+                e.core.insert_text("LOCAL");
+                e.changed(window, cx);
+            });
         }
-        "merge" => {
-            let text = std::fs::read_to_string(dir.join("Source.md")).unwrap();
-            assert!(text.contains("LOCAL") && text.contains("outside-two"), "{text}");
-            std::fs::write(dir.join("Source.md"), text.replace("MARK", "DISK")).unwrap();
+        "local-won" => {
+            let path = dir.join("Source.md");
+            let text = std::fs::read_to_string(&path).unwrap();
+            assert!(text.contains("LOCAL") && text.contains("MARK") && !text.contains("DISK"), "{text}");
+            std::fs::write(path, text.replace("LOCAL", "DISK")).unwrap();
         }
-        "conflict" => {
-            assert!(!ws.flush(cx));
-            assert!(ws.save_error().contains("DISK"));
-            ws.save_failed_copy(window, cx);
-            let current = &ws.editor.as_ref().unwrap().read(cx).core.doc;
-            assert!(current.plain_text().contains("DISK"));
-            assert!(ws.entries.iter().any(|e| e.body.contains("OVERLAP")));
+        "disk-won" => {
+            let current = ws.editor.as_ref().unwrap().read(cx).core.doc.plain_text();
+            assert!(current.contains("DISK") && !current.contains("LOCAL"), "{current}");
+            let mirrors = ws.document_peers(ws.current.as_ref().unwrap(), window, cx);
+            assert_eq!(mirrors.len(), 1);
+            assert_eq!(mirrors[0].read(cx).core.doc.plain_text(), current);
         }
         "start-import" => {
-            assert!(std::fs::read_to_string(dir.join("Source.md")).unwrap().contains("AFTER"));
+            let text = std::fs::read_to_string(dir.join("Source.md")).unwrap();
+            assert!(text.contains("AFTER") && text.contains("DISK"), "{text}");
             ws.import_folder(&dir.join("import-me"), None, false, window, cx);
             assert!(ws.store.file_task_busy());
         }

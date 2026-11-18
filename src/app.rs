@@ -368,7 +368,6 @@ pub struct Workspace {
     pub shortcuts: bool,
     pub(crate) focus: FocusHandle,
     save_task: Option<Task<()>>,
-    conflict_detail: String,
     /// When the oldest edit not yet on disk was made: a save waits for a
     /// pause in typing, but never longer than `SAVE_MAX_DELAY` after it.
     dirty_since: Option<Instant>,
@@ -442,8 +441,7 @@ impl Workspace {
             cx.observe_window_activation(window, |this, window, cx| {
                 if window.is_window_active() {
                     if let Some(id) = &this.current { crate::quick_note::used(id, cx); }
-                    if !this.store.file_task_busy() { this.entries = this.store.list(); this.sort(); }
-                    this.refresh_external_markdown(window, cx);
+                    if !this.store.file_task_busy() { this.entries = this.store.list(); this.sort(); this.refresh_markdown(cx); }
                     crate::update::check_if_stale(cx); cx.notify();
                 }
                 else if !this.store.file_task_busy() { this.cancel_home_drag(cx); this.end_folder_drag(true, cx); this.cancel_shortcut_recording(cx); this.flush(cx); }
@@ -491,9 +489,22 @@ impl Workspace {
             let bg = cx.background_executor().clone();
             let shape = || bg.spawn(async { crate::store::Store::shape_at(&crate::store::Store::root_dir()) });
             let mut last = shape().await;
+            let mut last_file = None;
             loop {
                 bg.timer(Duration::from_secs(2)).await;
                 let now = shape().await;
+                let Ok(path) = this.update(cx, |w, _| w.current.as_ref()
+                    .filter(|id| !w.store.file_task_busy() && w.store.is_markdown(id))
+                    .and_then(|id| w.store.file_path(id))) else { break };
+                let file = bg.spawn(async move {
+                    let path = path?;
+                    let meta = fdl_core::vfs::metadata(&path).ok()?;
+                    Some((path, meta.modified().ok()?, meta.len()))
+                }).await;
+                if file != last_file {
+                    let _ = this.update(cx, |w, cx| w.refresh_markdown(cx));
+                    last_file = file;
+                }
                 if now == last { continue }
                 let reloaded = this.update(cx, |w, cx| {
                     // Not mid-rename: the row under the field would be rebuilt.
@@ -593,7 +604,6 @@ impl Workspace {
             export_md: None,
             focus: cx.focus_handle(),
             save_task: None,
-            conflict_detail: String::new(),
             dirty_since: None,
             unsaved: false,
             after_save: None,
@@ -706,7 +716,7 @@ impl Workspace {
                 cx.notify();
             }
             EditorEvent::Save => {
-                this.flush(cx);
+                if !this.flush(cx) { this.confirm = Some(Confirm::SaveFailed); cx.notify(); }
             }
             EditorEvent::Search(q) => {
                 this.open_search(window, cx);
@@ -1030,15 +1040,6 @@ impl Workspace {
         cx.notify();
     }
 
-    pub(crate) fn refresh_external_markdown(&mut self, window: &Window, cx: &mut Context<Self>) {
-        if !self.unsaved && self.preview.is_none() && !self.store.file_task_busy()
-            && let (Some(id), Some(ed)) = (self.current.clone(), self.editor.clone())
-            && self.document_peers(&id, window, cx).is_empty()
-            && let Ok(Some(doc)) = self.store.changed_markdown(&id) {
-            ed.update(cx, |e, cx| e.receive_document(&crate::editor::core::Core::new(doc), cx));
-        }
-    }
-
     pub(crate) fn document_peers(&self, id: &str, window: &Window, cx: &mut Context<Self>) -> Vec<Entity<Editor>> {
         cx.windows().into_iter().filter(|w| w.window_id() != window.window_handle().window_id())
             .filter_map(|w| w.downcast::<Workspace>())
@@ -1120,12 +1121,61 @@ impl Workspace {
         }
     }
 
+    /// The current window can already be in a GPUI input callback. update
+    /// skips windows on the stack, whereas reading their root would panic.
+    fn other_workspaces(cx: &mut Context<Self>) -> Vec<Entity<Self>> {
+        let me = cx.entity_id();
+        cx.windows().into_iter().filter_map(|h| h.update(cx, |root, _, _| root.downcast::<Self>().ok()).ok().flatten())
+            .filter(|peer| peer.entity_id() != me).collect()
+    }
+
+    fn refresh_markdown(&mut self, cx: &mut Context<Self>) {
+        if self.preview.is_some() || self.store.file_task_busy() || matches!(self.confirm, Some(Confirm::SaveFailed)) { return }
+        let Some(id) = self.current.clone() else { return };
+        if !self.store.is_markdown(&id) { return }
+        if self.unsaved {
+            self.flush(cx);
+            return
+        }
+        // A newly opened sibling can be clean while its source view still has a pending edit.
+        if Self::other_workspaces(cx).into_iter()
+            .any(|p| { let w = p.read(cx); w.current.as_ref() == Some(&id) && w.unsaved }) { return }
+        if let Ok(Some(doc)) = self.store.with(|s| s.refresh_markdown(&id)) {
+            self.adopt_markdown(&id, doc, cx);
+        }
+    }
+
+    /// All live views share the store's save baseline, so install the accepted
+    /// revision in each of them before a sibling's pending autosave can run.
+    fn adopt_markdown(&mut self, id: &str, doc: crate::model::Document, cx: &mut Context<Self>) {
+        let core = crate::editor::core::Core::new(doc);
+        let install = |w: &mut Self, cx: &mut Context<Self>| {
+            if let Some(p) = &mut w.preview { p.core = core.clone(); }
+            else if let Some(ed) = &w.editor { ed.update(cx, |e, cx| e.receive_markdown(&core, cx)); }
+            w.save_task = None;
+            w.unsaved = false;
+            w.dirty_since = None;
+            w.status = SaveStatus::Saved;
+            if let Some(entry) = w.entries.iter_mut().find(|e| e.id == id) {
+                entry.title = core.doc.title.text.clone();
+                entry.body = core.doc.plain_text().into();
+                entry.reminders = core.doc.reminders();
+                entry.links = core.doc.doc_links();
+            }
+            cx.notify();
+        };
+        install(self, cx);
+        for peer in Self::other_workspaces(cx) {
+            if peer.read(cx).current.as_deref() == Some(id) {
+                peer.update(cx, install);
+            }
+        }
+    }
+
     /// Write the open document to disk if it has unsaved changes. False when
     /// that failed: the changes stay pending (a later save retries them) and
     /// the top bar shows the error.
-    pub fn flush(&mut self, cx: &mut Context<Self>) -> bool { self.flush_inner(cx, true) }
-
-    fn flush_inner(&mut self, cx: &mut Context<Self>, merge: bool) -> bool {
+    pub fn flush(&mut self, cx: &mut Context<Self>) -> bool {
         self.save_task = None;
         // 版本历史 preview: the editor holds an older snapshot, so writing it
         // would overwrite the live document with history.
@@ -1139,14 +1189,7 @@ impl Workspace {
         };
         let doc = &ed.read(cx).core.doc;
         let (title, icon, body, reminders, links) = (doc.title.text.clone(), doc.icon.clone(), doc.plain_text(), doc.reminders(), doc.doc_links());
-        let saved = self.store.save(&id, doc);
-        if merge && saved.is_err() && cx.windows().len() == 1
-            && let Some(doc) = self.store.merge_changed_markdown(&id, doc) {
-            ed.update(cx, |e, cx| e.receive_document(&crate::editor::core::Core::new(doc), cx));
-            return self.flush_inner(cx, false);
-        }
-        self.conflict_detail.clear();
-        match saved {
+        match self.store.with(|s| s.save_editor(&id, doc)) {
             Ok(meta) => {
                 if let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
                     e.title = title;
@@ -1155,6 +1198,23 @@ impl Workspace {
                     e.reminders = reminders;
                     e.links = links;
                     e.meta = meta.clone();
+                }
+                // A mirrored edit was saved by this window. A sibling must not
+                // later write it a second time over a newer external edit.
+                if meta.markdown {
+                    for peer in Self::other_workspaces(cx) {
+                        let w = peer.read(cx);
+                        if w.unsaved && w.current.as_ref() == Some(&id) && w.preview.is_none()
+                            && w.editor.as_ref().is_some_and(|e| e.read(cx).core.doc == ed.read(cx).core.doc) {
+                            peer.update(cx, |w, cx| {
+                                w.unsaved = false;
+                                w.dirty_since = None;
+                                w.save_task = None;
+                                w.status = SaveStatus::Saved;
+                                cx.notify();
+                            });
+                        }
+                    }
                 }
                 self.sync_links(cx);
                 ed.update(cx, |e, cx| {
@@ -1165,10 +1225,7 @@ impl Workspace {
                 self.unsaved = false;
                 self.sort();
             }
-            Err(e) => {
-                self.conflict_detail = self.store.conflict_detail(&id, doc).unwrap_or_default();
-                self.status = SaveStatus::Failed(crate::localized_format!("保存失败：{}", "Could not save: {}", crate::settings::diagnostic(&e.to_string())));
-            }
+            Err(e) => self.status = SaveStatus::Failed(crate::localized_format!("保存失败：{}", "Could not save: {}", crate::settings::diagnostic(&e.to_string()))),
         }
         // A failed save tries again SAVE_MAX_DELAY after this attempt, not on every keystroke.
         self.dirty_since = self.unsaved.then(Instant::now);
@@ -1220,10 +1277,13 @@ impl Workspace {
             let Some(id) = self.current.clone() else { return };
             match self.store.load_for_edit(&id, false) {
                 Ok(doc) => {
-                    if let Some(ed) = &self.editor {
-                        ed.update(cx, |e, cx| e.receive_document(&crate::editor::core::Core::new(doc), cx));
+                    if self.store.is_markdown(&id) { self.adopt_markdown(&id, doc, cx); }
+                    else {
+                        if let Some(ed) = &self.editor {
+                            ed.update(cx, |e, cx| e.receive_document(&crate::editor::core::Core::new(doc), cx));
+                        }
+                        self.sync_document(window, cx);
                     }
-                    self.sync_document(window, cx);
                     self.save_task = None;
                     self.unsaved = false;
                     self.status = SaveStatus::Idle;
@@ -1266,7 +1326,7 @@ impl Workspace {
     /// The error of the last failed save, for the 保存失败 dialog.
     pub(crate) fn save_error(&self) -> String {
         match &self.status {
-            SaveStatus::Failed(e) => format!("{e}{}", self.conflict_detail),
+            SaveStatus::Failed(e) => e.clone(),
             _ => crate::settings::text("保存失败").to_string(),
         }
     }
@@ -1541,10 +1601,7 @@ impl Workspace {
 
                     )
                     .when_some(save_error, |d, error| d.child(
-                        div().id("save-error").cursor_pointer().on_click(cx.listener(|w, _, _, cx| {
-                            w.confirm = Some(Confirm::SaveFailed);
-                            cx.notify();
-                        })).min_w_0().max_w(px(220.)).text_size(px(12.)).line_height(px(18.))
+                        div().id("save-status-error").when(self.unsaved, |d| d.cursor_pointer().on_click(cx.listener(|w, _, _, cx| { w.confirm = Some(Confirm::SaveFailed); cx.notify(); }))).min_w_0().max_w(px(220.)).text_size(px(12.)).line_height(px(18.))
                             .text_color(theme::c(craft::R400)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(error),
                     )),
             )
