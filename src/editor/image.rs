@@ -2386,8 +2386,12 @@ pub(crate) fn local_image_path(line: &str) -> Option<PathBuf> {
     let s = line.trim();
     let s = s.strip_prefix("file://").unwrap_or(s);
     let p = Path::new(s);
+    is_local_image_file(p).then(|| p.to_path_buf())
+}
+
+pub(super) fn is_local_image_file(p: &Path) -> bool {
     let ext = p.extension().and_then(|x| x.to_str()).unwrap_or_default().to_ascii_lowercase();
-    (p.is_absolute() && FORMATS.contains(&ext.as_str()) && p.is_file()).then(|| p.to_path_buf())
+    p.is_absolute() && FORMATS.contains(&ext.as_str()) && p.fs_is_file()
 }
 
 /// File name of a remote image's download in `assets/remote`.
