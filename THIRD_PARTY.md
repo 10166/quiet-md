@@ -800,7 +800,7 @@ rough.js、hachure-fill、points-on-curve、points-on-path、path-data-parser、
 
 ## 封面与插画
 
-`assets/covers/`（26 张封面及其缩略图）、`assets/illus/`（3 张空态插画，本项目绘制）随本项目以 MIT 分发。
+`assets/covers/`（26 张封面及其缩略图）、`assets/illus/`（3 张空态插画和 `kinds/` 下 5 个新建菜单的彩色类型图标，本项目绘制）随本项目以 MIT 分发。
 
 ## 内置主题的样式数值
 

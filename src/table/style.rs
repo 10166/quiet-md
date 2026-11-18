@@ -21,8 +21,17 @@ pub const GUTTER_W: f32 = 56.;
 /// Field header row; rows are `RowHeight::px`.
 pub const HEADER_H: f32 = 36.;
 /// The trailing "+" (新增字段) column.
-pub const ADD_FIELD_W: f32 = 100.;
+pub const ADD_FIELD_W: f32 = 145.;
 pub const CELL_PAD_X: f32 = 8.;
+/// The one header line of a table in a page (飞书 docx's embedded base: 52).
+pub const INLINE_HEAD_H: f32 = 52.;
+/// Rows a table in a page shows before it scrolls inside (飞书 grows without end; a
+/// page holding thousands of rows would draw them all).
+pub const INLINE_MAX_ROWS_H: f32 = 1120.;
+/// A kanban or gallery in a page: a fixed height, scrolling inside (飞书's kanban: 280 + head).
+pub const INLINE_BOARD_H: f32 = 420.;
+/// The add-record line under the rows: one short line whatever the row height (it is not a record).
+pub const ADD_ROW_H: f32 = 32.;
 /// View tab bar and toolbar.
 pub const TABS_H: f32 = 40.;
 pub const TOOLBAR_H: f32 = 44.;
@@ -42,10 +51,11 @@ pub fn line() -> Hsla { c(ud::N300) }
 pub fn frozen_line() -> Hsla { c(ud::N400) }
 /// Selected column / row and the row number of the selected cell (#E9EEFC… a 10% primary on white).
 pub fn sel_bg() -> Hsla { c(0xe9eefc) }
+/// The row of the selected cell (飞书 #E7EEFD, measured in its embedded base, EMBED.md §3).
+pub fn sel_row() -> Hsla { c(0xe7eefd) }
 /// A range selection's fill over the cells.
 pub fn range_bg() -> Hsla { crate::theme::adapt(Rgba { r: 20. / 255., g: 86. / 255., b: 240. / 255., a: 0.08 }.into()) }
 pub fn row_hover() -> Hsla { c(ud::N50) }
-pub fn header_bg() -> Hsla { c(ud::N50) }
 pub fn tabs_bg() -> Hsla { c(ud::N50) }
 pub fn star() -> Hsla { c(ud::O350) }
 pub fn found_bg() -> Hsla { c(0xfff5c2) }

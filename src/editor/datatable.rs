@@ -1,5 +1,5 @@
 //! 数据表 block: the table drawn in the page itself (`crate::table::TableView`,
-//! editable where it is, with a height that can be dragged), and 全屏 over
+//! editable where it is, as tall as its rows), and 全屏 over
 //! the whole note pane the way a 画板 opens. The block only names its file;
 //! the view reads and writes it (`crate::table::BaseState`). A standalone
 //! `.sqlite` file opens straight into the full view.
@@ -23,22 +23,21 @@ pub struct DataTablesUi {
 impl R<'_> {
     pub(super) fn datatable_block(&self, b: &Block, t: &TableRef, cx: &mut Context<Editor>) -> AnyElement {
         let id = b.id;
-        let frame = || div().id(("datatable", id.0)).relative().w_full().rounded(px(8.));
+        let frame = || div().id(("datatable", id.0)).relative().w_full();
         // the drag ghost, and the frame before the view exists
         let Some(view) = self.ed.datatables.views.get(&id).map(|v| v.0.clone()).filter(|_| !self.ghost) else {
             return frame().h(px(t.height.min(160.))).border_1().border_color(Theme::line_border()).flex().items_center().justify_center()
                 .text_size(px(13.)).text_color(Theme::text_placeholder()).child(crate::settings::label("数据表")).into_any_element();
         };
-        let h = view.read(cx).block_height();
         let covered = self.ed.datatables.open == Some(id);
-        let grip = view.clone();
-        frame().h(px(h))
+        // the view is as tall as its rows (`TableView::render`); while it is full-pane, a gap of its height stays
+        let h = view.read(cx).height;
+        frame()
             // clicks inside belong to the table, not to the page's caret
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .when(covered, |d| d.h(px(h)))
             .when(!covered, |d| d.child(view))
-            .child(div().id(("datatable-grip", id.0)).absolute().left_0().right_0().bottom(px(-4.)).h(px(8.)).cursor(CursorStyle::ResizeUpDown)
-                .on_mouse_down(MouseButton::Left, move |ev, _, cx| { cx.stop_propagation(); grip.update(cx, |v, cx| v.begin_height_drag(f32::from(ev.position.y), cx)); }))
             .into_any_element()
     }
 }
@@ -62,8 +61,8 @@ impl Editor {
             let sub = cx.subscribe_in(&view, window, move |e, view, ev: &TableEvent, window, cx| match ev {
                 TableEvent::Expand => e.open_table(id, window, cx),
                 TableEvent::Close => e.close_table(window, cx),
-                // which table and view shows, and how tall: the block remembers
-                TableEvent::Shown | TableEvent::Resized => {
+                // which table and view shows: the block remembers
+                TableEvent::Shown => {
                     let Some(BlockKind::DataTable(old)) = e.core.block(id).map(|b| b.kind.clone()) else { return };
                     let (table, shown) = view.read(cx).shown(cx);
                     let new = TableRef { src: old.src.clone(), table, view: shown, height: view.read(cx).height };

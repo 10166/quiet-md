@@ -10,7 +10,8 @@ use crate::ui::ui_text;
 /// One line of text that ends in an ellipsis, or (in a tall row) wraps.
 fn text_line(s: String, color: Hsla, wrap: bool) -> Div {
     if wrap { div().w_full().text_color(color).line_height(px(20.)).overflow_hidden().child(SharedString::from(s)) }
-    else { div().w_full().text_color(color).overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(s)) }
+    // the in-place editor's line height (`TextField`: 20), so typing and the finished cell put the text at the same place
+    else { div().w_full().text_color(color).line_height(px(20.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(s)) }
 }
 
 /// A value as shown, without anything to click. `wrap`: there is room for more than one line.
@@ -35,7 +36,7 @@ pub(crate) fn value_view(base: &Base, f: &Field, v: &Value, wrap: bool) -> AnyEl
         Value::Number(n) if f.ty == FieldType::Progress => div().w_full().flex().items_center().gap(px(8.))
             .child(div().flex_1().min_w(px(20.)).h(px(6.)).rounded(px(3.)).bg(c(ud::N200)).child(div().h_full().rounded(px(3.)).bg(Theme::primary()).w(relative(n.clamp(0., 1.) as f32))))
             .child(div().flex_none().text_color(Theme::text()).child(field::format_number(*n, f))).into_any_element(),
-        Value::Number(n) => div().w_full().flex().justify_end().text_color(Theme::text()).whitespace_nowrap().child(ui_text(field::format_number(*n, f))).into_any_element(),
+        Value::Number(n) => div().w_full().flex().justify_end().text_color(Theme::text()).line_height(px(20.)).whitespace_nowrap().child(ui_text(field::format_number(*n, f))).into_any_element(),
         Value::Text(s) if f.ty == FieldType::Url || f.ty == FieldType::Email => text_line(s.clone(), Theme::link(), false).into_any_element(),
         Value::Text(s) => text_line(s.clone(), Theme::text(), wrap).into_any_element(),
         Value::Date(_) | Value::List(_) => text_line(field::display_in(base, f, v), Theme::text(), wrap).into_any_element(),

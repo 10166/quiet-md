@@ -363,9 +363,12 @@ fn field_list(t: &Table, view: &View, panel: &Panel, cx: &Context<TableView>) ->
 
 // ---- 筛选 ----
 
+/// A condition panel with nothing in it yet: only its title and an add button, so narrow.
+const EMPTY_W: f32 = 280.;
+
 fn filter_panel(t: &Table, view: &View, panel: &Panel, cx: &Context<TableView>) -> AnyElement {
     let f = &view.opts.filter;
-    let mut p = shell("tb-panel-filter", 560., cx).p(px(16.)).gap(px(10.)).child(title("设置筛选条件"));
+    let mut p = shell("tb-panel-filter", if f.conds.is_empty() { EMPTY_W } else { 560. }, cx).p(px(16.)).gap(px(10.)).child(title("设置筛选条件"));
     if f.conds.len() >= 2 {
         let all = f.all;
         p = p.child(div().flex().items_center().gap(px(8.)).text_color(Theme::text_caption())
@@ -397,7 +400,7 @@ const GROUP_LEVELS: usize = 3;
 
 fn order_panel(t: &Table, view: &View, kind: Kind, cx: &Context<TableView>) -> AnyElement {
     let (list, group) = (sorts(view, kind), kind == Kind::Group);
-    let mut p = shell(if group { "tb-panel-group" } else { "tb-panel-sort" }, 400., cx).p(px(16.)).gap(px(10.)).child(title(if group { "设置分组条件" } else { "设置排序条件" }));
+    let mut p = shell(if group { "tb-panel-group" } else { "tb-panel-sort" }, if list.is_empty() { EMPTY_W } else { 400. }, cx).p(px(16.)).gap(px(10.)).child(title(if group { "设置分组条件" } else { "设置排序条件" }));
     for (i, s) in list.iter().enumerate() {
         let f = t.field(s.field);
         let (asc, desc) = order_words(f.map(|f| f.ty));
@@ -459,7 +462,7 @@ fn height_panel(view: &View, cx: &Context<TableView>) -> AnyElement {
 // ---- 填色 ----
 
 fn color_panel(t: &Table, view: &View, panel: &Panel, cx: &Context<TableView>) -> AnyElement {
-    let mut p = shell("tb-panel-color", 560., cx).p(px(16.)).gap(px(10.)).child(title("设置填色条件"));
+    let mut p = shell("tb-panel-color", if view.opts.colors.is_empty() { EMPTY_W } else { 560. }, cx).p(px(16.)).gap(px(10.)).child(title("设置填色条件"));
     for (i, rule) in view.opts.colors.iter().enumerate() {
         let cur = rule.color % 10;
         p = p.child(div().flex().items_center().gap(px(8.))

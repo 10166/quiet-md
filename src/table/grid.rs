@@ -44,12 +44,15 @@ impl TableView {
         size(if w > 0. { w } else { 1200. }, if h > 0. { h } else { 800. })
     }
 
-    fn content_h(&self, row_h: f32) -> f32 { self.tops.last().copied().unwrap_or(0.) + row_h }
+    /// Room left under the last row: none in a page, where the block is exactly as tall as its rows.
+    fn slack(&self) -> f32 { if self.full { 8. } else { 0. } }
+
+    fn content_h(&self, _row_h: f32) -> f32 { self.tops.last().copied().unwrap_or(0.) + ADD_ROW_H }
 
     pub(crate) fn clamp_scroll(&mut self, cols: &Cols, row_h: f32) {
         let s = self.view_size();
         self.scroll.x = self.scroll.x.clamp(0., (cols.total + ADD_FIELD_W - s.width).max(0.));
-        self.scroll.y = self.scroll.y.clamp(0., (self.content_h(row_h) + 8. - s.height).max(0.));
+        self.scroll.y = self.scroll.y.clamp(0., (self.content_h(row_h) + self.slack() - s.height).max(0.));
     }
 
     /// The selection as (first row, last row, first column, last column):
@@ -266,7 +269,6 @@ pub(crate) fn mouse_move(v: &mut TableView, ev: &MouseMoveEvent, _window: &mut W
     let mut drag = v.drag.take().unwrap();
     match &mut drag {
         Drag::ColWidth { x0, w0, w, .. } => *w = (*w0 + px_ - *x0).max(MIN_WIDTH),
-        Drag::Height { y0, h0, h } => *h = (*h0 + py_ - *y0).clamp(200., 2000.),
         Drag::Select => {
             if let Some(cell) = v.hit_cell(ev.position, t, &cols) && let Some(s) = v.sel.as_mut() { s.head = cell; }
             // near the edges the grid scrolls along
@@ -310,7 +312,6 @@ fn mouse_up_inner(v: &mut TableView, cx: &mut Context<TableView>) {
     let tid = v.table;
     match drag {
         Drag::ColWidth { field, w, w0, .. } => if (w - w0).abs() >= 1. { v.edit_view(cx, |view| { view.opts.widths.insert(field, w.round()); }); },
-        Drag::Height { h, h0, .. } => if (h - h0).abs() >= 1. { v.height = h.round(); cx.emit(TableEvent::Resized); },
         Drag::Select => {}
         Drag::Fill(to) => {
             let plan = {
@@ -388,13 +389,15 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
     let _ = window;
 
     // ---- header ----
+    // the header's fill stops with its last cell (the + column), never runs to the edge
+    let hdr_bg = Theme::bg_body();
     let hdr_cell = |ci: usize| {
         let f = fields[ci];
         let fid = f.id;
         let (w, on) = (cols.w[ci], v.col_sel == Some(fid));
         let sorted = view.opts.sorts.iter().find(|s| s.field == fid).map(|s| s.desc);
         div().id(("tb-hdr", fid)).group("tb-hdr").relative().flex_none().w(px(w)).h_full().flex().items_center().gap(px(4.)).px(px(CELL_PAD_X))
-            .border_b_1().border_r_1().border_color(line())
+            .border_r_1().border_color(line()).bg(hdr_bg)
             .when(on, |d| d.bg(sel_bg())).when(!on, |d| d.hover(|s| s.bg(Theme::fill_hover())))
             .child(icon(field_glyph(f.ty), 14., Theme::text_caption()))
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(Theme::text()).child(ui_text(f.name.clone())))
@@ -433,7 +436,7 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
                 })))
     };
     let mut hdr_frozen = div().flex_none().flex().w(px(cols.frozen_w)).h_full().border_r_1().border_color(frozen_line())
-        .child(div().id("tb-hdr-check").group("tb-hdr-all").flex_none().w(px(GUTTER_W)).h_full().flex().items_center().justify_center().border_r_1().border_b_1().border_color(line()).cursor_pointer()
+        .child(div().id("tb-hdr-check").group("tb-hdr-all").flex_none().w(px(GUTTER_W)).h_full().flex().items_center().justify_center().border_r_1().border_color(line()).bg(hdr_bg).cursor_pointer()
             .child(div().when(!all_sel, |d| d.invisible().group_hover("tb-hdr-all", |s| s.visible())).child(checkbox(all_sel)))
             .on_click(cx.listener(|v, _, _, cx| {
                 let ids: Vec<RecId> = { let st = v.state.read(cx); st.doc.base.table(v.table).map(|t| v.result.records.iter().map(|i| t.records[*i].id).collect()).unwrap_or_default() };
@@ -444,10 +447,11 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
     for ci in 0..cols.frozen { hdr_frozen = hdr_frozen.child(hdr_cell(ci)); }
     let mut hdr_scroll = div().flex().h_full().ml(px(-sx));
     for ci in cols.frozen..fields.len() { hdr_scroll = hdr_scroll.child(hdr_cell(ci)); }
-    hdr_scroll = hdr_scroll.child(div().id("tb-add-field").flex_none().w(px(ADD_FIELD_W)).h_full().flex().items_center().justify_center().border_b_1().border_r_1().border_color(line())
+    hdr_scroll = hdr_scroll.child(div().id("tb-add-field").flex_none().w(px(ADD_FIELD_W)).h_full().flex().items_center().justify_center().bg(hdr_bg)
         .cursor_pointer().hover(|s| s.bg(Theme::fill_hover())).child(icon("plus", 15., Theme::icon()))
         .on_click(cx.listener(|v, ev: &ClickEvent, window, cx| { let p = ev.position(); menus::add_field(v, None, point(p.x - px(160.), p.y + px(16.)), window, cx); })));
-    let header = div().flex_none().flex().h(px(HEADER_H)).bg(header_bg())
+    let inline = !v.full;
+    let header = div().flex_none().flex().h(px(HEADER_H)).bg(Theme::bg_body()).border_b_1().border_color(line())
         .child(hdr_frozen).child(div().flex_1().min_w_0().h_full().overflow_hidden().child(hdr_scroll));
 
     // ---- rows in sight ----
@@ -497,9 +501,7 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
                             v.col_sel = None;
                             cx.notify();
                         })))
-                    .child(div().id(("tb-open", rid as usize)).absolute().right(px(2.)).top_0().bottom_0().w(px(16.)).flex().items_center().justify_center().cursor_pointer()
-                        .invisible().group_hover("tb-row", |s| s.visible()).child(icon("expand", 12., Theme::text_caption()))
-                        .on_mouse_down(MouseButton::Left, cx.listener(move |v, _, window, cx| { cx.stop_propagation(); v.commit_edit(true, window, cx); record::open(v, rid, window, cx); })));
+;
                 let cell = |ci: usize| {
                     let f = fields[ci];
                     let id: CellId = (rid, f.id);
@@ -518,6 +520,11 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
                         .when((in_sel && multi) || filling, |d| d.bg(range_bg()))
                         .when(editing, |d| d.bg(Theme::bg_body()))
                         .child(div().w_full().h(px(row_h.min(32.) - 1.)).flex().items_center().when(row_h > 32., |d| d.h_full().items_start().py(px(6.))).child(content))
+                        // the title cell offers 查看 (the record) while the row is hovered, as 飞书
+                        .when(ci == 0 && !editing, |d| d.child(div().absolute().right(px(6.)).top_0().h(px(row_h.min(32.))).flex().items_center().invisible().group_hover("tb-row", |s| s.visible())
+                            .child(div().id(("tb-open", rid as usize)).h(px(22.)).px(px(6.)).flex().items_center().gap(px(4.)).rounded(px(6.)).border_1().border_color(line()).bg(Theme::bg_body()).cursor_pointer()
+                                .hover(|s| s.bg(c(ud::N100))).child(icon("expand", 12., Theme::icon())).child(div().text_size(px(12.)).text_color(Theme::text()).child(crate::settings::label("查看")))
+                                .on_mouse_down(MouseButton::Left, cx.listener(move |v, _, window, cx| { cx.stop_propagation(); v.commit_edit(true, window, cx); record::open(v, rid, window, cx); })))))
                         .when(is_head, |d| d.child(div().absolute().top(px(-1.)).left(px(-1.)).right(px(-1.)).bottom(px(-1.)).border_2().border_color(Theme::primary())))
                         .when(corner, |d| d.child(div().id(("tb-fill", rid as usize)).absolute().right(px(-1.)).bottom(px(-1.)).size(px(7.)).bg(Theme::primary()).border_1().border_color(Theme::bg_body())
                             .cursor(CursorStyle::Crosshair)
@@ -552,10 +559,11 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
                 for ci in 0..cols.frozen { fz = fz.child(cell(ci)); }
                 let mut sc = div().flex().h_full().ml(px(-sx));
                 for ci in cols.frozen..fields.len() { sc = sc.child(cell(ci)); }
-                body = body.child(div().group("tb-row").absolute().left_0().right_0().top(px(top)).h(px(row_h)).flex()
+                body = body.child(div().group("tb-row").absolute().left_0().w(px((cols.total - sx).max(cols.frozen_w))).top(px(top)).h(px(row_h)).flex()
                     .when_some(tint, |d, slot| d.bg(row_tint(slot)))
+                    .when(active_row && !checked, |d| d.bg(sel_row()))
                     .when(checked, |d| d.bg(sel_bg()))
-                    .when(!checked && tint.is_none(), |d| d.hover(|s| s.bg(row_hover())))
+                    .when(!checked && !active_row && tint.is_none(), |d| d.hover(|s| s.bg(row_hover())))
                     .when(dragging, |d| d.opacity(0.4))
                     .child(fz).child(div().flex_1().min_w_0().h_full().overflow_hidden().child(sc)));
             }
@@ -564,8 +572,11 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
     // the add-record line, after the last row
     let end = v.tops.last().copied().unwrap_or(0.) - sy;
     if end < vs.height {
-        body = body.child(div().id("tb-add-row").absolute().left_0().top(px(end)).w(px((cols.total - sx).max(cols.frozen_w))).h(px(row_h.min(32.))).flex().items_center().cursor_pointer()
-            .border_b_1().border_color(line()).hover(|s| s.bg(row_hover()))
+        // 飞书: the last field's right edge runs on down through the add-record line, and that line spans the whole width
+        let last = cols.total - sx;
+        if last > cols.frozen_w { body = body.child(div().absolute().top(px(end)).left(px(last - 1.)).w(px(1.)).h(px(ADD_ROW_H)).bg(line())); }
+        body = body.child(div().id("tb-add-row").absolute().left_0().right_0().top(px(end)).h(px(ADD_ROW_H)).flex().items_center().cursor_pointer()
+            .when(!inline, |d| d.border_b_1().border_color(line())).hover(|s| s.bg(row_hover()))
             .child(div().flex_none().w(px(GUTTER_W)).flex().items_center().justify_center().child(icon("plus", 15., Theme::text_placeholder())))
             .on_click(cx.listener(|v, _, window, cx| v.add_record(None, window, cx))));
     }
@@ -599,26 +610,35 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
             .on_click(cx.listener(move |v, ev: &ClickEvent, _, cx| { let p = ev.position(); v.open_popup(point(p.x - px(80.), p.y - px(12.)), Popup::Stat(fid), cx); }))
     };
     let count = v.result.records.len();
-    let mut ft_frozen = div().flex_none().flex().w(px(cols.frozen_w)).h_full().border_r_1().border_color(frozen_line())
+    let mut ft_frozen = div().flex_none().flex().w(px(cols.frozen_w)).h_full().when(!inline, |d| d.border_r_1().border_color(frozen_line()))
         .child(div().flex_none().w(px(GUTTER_W)).h_full());
     for ci in 0..cols.frozen {
         ft_frozen = ft_frozen.child(if ci == 0 && !view.opts.stats.contains_key(&fields[0].id) {
-            div().flex_none().w(px(cols.w[0])).h_full().flex().items_center().px(px(CELL_PAD_X)).text_size(px(12.)).text_color(Theme::text_caption())
-                .child(format!("{count} {}", crate::settings::label("条记录"))).into_any_element()
+            // 飞书: the count at the right of the title column, its menu the summary choices
+            let fid = fields[0].id;
+            div().flex_none().w(px(cols.w[0])).h_full().flex().items_center().justify_end().px(px(CELL_PAD_X))
+                .child(div().id("tb-count").h(px(24.)).px(px(4.)).flex().items_center().gap(px(4.)).rounded(px(4.)).cursor_pointer().hover(|s| s.bg(Theme::fill_hover()))
+                    .text_size(px(12.)).text_color(Theme::text_caption())
+                    .child(format!("{count} {}", crate::settings::label("条记录"))).child(icon("chevron-down", 11., Theme::text_caption()))
+                    .on_click(cx.listener(move |v, ev: &ClickEvent, _, cx| { let p = ev.position(); v.open_popup(point(p.x - px(80.), p.y - px(12.)), Popup::Stat(fid), cx); })))
+                .into_any_element()
         } else { stat_cell(ci).into_any_element() });
     }
     let mut ft_scroll = div().flex().h_full().ml(px(-sx));
     for ci in cols.frozen..fields.len() { ft_scroll = ft_scroll.child(stat_cell(ci)); }
-    let footer = div().flex_none().flex().h(px(FOOTER_H)).border_t_1().border_color(line()).bg(Theme::bg_body())
+    // in a page the count sits under the frame, unboxed (飞书's embedded base)
+    let footer = div().flex_none().flex().h(px(FOOTER_H)).when(!inline, |d| d.border_t_1().border_color(line())).bg(Theme::bg_body())
         .child(ft_frozen).child(div().flex_1().min_w_0().h_full().overflow_hidden().child(ft_scroll));
 
     let max_x = (cols.total + ADD_FIELD_W - vs.width).max(0.);
-    let max_y = (v.content_h(row_h) + 8. - vs.height).max(0.);
+    let max_y = (v.content_h(row_h) + v.slack() - vs.height).max(0.);
     div().id("tb-grid").relative().flex_1().min_h_0().flex().flex_col()
-        .child(header)
-        .child(body.when(empty, |d| d.child(div().absolute().left_0().right_0().top(px(48.)).flex().justify_center().text_color(Theme::text_placeholder()).child(crate::settings::label("没有符合筛选条件的记录")))))
+        // in a page, a frame around the header and the rows only
+        .child(div().flex_1().min_h_0().flex().flex_col().when(inline, |d| d.border_1().border_color(line()))
+            .child(header)
+            .child(body.when(empty, |d| d.child(div().absolute().left_0().right_0().top(px(48.)).flex().justify_center().text_color(Theme::text_placeholder()).child(crate::settings::label("没有符合筛选条件的记录")))))
+            .children(scrollbars(v, max_x, max_y, vs, cols.frozen_w, inline)))
         .child(footer)
-        .children(scrollbars(v, max_x, max_y, vs, cols.frozen_w))
         .on_scroll(cx.listener(move |v, ev: &ScrollEvent, _, cx| {
             let d = ev.delta.pixel_delta(px(20.));
             let (mut dx, mut dy) = (f32::from(d.x), f32::from(d.y));
@@ -634,19 +654,20 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
 }
 
 /// Thin scroll thumbs along the right and bottom edges of the body.
-fn scrollbars(v: &TableView, max_x: f32, max_y: f32, vs: Size<f32>, frozen_w: f32) -> Vec<AnyElement> {
+/// `quiet`: only while the pointer is over the block (a table in a page).
+fn scrollbars(v: &TableView, max_x: f32, max_y: f32, vs: Size<f32>, frozen_w: f32, quiet: bool) -> Vec<AnyElement> {
     let mut out = vec![];
     if max_y > 0. {
         let track = vs.height;
         let len = (track * track / (track + max_y)).max(28.);
         let top = HEADER_H + (track - len) * (v.scroll.y / max_y);
-        out.push(div().absolute().right(px(2.)).top(px(top)).w(px(6.)).h(px(len)).rounded(px(3.)).bg(Theme::scrollbar_thumb()).into_any_element());
+        out.push(div().absolute().right(px(2.)).top(px(top)).w(px(6.)).h(px(len)).rounded(px(3.)).bg(Theme::scrollbar_thumb()).when(quiet, |d| d.invisible().group_hover("tb-block", |s| s.visible())).into_any_element());
     }
     if max_x > 0. {
         let track = vs.width - frozen_w;
         let len = (track * track / (track + max_x)).max(28.);
         let left = frozen_w + (track - len) * (v.scroll.x / max_x);
-        out.push(div().absolute().bottom(px(FOOTER_H + 2.)).left(px(left)).h(px(6.)).w(px(len)).rounded(px(3.)).bg(Theme::scrollbar_thumb()).into_any_element());
+        out.push(div().absolute().bottom(px(if quiet { 2. } else { FOOTER_H + 2. })).left(px(left)).h(px(6.)).w(px(len)).rounded(px(3.)).bg(Theme::scrollbar_thumb()).when(quiet, |d| d.invisible().group_hover("tb-block", |s| s.visible())).into_any_element());
     }
     out
 }

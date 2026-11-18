@@ -121,8 +121,11 @@ fn placeholder(ty: FieldType) -> &'static str {
     }
 }
 
-pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, r: &Record, _window: &mut Window, cx: &Context<TableView>) -> AnyElement {
+pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, r: &Record, window: &mut Window, cx: &Context<TableView>) -> AnyElement {
     let rid = r.id;
+    // a table in a page opens the record as a dialog over the window (飞书 docx), not beside the table
+    let modal = !v.full;
+    let label_w = if modal { 240. } else { LABEL_W };
     let ui = &v.record;
     // the neighbours in the view's order (a record the filter leaves out has none)
     let place = v.order.get(&rid).copied();
@@ -135,7 +138,7 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, r: &Rec
         button(id, if up { glyph.with_transformation(Transformation::rotate(percentage(0.5))) } else { glyph }, to.is_some())
             .on_click(cx.listener(move |v, _, window, cx| if let Some(to) = to { open(v, to, window, cx) }))
     };
-    let head = div().flex_none().h(px(48.)).px(px(12.)).flex().items_center().gap(px(4.)).border_b_1().border_color(Theme::line_divider())
+    let head = div().flex_none().h(px(if modal { 64. } else { 48. })).px(px(if modal { 24. } else { 12. })).flex().items_center().gap(px(4.)).border_b_1().border_color(Theme::line_divider())
         .child(nav("tb-rec-prev", true, prev))
         .child(nav("tb-rec-next", false, next))
         .when_some(place, |d, p| d.child(div().pl(px(4.)).text_size(px(12.)).text_color(Theme::text_placeholder()).child(format!("{}/{}", p + 1, v.result.records.len()))))
@@ -159,7 +162,7 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, r: &Rec
     let title = t.title(r);
     let title_cell = primary.map(|f| (rid, f.id));
     let title_editing = title_cell.is_some() && ui.editing == title_cell;
-    let title_el = div().px(px(16.)).pt(px(16.)).pb(px(8.)).flex().text_size(px(20.)).line_height(px(28.)).font_weight(FontWeight::MEDIUM)
+    let title_el = div().px(px(16.)).pt(px(if modal { 24. } else { 16. })).pb(px(if modal { 16. } else { 8. })).flex().text_size(px(if modal { 24. } else { 20. })).line_height(px(if modal { 32. } else { 28. })).font_weight(if modal { FontWeight::SEMIBOLD } else { FontWeight::MEDIUM })
         .child(value_box("tb-rec-title".into(), title_editing, primary.is_some_and(|f| !f.ty.computed()))
             .map(|d| if title_editing { input(d) } else if title.is_empty() { d.child(empty("未命名记录")) } else { d.child(div().w_full().child(SharedString::from(title))) })
             .when_some(title_cell.filter(|_| !title_editing), |d, cell| d.on_click(cx.listener(move |v, ev: &ClickEvent, window, cx| activate(v, cell, ev.position(), window, cx)))));
@@ -189,7 +192,7 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, r: &Rec
             _ => Some(kanban::value(base, f, val)),
         };
         div().w_full().px(px(16.)).flex().items_start().gap(px(8.))
-            .child(div().flex_none().w(px(LABEL_W)).h(px(36.)).pl(px(8.)).flex().items_center().gap(px(6.))
+            .child(div().flex_none().w(px(label_w)).h(px(36.)).pl(px(8.)).flex().items_center().gap(px(6.))
                 .child(icon(field_glyph(f.ty), 15., Theme::icon()))
                 .child(div().flex_1().min_w_0().text_color(Theme::text_caption()).overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(f.name.clone()))))
             .child(value_box(("tb-rec-val", fid).into(), editing, !f.ty.computed() && f.ty != FieldType::Rating)
@@ -236,6 +239,19 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, r: &Rec
                 if v.sel.is_some_and(|s| s.anchor.0 == rid || s.head.0 == rid) { v.sel = None; }
             }))))).with_priority(5));
 
+    if modal {
+        // 飞书's record dialog: the page dimmed, the record centred (781×675 in a 1161×795 window, measured)
+        let vp = window.viewport_size();
+        let (w, h) = ((f32::from(vp.width) * 0.86).min(1200.), (f32::from(vp.height) * 0.86).min(900.));
+        return deferred(anchored().position(point(px(0.), px(0.))).child(
+            div().id("tb-record-scrim").occlude().w(vp.width).h(vp.height).bg(crate::ui::scrim()).flex().items_center().justify_center()
+                .on_mouse_down(MouseButton::Left, cx.listener(|v, _, window, cx| close(v, window, cx)))
+                .child(crate::ui::dialog("tb-record").w(px(w)).h(px(h)).flex().flex_col().overflow_hidden().text_size(px(TEXT))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(head)
+                    .child(div().id("tb-rec-body").flex_1().min_h_0().overflow_y_scroll().px(px(40.)).pb(px(24.)).child(list))
+                    .children(menu)))).with_priority(4).into_any_element();
+    }
     div().id("tb-record").flex_none().w(px(RECORD_W)).h_full().flex().flex_col().bg(Theme::bg_body()).border_l_1().border_color(line())
         .child(head)
         .child(div().id("tb-rec-body").flex_1().min_h_0().overflow_y_scroll().child(list))

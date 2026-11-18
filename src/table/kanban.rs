@@ -8,7 +8,8 @@ use super::*;
 use crate::feishu_theme::{c, ud};
 use crate::ui::ui_text;
 
-const COL_W: f32 = 272.;
+/// 飞书's kanban column: 256 wide, 8 apart (EMBED.md §5).
+const COL_W: f32 = 256.;
 /// Cards drawn per column; the rest are only counted (a long table would draw slowly).
 const MAX_CARDS: usize = 200;
 /// Fields listed on a card, after its title.
@@ -51,19 +52,20 @@ pub(crate) fn cover(path: PathBuf, h: f32) -> AnyElement {
 
 /// The box of a card.
 pub(crate) fn card_shell(id: impl Into<ElementId>) -> Stateful<Div> {
-    div().id(id).flex_none().flex().flex_col().rounded(px(6.)).bg(Theme::bg_body()).border_1().border_color(line()).overflow_hidden().cursor_pointer()
+    div().id(id).flex_none().flex().flex_col().rounded(px(6.)).bg(Theme::bg_body()).border_1().border_color(c(ud::N200)).overflow_hidden().cursor_pointer()
         .hover(|s| s.shadow(crate::theme::shadow_card()))
 }
 
-/// A card's text: the record's title, then up to `max` of the view's fields that are filled in (never `skip`), each under its name.
-pub(crate) fn card_text(base: &Base, t: &Table, view: &View, r: &Record, skip: Option<FieldId>, max: usize) -> Div {
+/// A card's text: the record's title, then up to `max` of the view's fields that are filled in (never `skip`),
+/// each under its name when `names` (画册); a kanban card shows the values alone, as 飞书's.
+pub(crate) fn card_text(base: &Base, t: &Table, view: &View, r: &Record, skip: Option<FieldId>, max: usize, names: bool) -> Div {
     let title = t.title(r);
     let mut d = div().w_full().px(px(12.)).py(px(10.)).flex().flex_col().gap(px(8.))
         .child(div().w_full().line_height(px(20.)).font_weight(FontWeight::MEDIUM).line_clamp(3).when(title.is_empty(), |d| d.text_color(Theme::text_placeholder()))
             .child(SharedString::from(if title.is_empty() { label("未命名记录") } else { title })));
     for f in t.visible_fields(view).into_iter().skip(1).filter(|f| Some(f.id) != skip && !r.get(f.id).is_empty()).take(max) {
         d = d.child(div().w_full().flex().flex_col().gap(px(2.))
-            .child(div().w_full().text_size(px(12.)).text_color(Theme::text_caption()).overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(f.name.clone())))
+            .when(names, |d| d.child(div().w_full().text_size(px(12.)).text_color(Theme::text_caption()).overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(f.name.clone()))))
             .child(value(base, f, r.get(f.id))));
     }
     d
@@ -86,8 +88,10 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, _window
         let col = match r.get(sid) { Value::Select(ids) => ids.first().and_then(|id| at.get(id)).copied().unwrap_or(0), _ => 0 };
         cols[col].1.push(r);
     }
-    let mut board = div().id("tb-kanban").flex_1().min_h_0().w_full().flex().gap(px(12.)).p(px(16.)).overflow_x_scroll().track_scroll(&v.board_scroll);
+    let mut board = div().id("tb-kanban").flex_1().min_h_0().w_full().flex().gap(px(8.)).px(px(16.)).py(px(12.)).overflow_x_scroll().track_scroll(&v.board_scroll);
     for (ci, (opt, recs)) in cols.iter().enumerate() {
+        // 未分类 only when something is in it
+        if opt.is_none() && recs.is_empty() { continue; }
         let oid = opt.map(|o| o.id);
         let add = move |v: &mut TableView, window: &mut Window, cx: &mut Context<TableView>| add_card(v, sid, oid, window, cx);
         let head = div().flex_none().h(px(40.)).pl(px(12.)).pr(px(8.)).flex().items_center().gap(px(8.))
@@ -102,25 +106,27 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, _window
                 .invisible().group_hover("tb-kb-col", |s| s.visible()).hover(|s| s.bg(Theme::fill_hover()))
                 .child(icon("plus", 14., Theme::icon()))
                 .on_click(cx.listener(move |v, _, window, cx| add(v, window, cx))));
-        let mut list = div().id(("tb-kb-list", ci)).flex_1().min_h_0().overflow_y_scroll().px(px(8.)).pb(px(4.)).flex().flex_col().gap(px(8.));
+        let mut list = div().id(("tb-kb-list", ci)).flex_1().min_h_0().overflow_y_scroll().px(px(8.)).flex().flex_col().gap(px(4.));
         for r in recs.iter().take(MAX_CARDS) {
             let rid = r.id;
             let title = t.title(r);
             list = list.child(card_shell(("tb-kb-card", rid as usize))
                 .children(cover_path(r, cover_field).map(|p| cover(p, 120.)))
-                .child(card_text(base, t, view, r, Some(sid), CARD_FIELDS))
+                .child(card_text(base, t, view, r, Some(sid), CARD_FIELDS, false))
                 .on_click(cx.listener(move |v, _, window, cx| record::open(v, rid, window, cx)))
                 .on_drag(CardDrag { rec: rid, title: if title.is_empty() { label("未命名记录") } else { title }.into() }, |d, _, _, cx| cx.new(|_| d.clone())));
         }
         if recs.len() > MAX_CARDS { list = list.child(more(recs.len() - MAX_CARDS).px(px(4.))); }
-        board = board.child(div().id(("tb-kb-col", ci)).group("tb-kb-col").flex_none().w(px(COL_W)).flex().flex_col().rounded(px(8.)).bg(c(ud::N100))
+        // the column takes its option's colour, faintly (飞书: #f4f7ff for blue)
+        let tint = match opt { Some(o) => { let mut h = tag_colors(o.color).0; h.a = 0.4; h } None => c(ud::N50) };
+        board = board.child(div().id(("tb-kb-col", ci)).group("tb-kb-col").flex_none().w(px(COL_W)).flex().flex_col().rounded(px(8.)).bg(tint)
             .drag_over::<CardDrag>(|s, _, _, _| s.bg(c(ud::N200)))
             .on_drop(cx.listener(move |v, d: &CardDrag, _, cx| move_card(v, d.rec, sid, oid, cx)))
             .child(head)
             .child(list)
-            .child(div().id(("tb-kb-new", ci)).flex_none().h(px(32.)).mx(px(8.)).my(px(4.)).px(px(6.)).flex().items_center().gap(px(4.)).rounded(px(6.)).cursor_pointer()
-                .text_color(Theme::text_caption()).hover(|s| s.bg(Theme::fill_hover()))
-                .child(icon("plus", 14., Theme::icon())).child(label("新增记录"))
+            .child(div().id(("tb-kb-new", ci)).flex_none().h(px(36.)).mx(px(8.)).my(px(4.)).flex().items_center().justify_center().rounded(px(6.)).cursor_pointer()
+                .hover(|s| s.bg(Theme::fill_hover()))
+                .child(icon("plus", 15., Theme::icon()))
                 .on_click(cx.listener(move |v, _, window, cx| add(v, window, cx)))));
     }
     board.into_any_element()

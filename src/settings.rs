@@ -1552,6 +1552,7 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "未命名文档" => "Untitled",
         "画板" => "Board",
         // 数据表
+        "查看" => "Open",
         "退出全屏" => "Exit full screen",
         "上周" => "Last week",
         "上月" => "Last month",

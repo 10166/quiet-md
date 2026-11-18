@@ -25,7 +25,7 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, _window
                 Some(p) => kanban::cover(p, COVER_H),
                 None => div().flex_none().w_full().h(px(COVER_H)).bg(c(ud::N100)).flex().items_center().justify_center().child(icon("image", 28., c(ud::N400))).into_any_element(),
             }))
-            .child(kanban::card_text(base, t, view, r, None, CARD_FIELDS))
+            .child(kanban::card_text(base, t, view, r, None, CARD_FIELDS, true))
             .on_click(cx.listener(move |v, _, window, cx| record::open(v, rid, window, cx))));
     }
     if total > MAX_CARDS { grid = grid.child(kanban::more(total - MAX_CARDS).w_full()); }

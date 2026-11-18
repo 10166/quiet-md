@@ -142,8 +142,6 @@ pub enum TableEvent {
     Expand,
     /// The table or view shown changed: the block remembers which.
     Shown,
-    /// The block's height was dragged (`TableView::height`).
-    Resized,
 }
 
 /// A cell: record and field.
@@ -168,8 +166,6 @@ pub(crate) enum Drag {
     ColMove { field: FieldId, x0: f32, x: f32, to: Option<usize> },
     /// Row handles dragged: lands before the record at place `to` of the view's order.
     RowMove { ids: Vec<RecId>, to: usize, y0: f32, y: f32, moved: bool },
-    /// The block's bottom edge.
-    Height { y0: f32, h0: f32, h: f32 },
 }
 
 /// What floats over the view. One at a time, with at most one `Dropdown` on top of it.
@@ -183,6 +179,8 @@ pub(crate) enum Popup {
     Files { rec: RecId, field: FieldId },
     Panel(panels::Panel),
     ViewMenu(ViewId),
+    /// The view list under a table-in-a-page's view name.
+    Views,
     AddView,
     TableMenu(TableId),
     Stat(FieldId),
@@ -248,6 +246,8 @@ pub struct TableView {
     pub(crate) popup: Option<(Point<Pixels>, Popup)>,
     pub(crate) dropdown: Option<Dropdown>,
     pub(crate) rename: Option<Rename>,
+    /// The view list's 新建 submenu is out.
+    pub(crate) views_new: bool,
     /// 记录详情.
     pub(crate) expanded: Option<RecId>,
     pub(crate) record: record::RecordUi,
@@ -311,18 +311,13 @@ impl TableView {
             result: Default::default(), tops: Default::default(), order: Default::default(), row_of: Default::default(), result_key: (u64::MAX, 0, 0, 0),
             sel: None, rows_sel: HashSet::new(), col_sel: None, editing: None, input, aux, scroll: point(0., 0.),
             body: Rc::new(Cell::new(Bounds::default())), drag: None, popup: None, dropdown: None, rename: None,
-            expanded: None, record: Default::default(), find: None, find_input,
+            views_new: false, expanded: None, record: Default::default(), find: None, find_input,
             board_scroll: ScrollHandle::new(), _refresh: refresh, _subs: subs,
         }
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut App) { window.focus(&self.focus, cx); }
 
-    /// The block's height in the page, as it is being dragged.
-    pub fn block_height(&self) -> f32 { match &self.drag { Some(Drag::Height { h, .. }) => *h, _ => self.height } }
-
-    /// The page's grip under the block was pressed.
-    pub fn begin_height_drag(&mut self, y: f32, cx: &mut Context<Self>) { self.drag = Some(Drag::Height { y0: y, h0: self.height, h: self.height }); cx.notify(); }
 
     /// The names of the table and view shown (what the block saves).
     pub fn shown(&self, cx: &App) -> (Option<String>, Option<String>) {
@@ -415,6 +410,7 @@ impl TableView {
 
     pub(crate) fn open_popup(&mut self, pos: Point<Pixels>, popup: Popup, cx: &mut Context<Self>) {
         self.dropdown = None;
+        self.views_new = false;
         self.popup = Some((pos, popup));
         cx.notify();
     }
@@ -512,7 +508,8 @@ impl TableView {
         };
         let Some(name) = name else { return };
         self.popup = None;
-        self.aux.update(cx, |t, cx| { t.set_placeholder("", cx); t.set_text(&name, cx); t.select_all_text(cx); });
+        // 飞书's rename box: 16px text, all of it selected
+        self.aux.update(cx, |t, cx| { t.size = 16.; t.line_height = 22.; t.set_placeholder("", cx); t.set_text(&name, cx); t.select_all_text(cx); });
         window.focus(&self.aux.focus_handle(cx), cx);
         self.rename = Some(r);
         cx.notify();
@@ -524,7 +521,7 @@ impl Render for TableView {
         self.sync(cx);
         let state = self.state.clone();
         let st = state.read(cx);
-        let root = div().id("table-view").key_context("Table").track_focus(&self.focus).relative().size_full().flex().flex_col()
+        let root = div().id("table-view").key_context("Table").track_focus(&self.focus).relative().w_full().when(self.full, |d| d.h_full()).flex().flex_col()
             .bg(Theme::bg_body()).font_family(crate::theme::UI_FONT).text_size(px(TEXT)).text_color(Theme::text())
             .on_key_down(cx.listener(keys::key_down))
             // a gesture in progress follows the pointer wherever it goes in the window
@@ -549,12 +546,26 @@ impl Render for TableView {
             _ => gallery::unsupported(v.kind),
         };
         let side = self.expanded.and_then(|r| t.record(r)).map(|r| record::render(self, base, t, v, r, window, cx));
-        root.when(!self.full, |d| d.rounded(px(8.)).border_1().border_color(line()).overflow_hidden())
-            .child(menus::tabs(self, base, t, v, cx))
-            .child(menus::toolbar(self, base, t, v, cx))
-            .child(div().flex_1().min_h_0().flex()
-                .child(div().relative().flex_1().min_w_0().h_full().flex().flex_col().child(main).children(menus::find_bar(self, cx)).children(menus::selection_bar(self, t, cx)))
-                .children(side))
+        let body = div().flex_1().min_h_0().flex()
+            .child(div().relative().flex_1().min_w_0().h_full().flex().flex_col().child(main).children(menus::find_bar(self, cx)).children(menus::selection_bar(self, t, cx)))
+            .children(side);
+        // In a page, as 飞书 docx embeds a base: one quiet header line (the view's
+        // name; its tools only while the pointer is over the table), no frame
+        // around the block, and as tall as its rows. Full pane: the whole chrome.
+        let root = if self.full {
+            root.child(menus::tabs(self, base, t, v, cx)).child(menus::toolbar(self, base, t, v, cx)).child(body)
+        } else {
+            let grid = v.kind == ViewKind::Grid;
+            let h = if grid {
+                let rows = self.tops.last().copied().unwrap_or(0.) + ADD_ROW_H;
+                INLINE_HEAD_H + HEADER_H + rows.min(INLINE_MAX_ROWS_H) + FOOTER_H + 2.
+            } else { INLINE_HEAD_H + INLINE_BOARD_H };
+            self.height = h;
+            root.group("tb-block").h(px(h))
+                .child(menus::inline_header(self, base, t, v, cx))
+                .child(body.when(!grid, |d| d.border_t_1().border_color(line())))
+        };
+        root
             .children(menus::popup(self, base, t, v, window, cx))
             .children(menus::dropdown(self, cx))
             .into_any_element()

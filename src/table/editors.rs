@@ -19,7 +19,7 @@ pub(crate) fn edit_text(f: &Field, v: &Value) -> String {
 }
 
 pub(crate) fn open_select(v: &mut TableView, cell: CellId, pos: Point<Pixels>, window: &mut Window, cx: &mut Context<TableView>) {
-    v.aux.update(cx, |t, cx| { t.set_placeholder(crate::settings::label("查找或创建选项"), cx); t.set_text("", cx); });
+    v.aux.update(cx, |t, cx| { t.size = TEXT; t.line_height = 20.; t.set_placeholder(crate::settings::label("查找或创建选项"), cx); t.set_text("", cx); });
     window.focus(&v.aux.focus_handle(cx), cx);
     v.rename = None;
     v.open_popup(pos, Popup::Select { rec: cell.0, field: cell.1, editing: None }, cx);
@@ -32,7 +32,7 @@ pub(crate) fn open_date(v: &mut TableView, cell: CellId, pos: Point<Pixels>, cx:
 }
 
 pub(crate) fn open_links(v: &mut TableView, cell: CellId, pos: Point<Pixels>, window: &mut Window, cx: &mut Context<TableView>) {
-    v.aux.update(cx, |t, cx| { t.set_placeholder(crate::settings::label("搜索记录"), cx); t.set_text("", cx); });
+    v.aux.update(cx, |t, cx| { t.size = TEXT; t.line_height = 20.; t.set_placeholder(crate::settings::label("搜索记录"), cx); t.set_text("", cx); });
     window.focus(&v.aux.focus_handle(cx), cx);
     v.rename = None;
     v.open_popup(pos, Popup::Links { rec: cell.0, field: cell.1 }, cx);
@@ -62,7 +62,7 @@ pub(crate) fn aux_event(v: &mut TableView, ev: TextFieldEvent, window: &mut Wind
 
 fn back_to_options(v: &mut TableView, window: &mut Window, cx: &mut Context<TableView>) {
     if let Some((_, Popup::Select { editing, .. })) = v.popup.as_mut() { *editing = None; }
-    v.aux.update(cx, |t, cx| { t.set_placeholder(crate::settings::label("查找或创建选项"), cx); t.set_text("", cx); });
+    v.aux.update(cx, |t, cx| { t.size = TEXT; t.line_height = 20.; t.set_placeholder(crate::settings::label("查找或创建选项"), cx); t.set_text("", cx); });
     window.focus(&v.aux.focus_handle(cx), cx);
     cx.notify();
 }
@@ -153,7 +153,7 @@ pub(crate) fn select_popup(v: &TableView, t: &Table, rec: RecId, fid: FieldId, e
                 .on_mouse_down(MouseButton::Left, cx.listener(move |v, _, window, cx| {
                     cx.stop_propagation();
                     if let Some((_, Popup::Select { editing, .. })) = v.popup.as_mut() { *editing = Some(oid); }
-                    v.aux.update(cx, |t, cx| { t.set_placeholder("", cx); t.set_text(&name, cx); t.select_all_text(cx); });
+                    v.aux.update(cx, |t, cx| { t.size = TEXT; t.line_height = 20.; t.set_placeholder("", cx); t.set_text(&name, cx); t.select_all_text(cx); });
                     window.focus(&v.aux.focus_handle(cx), cx);
                     cx.notify();
                 })))
