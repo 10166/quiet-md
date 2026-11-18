@@ -911,6 +911,10 @@ impl Workspace {
                 p = p.child(div().flex_none().flex().items_start().gap(px(6.)).mb(px(8.))
                     .when_some(e.icon.as_ref(), |d, emoji| d.child(div().flex_none().text_size(px(14.)).line_height(px(20.)).child(emoji.clone())))
                     .child(div().min_w_0().text_size(px(14.)).line_height(px(20.)).font_weight(FontWeight::BOLD).child(e.title.clone())));
+                // A 数据表: its glyph (the rows are in its own file).
+                if e.meta.kind == crate::store::DocKind::Table {
+                    return p.child(div().flex_1().w_full().flex().items_center().justify_center().child(crate::ui::icon("storage", 40., Theme::text_placeholder())));
+                }
                 // A 画板: its board, drawn to fit the rest of the card.
                 if e.meta.kind == crate::store::DocKind::Board {
                     let board = thumb.blocks.iter().find_map(|b| match &b.kind { BlockKind::Board(bd) => Some(bd.clone()), _ => None }).unwrap_or_default();

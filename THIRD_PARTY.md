@@ -4,7 +4,7 @@ Quiet.md 本体以 MIT 协议发布（见 [LICENSE](LICENSE)）。下面是随�
 
 ## Rust 依赖
 
-由 `cargo metadata` 生成，共 764 个包。许可逐项列于下表，其中也包含 MPL-2.0；本表记录依赖声明，不替代各组件的许可文本。
+由 `cargo metadata` 生成，共 772 个包。许可逐项列于下表，其中也包含 MPL-2.0；本表记录依赖声明，不替代各组件的许可文本。
 
 要重新生成这张表：`scripts/licences.sh`（从 `cargo metadata` 取全部依赖）。
 
@@ -158,6 +158,8 @@ GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`co
 | event-listener | 5.4.2 | Apache-2.0 OR MIT |
 | event-listener-strategy | 0.5.4 | Apache-2.0 OR MIT |
 | exr | 1.74.2 | BSD-3-Clause |
+| fallible-iterator | 0.3.0 | MIT/Apache-2.0 |
+| fallible-streaming-iterator | 0.1.9 | MIT/Apache-2.0 |
 | fastrand | 2.5.0 | Apache-2.0 OR MIT |
 | fax | 0.2.7 | MIT |
 | fdeflate | 0.3.7 | MIT OR Apache-2.0 |
@@ -225,6 +227,7 @@ GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`co
 | hashbrown | 0.14.5 | MIT OR Apache-2.0 |
 | hashbrown | 0.16.1 | MIT OR Apache-2.0 |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 |
+| hashlink | 0.12.2 | MIT OR Apache-2.0 |
 | heapless | 0.9.3 | MIT OR Apache-2.0 |
 | heck | 0.4.1 | MIT OR Apache-2.0 |
 | heck | 0.5.0 | MIT OR Apache-2.0 |
@@ -285,6 +288,7 @@ GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`co
 | libloading | 0.8.9 | ISC |
 | libm | 0.2.16 | MIT |
 | libredox | 0.1.25 | MIT |
+| libsqlite3-sys | 0.40.0 | MIT |
 | linebender_resource_handle | 0.1.1 | Apache-2.0 OR MIT |
 | linux-raw-sys | 0.4.15 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | linux-raw-sys | 0.12.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
@@ -456,6 +460,8 @@ GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`co
 | rgb | 0.8.53 | MIT |
 | roxmltree | 0.20.0 | MIT OR Apache-2.0 |
 | roxmltree | 0.21.2 | MIT OR Apache-2.0 |
+| rsqlite-vfs | 0.2.0 | MIT |
+| rusqlite | 0.43.0 | MIT |
 | rustc-demangle | 0.1.28 | MIT/Apache-2.0 |
 | rustc-hash | 1.1.0 | Apache-2.0/MIT |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT |
@@ -505,6 +511,7 @@ GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`co
 | spin | 0.9.9 | MIT |
 | spin | 0.10.1 | MIT |
 | spirv | 0.4.0+sdk-1.4.341.0 | Apache-2.0 |
+| sqlite-wasm-rs | 0.6.3 | MIT |
 | stable_deref_trait | 1.2.1 | MIT OR Apache-2.0 |
 | static_assertions | 1.1.0 | MIT OR Apache-2.0 |
 | strict-num | 0.1.1 | MIT |
@@ -578,6 +585,7 @@ GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`co
 | value-bag | 1.14.1 | Apache-2.0 OR MIT |
 | value-bag-serde1 | 1.14.1 | Apache-2.0 OR MIT |
 | value-bag-sval2 | 1.14.1 | Apache-2.0 OR MIT |
+| vcpkg | 0.2.15 | MIT/Apache-2.0 |
 | vello_common | 0.3.0 | Apache-2.0 OR MIT |
 | vello_cpu | 0.3.0 | Apache-2.0 OR MIT |
 | version_check | 0.9.5 | MIT/Apache-2.0 |

@@ -664,10 +664,11 @@ impl Workspace {
             e.cat_pinned = pinned;
             e.markdown = meta.as_ref().is_some_and(|m| m.markdown);
             e.board_file = meta.as_ref().is_some_and(|m| m.kind == crate::store::DocKind::Board);
+            e.table_file = meta.as_ref().is_some_and(|m| m.kind == crate::store::DocKind::Table);
             if let Some(m) = &meta {
                 e.created = m.created;
                 e.info = m.info;
-                if !e.board_file { e.set_read_only(m.reading, cx); }
+                if !e.board_file && !e.table_file { e.set_read_only(m.reading, cx); }
             }
             e
         });
@@ -736,7 +737,7 @@ impl Workspace {
             { let f = editor.read(cx).focus.clone(); window.focus(&f, cx); }
         }
         // A 画板 opens straight into its board, over the whole window.
-        editor.update(cx, |e, cx| e.open_board_file(window, cx));
+        editor.update(cx, |e, cx| { e.open_board_file(window, cx); e.open_table_file(window, cx); });
         if let Some(m) = self.store.touch(id)
             && let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
                 e.meta.opened = m.opened;
@@ -1105,6 +1106,8 @@ impl Workspace {
     /// the top bar shows the error.
     pub fn flush(&mut self, cx: &mut Context<Self>) -> bool {
         self.save_task = None;
+        // 数据表 write their own files
+        crate::table::flush_all(cx);
         // 版本历史 preview: the editor holds an older snapshot, so writing it
         // would overwrite the live document with history.
         if self.preview.is_some() { return true }
@@ -1128,8 +1131,11 @@ impl Workspace {
                     e.meta = meta.clone();
                 }
                 self.sync_links(cx);
+                // a renamed 数据表's file moved with its title
+                let moved = (meta.kind == crate::store::DocKind::Table).then(|| self.store.file_path(&id)).flatten();
                 ed.update(cx, |e, cx| {
                     e.modified = meta.modified;
+                    if let Some(p) = &moved { e.table_file_at(p, cx); }
                     cx.notify();
                 });
                 self.status = SaveStatus::Saved;
@@ -1339,6 +1345,7 @@ impl Workspace {
         // a 画板 block open in the document's place: the document becomes a
         // crumb back to it, and the board is the page
         let board_block = self.editor.as_ref().is_some_and(|e| e.read(cx).board_block_open());
+        let table_block = self.editor.as_ref().is_some_and(|e| e.read(cx).table_block_open());
         let save_error = match &self.status {
             SaveStatus::Failed(error) => Some(error.clone()),
             _ => None,
@@ -1420,6 +1427,17 @@ impl Workspace {
             );
             crumbs.push(sep());
             title = crate::settings::tr("画板", "Board").to_string();
+        }
+        if table_block {
+            crumbs.push(
+                div().id("crumb-table-doc").no_drag().min_w(px(28.)).max_w(px(200.)).px(px(4.)).flex().items_center().rounded(px(4.)).cursor_pointer()
+                    .text_color(Theme::text_caption()).hover(|s| s.text_color(Theme::primary_500()))
+                    .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(title.clone())))
+                    .on_click(cx.listener(|w, _, window, cx| if let Some(e) = w.editor.clone() { e.update(cx, |e, cx| e.close_open_table(window, cx)) }))
+                    .into_any_element(),
+            );
+            crumbs.push(sep());
+            title = crate::settings::tr("数据表", "Data table").to_string();
         }
         // Too narrow for the path: it folds into one "…" (the path on hover),
         // and the title keeps the room. Left: the sidebar's buttons when it is
@@ -1560,6 +1578,8 @@ impl Render for Workspace {
         // down), so leaving the document hands it back to the window's keys.
         if self.view != View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).focus.is_focused(window)) { window.focus(&self.focus, cx); }
         crate::editor::image::frame_drawn(window, cx);
+        // a 数据表 file renamed or moved (the sidebar, 移动到): its view writes where the file now is
+        if let (Some(id), Some(ed)) = (&self.current, &self.editor) && ed.read(cx).table_file && let Some(p) = self.store.file_path(id) { ed.update(cx, |e, cx| e.table_file_at(&p, cx)); }
         // Full screen: the sidebar is solid (`Theme::window`) and the native glass stays hidden.
         crate::theme::set_fullscreen(window.is_fullscreen());
         self.native_sidebar.sync(if self.sidebar_open && !crate::theme::fullscreen() { self.sidebar_w(window) } else { 0. }, window);

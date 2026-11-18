@@ -99,6 +99,9 @@ pub enum DocKind {
     Doc,
     /// 画板: a `.excalidraw` file (Excalidraw's own JSON).
     Board,
+    /// 数据表: a `.sqlite` file (`table::sqlite`). Read and written by the
+    /// table itself; the store only knows it as a page holding one 数据表 block.
+    Table,
 }
 
 impl DocKind {
@@ -109,6 +112,7 @@ impl DocKind {
         match self {
             DocKind::Doc => if markdown { "md" } else { "xml" },
             DocKind::Board => "excalidraw",
+            DocKind::Table => "sqlite",
         }
     }
 
@@ -119,10 +123,14 @@ impl DocKind {
             "xml" => Some((DocKind::Doc, false)),
             "md" => Some((DocKind::Doc, true)),
             "excalidraw" => Some((DocKind::Board, false)),
+            "sqlite" => Some((DocKind::Table, false)),
             _ => None,
         }
     }
 }
+
+/// A 数据表 file, by its name.
+fn table_file(p: &Path) -> bool { p.file_name().and_then(|n| n.to_str()).and_then(DocKind::of_name).is_some_and(|k| k.0 == DocKind::Table) }
 
 fn catalogue_closed_default() -> bool { true }
 
@@ -963,6 +971,7 @@ impl Store {
     /// `text` (a file's contents) as a document.
     fn parse_doc(&self, id: &str, text: &str) -> Result<Document> {
         if self.kind(id) == DocKind::Board { return crate::whiteboard::parse_file(text, &self.markdown_title(id)); }
+        if self.kind(id) == DocKind::Table { return Ok(crate::table::file_doc(&self.markdown_title(id), &self.index[id].rel)); }
         if !self.is_markdown(id) {
             let mut doc = docxml::parse(text)?;
             if text.contains("href=") { self.links_to_ids(&self.doc_dir(id), &mut doc); }
@@ -982,6 +991,7 @@ impl Store {
     /// it: (source, path relative to its folder).
     fn serialize_with_copies(&self, id: &str, doc: &Document, disk: Option<&str>) -> (String, Vec<(PathBuf, String)>) {
         if self.kind(id) == DocKind::Board { return (crate::whiteboard::write_file(doc), vec![]); }
+        if self.kind(id) == DocKind::Table { return (String::new(), vec![]); }
         if !self.is_markdown(id) {
             if !self.flat && !doc.doc_links().is_empty() {
                 let mut doc = doc.clone();
@@ -1180,9 +1190,12 @@ impl Store {
             let parsed = match self.parsed.get(&id).filter(|c| stamp == Some((c.0, c.1))) {
                 Some(c) => c.2.clone(),
                 None => {
-                    let Ok(text) = crate::vfs::read_to_string(&p) else { continue };
-                    let doc = self.parse_doc(&id, &text).unwrap_or_default();
-                    let parsed = Parsed { title: doc.title.text.clone(), icon: doc.icon.clone(), body: doc.plain_text().into(), reminders: doc.reminders(), links: doc.doc_links() };
+                    // a 数据表 is not text: its words come from the file's cells
+                    let table = table_file(&p);
+                    let Ok(text) = (if table { Ok(String::new()) } else { crate::vfs::read_to_string(&p) }) else { continue };
+                    let doc = if table { Document::default() } else { self.parse_doc(&id, &text).unwrap_or_default() };
+                    let body = if table { crate::table::block_text(&self.root, &crate::table::TableRef::new(p.strip_prefix(&self.root).map(|r| r.to_string_lossy().into_owned()).unwrap_or_default())) } else { doc.plain_text() };
+                    let parsed = Parsed { title: doc.title.text.clone(), icon: doc.icon.clone(), body: body.into(), reminders: doc.reminders(), links: doc.doc_links() };
                     if let Some((t, len)) = stamp { self.parsed.insert(id.clone(), (t, len, parsed.clone())); }
                     parsed
                 }
@@ -1363,9 +1376,12 @@ impl Store {
             let parsed = match self.parsed.get(&id).filter(|c| stamp == Some((c.0, c.1))) {
                 Some(c) => c.2.clone(),
                 None => {
-                    let Ok(text) = crate::vfs::read_to_string(&p) else { continue };
-                    let doc = self.parse_doc(&id, &text).unwrap_or_default();
-                    let parsed = Parsed { title: doc.title.text.clone(), icon: doc.icon.clone(), body: doc.plain_text().into(), reminders: doc.reminders(), links: doc.doc_links() };
+                    // a 数据表 is not text: its words come from the file's cells
+                    let table = table_file(&p);
+                    let Ok(text) = (if table { Ok(String::new()) } else { crate::vfs::read_to_string(&p) }) else { continue };
+                    let doc = if table { Document::default() } else { self.parse_doc(&id, &text).unwrap_or_default() };
+                    let body = if table { crate::table::block_text(&self.root, &crate::table::TableRef::new(p.strip_prefix(&self.root).map(|r| r.to_string_lossy().into_owned()).unwrap_or_default())) } else { doc.plain_text() };
+                    let parsed = Parsed { title: doc.title.text.clone(), icon: doc.icon.clone(), body: body.into(), reminders: doc.reminders(), links: doc.doc_links() };
                     if let Some((t, len)) = stamp { self.parsed.insert(id.clone(), (t, len, parsed.clone())); reparsed = true; }
                     parsed
                 }
@@ -1418,6 +1434,8 @@ impl Store {
 
     fn read_doc_text(&self, id: &str) -> Result<String> {
         let p = self.path(id);
+        // a 数据表 is not text: the table reads its own file
+        if self.kind(id) == DocKind::Table { anyhow::ensure!(p.fs_exists(), "数据表文件已不在原处，可能已被移动或删除"); return Ok(String::new()); }
         match crate::vfs::read_to_string(&p) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && layout::placeholder(&p).is_some_and(|ph| ph.fs_exists()) => {
                 if let Some(ph) = layout::placeholder(&p) { layout::download(&ph); }
@@ -1468,6 +1486,17 @@ impl Store {
     }
 
     fn write_doc(&mut self, id: &str, doc: &Document) -> Result<Meta> {
+        // A 数据表 writes its own file as it is edited; saving its page only follows the title.
+        if self.kind(id) == DocKind::Table {
+            let title = doc.title.text.trim().to_string();
+            if !title.is_empty() && title != self.markdown_title(id) && let Err(e) = self.follow_title(id, &title) { self.warnings.push(format!("未能按标题重命名文件：{e}")); }
+            let t = now();
+            let m = self.index.get_mut(id).ok_or_else(|| anyhow::anyhow!("文档不存在"))?;
+            m.modified = t;
+            let m = m.clone();
+            self.save_index()?;
+            return Ok(m);
+        }
         let disk = if self.is_markdown(id) || self.loaded.borrow().contains_key(id) { crate::vfs::read_to_string(self.path(id)).ok() } else { None };
         let (xml, copies) = self.serialize_with_copies(id, doc, disk.as_deref());
         if let Some(previous) = self.loaded.borrow().get(id) {
@@ -1586,6 +1615,41 @@ impl Store {
         self.record_file_change(&id, None);
         drop(lock);
         self.place_new(&id, parent)?;
+        Ok(id)
+    }
+
+    /// A new 数据表 in folder `parent`: a `.sqlite` file named `title`, holding
+    /// one blank table. Only in the folder layout.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn create_table_in(&mut self, title: &str, parent: Option<&str>) -> Result<String> {
+        anyhow::ensure!(!self.flat, "旧格式的文档库不能新建数据表");
+        let id = uuid::Uuid::new_v4().to_string();
+        let lock = self.begin_write()?;
+        self.validate_folder(None, parent)?;
+        let t = now();
+        let dir = self.folder_rel(parent);
+        let rel = join_rel(&dir, &self.free_name(&dir, &file_name_for(title), Some(DocKind::Table.ext(false)), None));
+        self.index.insert(id.clone(), Meta { created: t, modified: t, opened: t, rel, ..Default::default() });
+        derive_tree(&mut self.index);
+        if let Err(e) = crate::table::sqlite::create(&self.path(&id), &crate::table::Base::blank(crate::table::field::now())).and_then(|_| self.save_index()) { self.index.remove(&id); return Err(e); }
+        drop(lock);
+        self.place_new(&id, parent)?;
+        Ok(id)
+    }
+
+    /// 创建副本 of a 数据表: its file copied under `title`, beside nothing in particular (the caller places it).
+    #[cfg(not(target_family = "wasm"))]
+    pub fn copy_table(&mut self, src: &str, title: &str) -> Result<String> {
+        anyhow::ensure!(!self.flat && self.kind(src) == DocKind::Table, "不是数据表");
+        let id = uuid::Uuid::new_v4().to_string();
+        let lock = self.begin_write()?;
+        let t = now();
+        let rel = self.free_name("", &file_name_for(title), Some(DocKind::Table.ext(false)), None);
+        let from = self.path(src);
+        self.index.insert(id.clone(), Meta { created: t, modified: t, opened: t, rel, ..Default::default() });
+        derive_tree(&mut self.index);
+        if let Err(e) = crate::vfs::copy(&from, self.path(&id)).map_err(anyhow::Error::from).and_then(|_| self.save_index()) { self.index.remove(&id); return Err(e); }
+        drop(lock);
         Ok(id)
     }
 
