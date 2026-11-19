@@ -2,7 +2,7 @@
 //! (docs/design/feishu-research/REPORT.md) and named from `feishu_theme`.
 
 use crate::feishu_theme::{Theme, c, ud};
-use crate::table::{FieldType, ViewKind};
+use crate::table::FieldType;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 
@@ -28,8 +28,6 @@ pub const INLINE_HEAD_H: f32 = 40.;
 /// Rows a table in a page shows before it scrolls inside (飞书 grows without end; a
 /// page holding thousands of rows would draw them all).
 pub const INLINE_MAX_ROWS_H: f32 = 1120.;
-/// A kanban in a page: a fixed height, scrolling inside (飞书's kanban: 280 + head).
-pub const INLINE_BOARD_H: f32 = 420.;
 /// The add-record line under the rows: one short line whatever the row height (it is not a record).
 pub const ADD_ROW_H: f32 = 32.;
 /// View tab bar and toolbar.
@@ -139,16 +137,6 @@ pub fn field_glyph(ty: FieldType) -> &'static str {
         Attachment => "ft-attach",
         Person => "ft-person",
         Phone | Email => "ft-text",
-    }
-}
-
-pub fn view_glyph(kind: ViewKind) -> &'static str {
-    match kind {
-        ViewKind::Grid => "table",
-        ViewKind::Kanban => "columns-2",
-        ViewKind::Calendar => "calendar",
-        ViewKind::Gantt => "list-tree",
-        ViewKind::Form => "file-text",
     }
 }
 

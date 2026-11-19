@@ -9,7 +9,6 @@ pub(crate) fn key_down(v: &mut TableView, ev: &KeyDownEvent, window: &mut Window
     let m = &ev.keystroke.modifiers;
     let key = ev.keystroke.key.as_str();
     let cmd = if cfg!(target_os = "macos") { m.platform } else { m.control };
-    let grid = { let st = v.state.read(cx); st.doc.base.table(v.table).and_then(|t| t.view(v.view)).is_some_and(|view| view.kind == ViewKind::Grid) };
     let mut used = true;
     match key {
         "z" if cmd && m.shift => v.redo(cx),
@@ -20,7 +19,6 @@ pub(crate) fn key_down(v: &mut TableView, ev: &KeyDownEvent, window: &mut Window
         "escape" if v.find.is_some() => v.close_find(window, cx),
         "escape" if v.expanded.is_some() => { v.expanded = None; cx.notify(); }
         "escape" if v.sel.is_some() || !v.rows_sel.is_empty() || !v.col_sel.is_empty() => { v.clear_selection(); cx.notify(); }
-        _ if !grid => used = false,
         "c" if cmd => copy(v, false, cx),
         "x" if cmd => { copy(v, false, cx); v.clear_cells(cx); }
         "v" if cmd => paste(v, cx),

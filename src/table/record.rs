@@ -187,9 +187,9 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, r: &Rec
             }
             _ if val.is_empty() => Some(empty(placeholder(f.ty)).into_any_element()),
             // what the table works out is read, not edited: a shade lighter
-            _ if f.ty.computed() => Some(div().w_full().opacity(0.7).child(kanban::value(base, f, val)).into_any_element()),
-            FieldType::Progress => Some(div().w_full().max_w(px(260.)).child(kanban::value(base, f, val)).into_any_element()),
-            _ => Some(kanban::value(base, f, val)),
+            _ if f.ty.computed() => Some(div().w_full().opacity(0.7).child(value(base, f, val)).into_any_element()),
+            FieldType::Progress => Some(div().w_full().max_w(px(260.)).child(value(base, f, val)).into_any_element()),
+            _ => Some(value(base, f, val)),
         };
         div().w_full().px(px(16.)).flex().items_start().gap(px(8.))
             .child(div().flex_none().w(px(label_w)).h(px(36.)).pl(px(8.)).flex().items_center().gap(px(6.))
@@ -257,4 +257,13 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, r: &Rec
         .child(div().id("tb-rec-body").flex_1().min_h_0().overflow_y_scroll().child(list))
         .children(menu)
         .into_any_element()
+}
+
+/// A value in 记录详情: `cell::value_view`, flush left.
+fn value(base: &Base, f: &Field, v: &Value) -> AnyElement {
+    match v {
+        Value::Bool(b) => checkbox(*b).into_any_element(),
+        Value::Number(n) if !matches!(f.ty, FieldType::Rating | FieldType::Progress) => div().w_full().line_height(px(20.)).child(ui_text(field::format_number(*n, f))).into_any_element(),
+        _ => cell::value_view(base, f, v, true),
+    }
 }
