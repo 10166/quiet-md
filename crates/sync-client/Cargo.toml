@@ -1,0 +1,30 @@
+[package]
+name = "quiet_sync_client"
+version = "0.1.13"
+edition = "2024"
+description = "Async local-first sync client engine for Quiet.md"
+license = "MIT"
+authors = ["s1dashu"]
+
+[dependencies]
+quiet_sync_proto = { path = "../sync-proto" }
+fdl_core = { path = "../core" }
+anyhow = "1.0.104"
+base64 = "0.22"
+futures-util = "0.3"
+log = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "rustls-tls-native-roots"] }
+rusqlite = { version = "0.34", features = ["bundled"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots", "rustls-tls-webpki-roots"] }
+uuid = { version = "1.28.0", features = ["v4"] }
+
+[dev-dependencies]
+quiet_sync_server = { path = "../sync-server" }
+
+[lints]
+workspace = true

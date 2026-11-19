@@ -408,6 +408,38 @@ fn covers(outer: &[Seg], inner: &[Seg]) -> bool {
     outer.len() <= inner.len() && inner.starts_with(outer)
 }
 
+fn remap_selection(old_doc: &Document, old_units: &[Unit], next: &Core, new_units: &[Unit], sel: Selection, is_markdown: bool) -> Selection {
+    let old_text = |id: BlockId| -> Option<&RichText> {
+        if id == TITLE { Some(&old_doc.title) } else { find_path(&old_doc.blocks, id).and_then(|p| block_at(&old_doc.blocks, &p)).map(|b| &b.text) }
+    };
+    let remap = |pos: Pos| {
+        if pos.block == TITLE {
+            return pos;
+        }
+        if !is_markdown && new_units.iter().any(|u| u.id == pos.block) {
+            return pos;
+        }
+        let ix = old_units.iter().position(|u| u.id == pos.block).unwrap_or(0);
+        let text = old_text(pos.block);
+        let block = text
+            .and_then(|t| {
+                new_units
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, u)| u.id != TITLE && next.text_of(u.id).is_some_and(|v| v.text == t.text))
+                    .min_by_key(|(j, _)| j.abs_diff(ix))
+                    .map(|(_, u)| u)
+            })
+            .or_else(|| new_units.get(ix))
+            .or_else(|| new_units.last());
+        Pos::new(block.map_or(TITLE, |u| u.id), pos.offset)
+    };
+    let head = remap(sel.head);
+    let anchor = if sel.is_collapsed() { head } else { remap(sel.anchor) };
+    let scope = |p: Pos| new_units.iter().find(|u| u.id == p.block).and_then(|u| u.scope);
+    if scope(anchor) == scope(head) { Selection { anchor, head } } else { Selection::caret(head) }
+}
+
 #[derive(Clone)]
 pub struct Core {
     pub doc: Document,
@@ -668,6 +700,49 @@ impl Core {
 
     pub fn break_coalescing(&mut self) {
         self.last_edit = None;
+    }
+
+    /// Install a remotely synced revision while remapping selection cleanly and
+    /// rebasing recent undo snapshots (stopping at the first conflicting snapshot
+    /// so `undo()` can never roll back remote changes).
+    pub fn receive_remote(&mut self, mut doc: Document, is_markdown: bool) {
+        if doc.blocks.is_empty() {
+            doc.blocks.push(Block::text(""));
+        }
+        let old_doc = std::mem::replace(&mut self.doc, doc);
+        let old_units = units(&old_doc);
+        let next = Core::new(self.doc.clone());
+        let new_units = next.units();
+
+        self.sel = remap_selection(&old_doc, &old_units, &next, &new_units, self.sel, is_markdown);
+
+        let mut rebased = Vec::new();
+        for snap in self.undo.iter().rev().take(64) {
+            let res = crate::merge::merge_documents(&old_doc, &snap.doc, &self.doc);
+            if res.has_conflicts() {
+                break;
+            }
+            let mut merged_doc = res.value;
+            if merged_doc.blocks.is_empty() {
+                merged_doc.blocks.push(Block::text(""));
+            }
+            let snap_units = units(&snap.doc);
+            let mut snap_core = Core::new(merged_doc);
+            let rebased_units = snap_core.units();
+            snap_core.sel = remap_selection(&snap.doc, &snap_units, &snap_core, &rebased_units, snap.sel, true);
+            snap_core.fix_selection();
+            rebased.push(std::sync::Arc::new(Snapshot::new(snap_core.doc, snap_core.sel)));
+        }
+        rebased.reverse();
+        self.undo = rebased.into();
+        self.redo.clear();
+
+        self.block_sel = None;
+        self.cell_sel = None;
+        self.pending_marks = None;
+        self.generation = self.generation.wrapping_add(1);
+        self.fix_selection();
+        self.break_coalescing();
     }
 
     fn push_undo(&mut self, s: Snapshot) {
@@ -4113,5 +4188,31 @@ mod tests {
         // editor.
         assert_eq!(next_word("中文标题", 0), 3);
         assert_eq!(prev_word("中文标题", 12), 9);
+    }
+
+    #[test]
+    fn receive_remote_rebases_non_conflicting_undo_and_barriers_conflicts() {
+        let mut c = doc("<title>T</title><p>one</p><p>two</p>");
+        let b1 = id(&c, 1);
+        c.sel = Selection::caret(Pos::new(b1, 3));
+        c.insert_text("-local");
+
+        // Remote edited paragraph 2 (non-overlapping): undo must revert paragraph 1 while keeping remote's paragraph 2.
+        let mut remote = c.doc.clone();
+        remote.blocks[1].text = RichText::plain("two-remote");
+        c.receive_remote(remote, false);
+        assert!(c.undo());
+        assert_eq!(c.doc.blocks[0].text.text, "one");
+        assert_eq!(c.doc.blocks[1].text.text, "two-remote");
+
+        // Now edit paragraph 1 again and receive a conflicting remote change to paragraph 1: undo must be barriered.
+        let cur_b1 = c.doc.blocks[0].id;
+        c.sel = Selection::caret(Pos::new(cur_b1, 0));
+        c.insert_text("local-again-");
+        let mut conflict_remote = c.doc.clone();
+        conflict_remote.blocks[0].text = RichText::plain("one-from-remote");
+        c.receive_remote(conflict_remote, false);
+        assert!(!c.undo());
+        assert_eq!(c.doc.blocks[0].text.text, "one-from-remote");
     }
 }

@@ -431,7 +431,7 @@ impl Workspace {
                     w.sync_sub_pages(cx);
                     w.show_toast_kind(crate::ui::ToastKind::Error, &e.to_string(), cx);
                 }
-                if result.is_ok() { w.confirm_tree_history(history, changes); }
+                if result.is_ok() { w.confirm_tree_history(history, changes); crate::sync::notify_scan(); }
                 w.save_next_tree_move(cx);
                 cx.notify();
             });

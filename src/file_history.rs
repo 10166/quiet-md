@@ -159,6 +159,7 @@ impl Workspace {
                         w.trash = w.store.list_trash();
                         w.batch = None; w.row_menu = None;
                         w.sync_sub_pages(cx);
+                        crate::sync::notify_scan();
                         w.show_toast(&format!("{}{}", if redo { crate::settings::tr("已重做：", "Redone: ") } else { crate::settings::tr("已撤销：", "Undone: ") }, record.label), cx);
                     }
                     Err(e) => {

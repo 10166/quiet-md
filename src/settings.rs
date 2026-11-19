@@ -285,7 +285,7 @@ pub(crate) fn watch_themes(cx: &mut Context<Workspace>) {
         cx.background_executor().timer(std::time::Duration::from_millis(800)).await;
         let now = cx.background_executor().spawn(async { themes::stamp() }).await;
         let changed = { let mut l = LAST.lock().unwrap(); let c = l.as_ref() != Some(&now); *l = Some(now); c };
-        if changed && this.update(cx, |w, cx| w.reload_themes(cx)).is_err() { break }
+        if changed && this.update(cx, |w, cx| { w.reload_themes(cx); crate::sync::notify_scan(); }).is_err() { break }
         if this.upgrade().is_none() { break }
     }).detach();
 }
@@ -293,7 +293,7 @@ pub(crate) fn watch_themes(cx: &mut Context<Workspace>) {
 // ---- the view
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Page { #[default] General, Appearance, Shortcuts, Library, About }
+pub enum Page { #[default] General, Appearance, Shortcuts, Library, Sync, About }
 
 impl Page {
     fn title(self) -> &'static str {
@@ -302,6 +302,7 @@ impl Page {
             Page::Appearance => tr("外观", "Appearance"),
             Page::Shortcuts => tr("快捷键", "Shortcuts"),
             Page::Library => tr("文档库", "Documents"),
+            Page::Sync => tr("云同步", "Cloud Sync"),
             Page::About => tr("关于", "About"),
         }
     }
@@ -311,14 +312,14 @@ impl Page {
             Page::Appearance => "palette",
             Page::Shortcuts => "keyboard",
             Page::Library => "storage",
+            Page::Sync => "cloud",
             Page::About => "info",
         }
     }
 }
 
-/// The sidebar list, one evenly spaced run (six rows need no unlabelled
-/// groups); `None` is 回收站 (its own view, shown with this sidebar).
-const NAV: [Option<Page>; 6] = [Some(Page::General), Some(Page::Appearance), Some(Page::Shortcuts), Some(Page::Library), None, Some(Page::About)];
+/// The sidebar list, one evenly spaced run; `None` is 回收站 (its own view, shown with this sidebar).
+const NAV: [Option<Page>; 7] = [Some(Page::General), Some(Page::Appearance), Some(Page::Shortcuts), Some(Page::Library), Some(Page::Sync), None, Some(Page::About)];
 
 // ---- controls (switch on the accent, 30pt buttons, grouped rows)
 
@@ -339,7 +340,7 @@ pub(crate) fn caption(t: &'static str) -> Div {
 }
 
 /// One setting: title and an optional description on the left, the control on the right.
-fn row(title: impl Into<SharedString>, desc: Option<SharedString>, control: impl IntoElement) -> Div {
+pub(crate) fn row(title: impl Into<SharedString>, desc: Option<SharedString>, control: impl IntoElement) -> Div {
     div().w_full().min_h(px(48.)).px(px(16.)).py(px(10.)).flex().items_center().justify_between().gap(px(24.))
         .child(div().flex_1().min_w_0().flex().flex_col().gap(px(2.))
             .child(div().text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).text_color(Theme::text()).child(title.into()))
@@ -347,7 +348,7 @@ fn row(title: impl Into<SharedString>, desc: Option<SharedString>, control: impl
         .child(div().flex_none().flex().items_center().gap(px(8.)).child(control))
 }
 
-fn desc(s: &'static str) -> Option<SharedString> { Some(s.into()) }
+pub(crate) fn desc(s: &'static str) -> Option<SharedString> { Some(s.into()) }
 
 /// The switch: the accent when on, black 16% when off, a white knob.
 pub(crate) fn switch(id: impl Into<ElementId>, on: bool) -> Stateful<Div> {
@@ -372,7 +373,7 @@ pub struct PrefMenu {
 }
 
 /// A segmented control: a grey groove and a white selected pill.
-fn segmented(id: &'static str, labels: &[&'static str], selected: usize, on: impl Fn(&mut Workspace, usize, &mut Context<Workspace>) + Clone + 'static, cx: &mut Context<Workspace>) -> Div {
+pub(crate) fn segmented(id: &'static str, labels: &[&'static str], selected: usize, on: impl Fn(&mut Workspace, usize, &mut Context<Workspace>) + Clone + 'static, cx: &mut Context<Workspace>) -> Div {
     div().flex_none().h(px(28.)).p(px(2.)).flex().gap(px(2.)).rounded(px(9.)).bg(Theme::fill_hover_strong())
         .children(labels.iter().enumerate().map(|(i, label)| {
             let on = on.clone();
@@ -700,6 +701,7 @@ impl Workspace {
             self.show_toast_kind(ui::ToastKind::Error, &format!("{}: {e}", tr("设置保存失败", "Could not save settings")), cx);
             return;
         }
+        crate::sync::notify_config("preferences");
         if p.quick_hotkey != old.quick_hotkey {
             if p.quick_hotkey { crate::quick_note::register(cx); } else { crate::quick_note::suspend_hotkey(); }
         }
@@ -721,6 +723,7 @@ impl Workspace {
         match themes::editable_file(id) {
             Ok(p) => {
                 self.reload_themes(cx);
+                crate::sync::notify_config(&format!("theme:{id}.css"));
                 open_in_editor(&p, cx);
             }
             Err(e) => self.show_toast_kind(ui::ToastKind::Error, &e.to_string(), cx),
@@ -731,6 +734,7 @@ impl Workspace {
         match themes::duplicate(id) {
             Ok((new_id, p)) => {
                 themes::load(&new_id, themes::all_loaded(), || cx.text_system().all_font_names());
+                crate::sync::notify_config(&format!("theme:{new_id}.css"));
                 let feishu = themes::themes().iter().find(|t| t.id == new_id).is_some_and(|t| t.style.feishu);
                 self.set_pref(move |pr| { pr.theme = new_id; pr.feishu = feishu; }, cx);
                 open_in_editor(&p, cx);
@@ -742,6 +746,7 @@ impl Workspace {
     fn remove_theme(&mut self, id: &str, cx: &mut Context<Self>) {
         if let Err(e) = themes::remove(id) { return self.show_toast_kind(ui::ToastKind::Error, &e.to_string(), cx) }
         self.reload_themes(cx);
+        crate::sync::notify_scan();
         // A deleted theme of the user's own: back to Craft.
         if !themes::themes().iter().any(|t| t.id == id) { self.set_pref(|p| { p.theme = "craft".into(); p.feishu = false; }, cx); }
     }
@@ -755,6 +760,7 @@ impl Workspace {
         self.settings_scroll.set_offset(point(px(0.), px(0.)));
         self.shortcut_error = None;
         if self.view != View::Settings { self.show_view(View::Settings, cx); }
+        if page == Page::Sync { self.sync_ui_enter(cx); }
         cx.notify();
     }
 
@@ -774,7 +780,7 @@ impl Workspace {
         };
         div().w(px(self.sidebar_w(window))).h_full().flex_none().flex().flex_col().text_color(Theme::text()).font_family(theme::UI_FONT)
             .child(div().h(px(crate::app::HEADER_H)).flex_none().flex().items_center().pl(px(theme::TRAFFIC_LIGHTS_W)).pr(px(12.)).title_bar().child(self.header_navigation(cx))
-                .child(div().flex_1()).children(update_pill(cx)))
+                .child(div().flex_1()).children(crate::sync::status_pill(cx)).children(update_pill(cx)))
             // The document sidebar's rhythm: 主页 sits 8 under the bar, a section
             // header like 我的文档's, rows on a 31 pitch. 设置's line sits on
             // 主页's, not a section header's: the 34pt box keeps the rows below.
@@ -821,6 +827,7 @@ impl Workspace {
             Page::Appearance => self.appearance_page(cx),
             Page::Shortcuts => self.shortcut_settings(cx),
             Page::Library => self.library_page(cx),
+            Page::Sync => self.sync_page(cx),
             Page::About => self.about_page(cx),
         };
         div().flex_1().min_w_0().h_full().flex().flex_col().bg(Theme::bg_body()).text_color(Theme::text()).font_family(theme::UI_FONT)

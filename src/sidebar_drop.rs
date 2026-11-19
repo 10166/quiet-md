@@ -114,7 +114,7 @@ impl Workspace {
     fn import_dropped_local(&mut self, id: &str, target: SidebarDropAt, cx: &mut Context<Self>) {
         let Some(doc) = self.doc_of(id, cx) else { return };
         let front = self.store.front_matter_of(id);
-        match self.store.with(|s| s.create_markdown_in(&doc, &front, target.parent.as_deref())) {
+        match self.store.create_markdown_in(&doc, &front, target.parent.as_deref()) {
             Ok(new) => {
                 self.place_dropped(&[new], &target);
                 self.landed_in(target.parent.as_deref());
@@ -130,7 +130,7 @@ impl Workspace {
     fn place_dropped(&mut self, ids: &[String], target: &SidebarDropAt) {
         let journal = self.store.track_file_changes();
         if target.slot.is_some() {
-            for id in ids { let _ = self.store.with(|s| s.move_in_tree(id, target.parent.as_deref(), target.before.as_deref())); }
+            for id in ids { let _ = self.store.move_in_tree(id, target.parent.as_deref(), target.before.as_deref()); }
         }
         self.entries = self.store.list();
         self.sort();

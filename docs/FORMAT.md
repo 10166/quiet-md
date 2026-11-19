@@ -135,3 +135,13 @@ DocxXML 里没有、本应用自己加的写法。别的工具不认识这些写
 系统退出阶段保存失败时，正文另存至系统本地应用数据目录的 `quiet-md/recovery/<文档库标识>/`。下次打开同一文档库时创建恢复副本，成功写入后移除恢复文件。它是退出失败时的最后兜底，不替代按文档的版本历史（见上节）。
 
 导出本地资源时检查规范化路径，拒绝文档库外的文件和越界符号链接。HTML 内嵌图片读取上限为 20 MiB，Markdown 复制的单个资源上限为 256 MiB；缺失、被拒绝或超限的 Markdown 资源会计入导出警告。行内附件与块附件均导出为链接并复制文件。
+
+## 远程同步状态与配置边界
+
+- **兼容现有目录布局（`store::FORMAT` 保持 4）**：开启云同步不修改文档库磁盘结构或 `.quiet/format.json`；未配置同步且本地尚无同步状态时延迟初始化，不启动 Tokio 运行时，也不写入 `state.db` / `credentials.json`。
+- **同步状态与凭据外置**：同步游标（`head_seq`）、三路合并基线（`base_blob`）、离线发件箱（`outbox`）、块去重与附件映射索引（`asset_map`）及账号令牌统一存放在文档库外部的 `<data_local_dir>/quiet-md/sync/<library_key>/`（`state.db` 与 `credentials.json`，目录采用 `0700`、文件采用 `0600` 权限，测试库放在系统临时目录下的 `quiet-md-local/sync/<library_key>/`），避免与文档库本身混杂或误同步。
+- **实体映射与作用域**：服务端同一 Vault 内的 `entity_id` 按类型分域——文件夹与文档沿用索引 UUID，回收站条目使用 `trash:<id>`，版本快照使用 `hist:<doc_id>/<name>`，配置使用 `cfg:<key>`；明文库附件使用规范化相对路径 `.assets/...`，E2EE 文档库附件使用 HMAC-SHA256 派生的不透明标识 `asset:<32位十六进制>`，原路径与文件名保留在加密负载内。
+- **端到端加密可见边界**：E2EE 启用后，文档正文、标题、文件夹名、历史内容与附件文件名/字节均在本机使用 XChaCha20-Poly1305 加密，删除操作同样附带经认证的墓碑信封；服务端仍可观测账号、文档库与设备元数据、实体 UUID/不透明 ID、密文大小、时间戳与同步序号。
+- **同步项与本机排除项**：
+  - **同步内容**：文档（`.xml` / `.md`）、独立画板（`.excalidraw`）、真实文件夹层级及排序/属性元数据（`pinned`、`starred`、`order`、`root_order`、`width`、`catalogue_closed`、`reading`、`info`、`refs_hidden`）、`.assets/` 附件、回收站（`.quiet/trash/`，可开关）、版本历史快照与命名标签（`.quiet/history/`，可开关）、跨端配置（`preferences.json`、`shortcuts.json`、`settings.json` 与 `.quiet/themes/*.css`，可开关）。
+  - **仅保留在本机**：`Meta::local()`（临时未接管文件）、最近打开时间戳 `opened`、`preferences.json` 中的 `seen_version` / `migrate_later` / `browser`，以及 `settings.json` 中的 `window_size` / `window_origin` / `window_display` / `quick_note_size` / `sidebar_width` / `scroll_top`（同步引擎读写 JSON 时自动剥离与回填，避免多端互相覆盖窗口布局）。

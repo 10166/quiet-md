@@ -158,6 +158,7 @@ pub fn quit(cx: &mut App) {
         .map(|w| w.update(cx, |ws, _, cx| ws.save_before(cx, |_, _, cx| cx.defer(quit))).unwrap_or(false))
         .fold(true, |ready, saved| ready & saved);
     if ready {
+        crate::sync::flush_before_quit(cx);
         cx.quit();
     }
 }
@@ -174,9 +175,11 @@ pub fn switch_library(root: std::path::PathBuf, cx: &mut App) {
         .map(|w| { let again = root.clone(); w.update(cx, |ws, _, cx| ws.save_before(cx, move |_, _, cx| cx.defer(move |cx| switch_library(again, cx)))).unwrap_or(false) })
         .fold(true, |ready, saved| ready & saved);
     if !ready { return }
+    crate::sync::flush_before_quit(cx);
     let prefs = crate::store::Store::internal_dir().join("preferences.json");
     let set = crate::guides::initialize(&root).and_then(|_| crate::store::Store::set_root_dir(root.clone()));
     if let Err(e) = set {
+        crate::sync::reinit_for_library(cx);
         let msg = format!("{}{e}", crate::settings::tr("无法在这里创建文档库：", "Couldn't create the library here: "));
         if let Some(ws) = cx.windows().into_iter().find_map(|w| w.downcast::<Workspace>()) { let _ = ws.update(cx, |w, _, cx| w.show_toast(&msg, cx)); }
         return;
@@ -377,6 +380,10 @@ pub struct Workspace {
     /// Held back by a failed save: runs after 重试 succeeds or 放弃修改.
     pub(crate) after_save: Option<AfterSave>,
     pub(crate) editor_sub: Option<Subscription>,
+    pub(crate) pending_remote_doc: Option<crate::sync::PendingRemoteDoc>,
+    pub(crate) pending_remote_board: Option<crate::sync::PendingRemoteBoard>,
+    pub(crate) conflict_banner: Option<crate::sync::ConflictBanner>,
+    pub(crate) sync_ui: crate::sync_ui::SyncUiState,
     _subs: Vec<Subscription>,
 }
 
@@ -514,7 +521,7 @@ impl Workspace {
                     cx.notify();
                     true
                 });
-                match reloaded { Ok(true) => last = now, Ok(false) => {}, Err(_) => break }
+                match reloaded { Ok(true) => { last = now; crate::sync::notify_scan(); }, Ok(false) => {}, Err(_) => break }
             }
         })
         .detach();
@@ -603,6 +610,10 @@ impl Workspace {
             move_dlg: None,
             export_md: None,
             focus: cx.focus_handle(),
+            pending_remote_doc: None,
+            pending_remote_board: None,
+            conflict_banner: None,
+            sync_ui: crate::sync_ui::SyncUiState::new(window, cx),
             save_task: None,
             dirty_since: None,
             unsaved: false,
@@ -717,8 +728,14 @@ impl Workspace {
                 // 阅读模式 put the document back: nothing to save.
                 let rejected = this.editor.clone().is_some_and(|ed| ed.update(cx, |e, cx| e.reject_read_only_edit(cx)));
                 if !rejected {
-                    this.sync_document(window, cx);
-                    this.schedule_save(window, cx);
+                    if this.editor.as_ref().is_some_and(|e| e.read(cx).has_ime_composition()) {
+                        crate::sync::notify_user_activity();
+                        this.unsaved = true;
+                        this.save_task = None;
+                    } else {
+                        this.sync_document(window, cx);
+                        this.schedule_save(window, cx);
+                    }
                 }
             }
             EditorEvent::Mode(reading) => this.set_mode(*reading, window, cx),
@@ -762,6 +779,13 @@ impl Workspace {
                     let _ = this.store.set_catalogue(&id, *pinned);
                 }
             }
+            EditorEvent::ImeCommitted => {
+                crate::sync::apply_pending_remote_doc(this, window, cx);
+                this.sync_document(window, cx);
+                if this.unsaved && this.save_task.is_none() {
+                    this.schedule_save(window, cx);
+                }
+            }
         }));
         // Opening a document puts the caret in it, unless the user is typing a search.
         if !self.search_open {
@@ -777,6 +801,10 @@ impl Workspace {
             && self.document_peers(previous, window, cx).is_empty() { self.store.forget_loaded(previous); }
         self.editor = Some(editor);
         self.current = Some(id.to_string());
+        self.pending_remote_doc = None;
+        self.pending_remote_board = None;
+        self.conflict_banner = None;
+        crate::sync::set_active_doc(Some(id.to_string()), cx);
         // Web images pasted earlier whose download landed after it closed (#220).
         if let Some(e) = self.editor.clone() { e.update(cx, |e, cx| e.adopt_remote(cx)); }
         crate::quick_note::used(id, cx);
@@ -879,6 +907,9 @@ impl Workspace {
                 }
                 w.sync_peers(cx, &listed.entries, Some(&listed.trash));
                 w.entries = listed.entries; w.trash = listed.trash;
+                if !done.deleted.is_empty() {
+                    crate::sync::notify_delete_docs(&done.deleted);
+                }
                 if w.folder_current.as_ref().is_some_and(|id| done.deleted.contains(id)) {
                     w.folder_current = None;
                     if w.view == View::Folder { w.view = View::Home; }
@@ -958,6 +989,11 @@ impl Workspace {
             self.trash = self.store.list_trash();
         }
         self.view = view;
+        if view == View::Doc {
+            crate::sync::set_active_doc(self.current.clone(), cx);
+        } else {
+            crate::sync::set_active_doc(None, cx);
+        }
         self.row_menu = None;
         self.trash_menu = None;
         self.theme_menu = None;
@@ -1091,6 +1127,7 @@ impl Workspace {
 
     fn schedule_save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.preview.is_some() { return }
+        crate::sync::notify_user_activity();
         self.status = SaveStatus::Saving;
         if !self.unsaved || self.dirty_since.is_none() {
             self.dirty_since = Some(Instant::now());
@@ -1133,7 +1170,14 @@ impl Workspace {
     }
 
     fn refresh_markdown(&mut self, cx: &mut Context<Self>) {
-        if self.preview.is_some() || self.store.file_task_busy() || matches!(self.confirm, Some(Confirm::SaveFailed)) { return }
+        if self.preview.is_some()
+            || self.store.file_task_busy()
+            || matches!(self.confirm, Some(Confirm::SaveFailed))
+            || self.pending_remote_doc.is_some()
+            || self.editor.as_ref().is_some_and(|e| e.read(cx).has_ime_composition())
+        {
+            return;
+        }
         let Some(id) = self.current.clone() else { return };
         if !self.store.is_markdown(&id) { return }
         if self.unsaved {
@@ -1180,7 +1224,20 @@ impl Workspace {
     /// Write the open document to disk if it has unsaved changes. False when
     /// that failed: the changes stay pending (a later save retries them) and
     /// the top bar shows the error.
+    pub(crate) fn clear_unsaved_state(&mut self) {
+        self.unsaved = false;
+        self.save_task = None;
+        self.dirty_since = None;
+        self.status = SaveStatus::Idle;
+    }
+
     pub fn flush(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.editor.as_ref().is_some_and(|e| e.read(cx).has_ime_composition()) || self.pending_remote_doc.is_some() {
+            return true;
+        }
+        if self.pending_remote_board.is_some() && crate::sync::apply_pending_remote_board(self, cx) {
+            return true;
+        }
         self.save_task = None;
         // 版本历史 preview: the editor holds an older snapshot, so writing it
         // would overwrite the live document with history.
@@ -1194,7 +1251,7 @@ impl Workspace {
         };
         let doc = &ed.read(cx).core.doc;
         let (title, icon, body, reminders, links) = (doc.title.text.clone(), doc.icon.clone(), doc.plain_text(), doc.reminders(), doc.doc_links());
-        match self.store.with(|s| s.save_editor(&id, doc)) {
+        match self.store.save_editor(&id, doc) {
             Ok(meta) => {
                 if let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
                     e.title = title;
@@ -1607,6 +1664,17 @@ impl Workspace {
                             ),
 
                     )
+                    .when_some(
+                        self.current.as_ref().map(|id| crate::sync::other_device_viewing(id, cx)).filter(|v| !v.is_empty()),
+                        |d, devs| {
+                            let tip = format!("{}: {}", crate::settings::tr("其他设备正在查看或编辑此文档", "Also active on"), devs.join("、"));
+                            d.child(
+                                div().id("doc-presence-dot").flex_none().size(px(8.)).rounded_full()
+                                    .bg(theme::c(craft::old::G500))
+                                    .tip_label(tip, crate::ui::TipSide::Below)
+                            )
+                        },
+                    )
                     .when_some(save_error, |d, error| d.child(
                         div().id("save-status-error").when(self.unsaved, |d| d.cursor_pointer().on_click(cx.listener(|w, _, _, cx| { w.confirm = Some(Confirm::SaveFailed); cx.notify(); }))).min_w_0().max_w(px(220.)).text_size(px(12.)).line_height(px(18.))
                             .text_color(theme::c(craft::R400)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(error),
@@ -1707,6 +1775,7 @@ impl Render for Workspace {
                 .flex_col()
                 .child(self.top_bar(f32::from(window.viewport_size().width) - if self.sidebar_open { self.sidebar_w(window) } else { 0. }, cx))
                 .children(self.render_history_banner(cx))
+                .children(self.render_conflict_banner(cx))
                 .child(
                     div()
                         .flex_1()
@@ -1896,6 +1965,41 @@ impl Render for Workspace {
 }
 
 impl Workspace {
+    fn render_conflict_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let b = self.conflict_banner.as_ref()?;
+        let copy_id = b.conflict_doc_id.clone();
+        let msg = format!(
+            "{}（{} · {}）",
+            crate::settings::tr("检测到同步冲突，已保留本地修改并将远端版本另存为副本", "Sync conflict: kept local changes and saved remote copy"),
+            b.title,
+            b.device_name,
+        );
+        Some(
+            div()
+                .id("conflict-banner")
+                .flex_none()
+                .min_h(px(36.))
+                .px(px(16.))
+                .py(px(6.))
+                .flex()
+                .items_center()
+                .gap(px(10.))
+                .bg(theme::ca(craft::O50, 0.7))
+                .border_b_1()
+                .border_color(Theme::line_divider())
+                .child(div().flex_1().min_w_0().text_size(px(12.)).text_color(Theme::text()).child(msg))
+                .child(crate::ui::secondary_button("conflict-open-copy", crate::settings::tr("打开冲突副本", "Open conflict copy")).on_click(cx.listener(move |w, _, window, cx| {
+                    w.conflict_banner = None;
+                    w.open(&copy_id, window, cx);
+                })))
+                .child(crate::ui::secondary_button("conflict-dismiss", crate::settings::tr("忽略", "Dismiss")).on_click(cx.listener(|w, _, _, cx| {
+                    w.conflict_banner = None;
+                    cx.notify();
+                })))
+                .into_any_element(),
+        )
+    }
+
     /// Lay the first-launch pages over this window; finishing them uncovers it.
     pub(crate) fn replay_onboarding(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.onboarding.is_some() { return }

@@ -51,6 +51,7 @@ fn label_of(dir: &Path, name: &str) -> Option<String> {
 /// Set or clear a snapshot's name. An empty name removes the file rather than
 /// leaving a blank one behind.
 pub fn set_label(root: &Path, id: &str, name: &str, label: Option<&str>, trashed: bool) -> Result<()> {
+    anyhow::ensure!(safe_id(id), "无效的文档标识");
     anyhow::ensure!(safe_name(name), "无效的历史版本文件名");
     let dir = base(root, trashed).join(id);
     let path = label_path(&dir, name);
@@ -67,13 +68,25 @@ pub fn set_label(root: &Path, id: &str, name: &str, label: Option<&str>, trashed
     }
 }
 
+pub fn safe_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 /// `<13-digit ms>-<8 hex>.xml|md`; the fixed-width stamp sorts by time.
 pub fn stamp(name: &str) -> Option<u64> { name.split_once('-')?.0.parse().ok() }
 
-fn safe_name(name: &str) -> bool {
+pub fn safe_name(name: &str) -> bool {
     !name.contains('/') && !name.contains('\\') && !name.contains("..")
         && stamp(name).is_some()
         && (name.ends_with(".xml") || name.ends_with(".md"))
+}
+
+pub fn write_raw(root: &Path, id: &str, name: &str, trashed: bool, bytes: &[u8]) -> Result<()> {
+    anyhow::ensure!(safe_id(id), "无效的文档标识");
+    anyhow::ensure!(safe_name(name), "无效的历史版本文件名");
+    let dir = base(root, trashed).join(id);
+    crate::vfs::create_dir_all(&dir)?;
+    crate::store::write_atomic(&dir.join(name), bytes)
 }
 
 /// A label file moves and dies with its snapshot.
@@ -82,6 +95,7 @@ fn is_label(name: &str) -> bool { name.ends_with(".name") && safe_name(name.trim
 /// Newest first. A missing directory is simply an empty history.
 pub fn list(root: &Path, id: &str, trashed: bool) -> Vec<Version> {
     let mut out = vec![];
+    if !safe_id(id) { return out; }
     let dir = base(root, trashed).join(id);
     let Ok(entries) = crate::vfs::read_dir(&dir) else { return out };
     for e in entries.flatten() {
@@ -97,12 +111,14 @@ pub fn list(root: &Path, id: &str, trashed: bool) -> Vec<Version> {
 }
 
 pub fn read(root: &Path, id: &str, name: &str, trashed: bool) -> Result<String> {
+    anyhow::ensure!(safe_id(id), "无效的文档标识");
     anyhow::ensure!(safe_name(name), "无效的历史版本文件名");
     crate::vfs::read_to_string(base(root, trashed).join(id).join(name))
         .with_context(|| format!("读取历史版本 {name} 失败"))
 }
 
 pub fn remove(root: &Path, id: &str, name: &str, trashed: bool) -> Result<()> {
+    anyhow::ensure!(safe_id(id), "无效的文档标识");
     anyhow::ensure!(safe_name(name), "无效的历史版本文件名");
     let dir = base(root, trashed).join(id);
     let p = dir.join(name);
@@ -117,6 +133,7 @@ pub fn remove(root: &Path, id: &str, name: &str, trashed: bool) -> Result<()> {
 /// Save `previous` as one version. The caller treats every error as a
 /// warning: a history failure must never fail the document's own save.
 pub fn snapshot(root: &Path, id: &str, ext: &str, previous: &str, ms: u64, limit: u32, force: bool) -> Result<()> {
+    anyhow::ensure!(safe_id(id), "无效的文档标识");
     if previous.is_empty() || (ext != "xml" && ext != "md") { return Ok(()) }
     let mut versions = list(root, id, false);
     if let Some(last) = versions.first() {
@@ -191,14 +208,17 @@ fn move_dir(src: &Path, dst: &Path) {
 }
 
 pub fn move_to_trash(root: &Path, id: &str) {
+    if !safe_id(id) { return; }
     move_dir(&history_root(root).join(id), &trash_root(root).join(id));
 }
 
 pub fn restore_from_trash(root: &Path, id: &str) {
+    if !safe_id(id) { return; }
     move_dir(&trash_root(root).join(id), &history_root(root).join(id));
 }
 
 pub fn purge(root: &Path, id: &str) {
+    if !safe_id(id) { return; }
     let dir = trash_root(root).join(id);
     let Ok(entries) = crate::vfs::read_dir(&dir) else { return };
     for e in entries.flatten() {
@@ -266,12 +286,23 @@ mod tests {
     }
 
     #[test]
-    fn names_are_validated_and_limits_clamped() {
+    fn names_and_ids_are_validated_and_limits_clamped() {
+        assert!(safe_id("a1-b2_c3"));
+        assert!(!safe_id("../escape"));
+        assert!(!safe_id("foo/bar"));
         assert!(safe_name("1700000000000-abcd1234.xml"));
         assert!(!safe_name("../index.json"));
         assert!(!safe_name("1700000000000-abcd1234.txt"));
         assert_eq!(clamp_limit(0), 1);
         assert_eq!(clamp_limit(99), 30);
+
+        let root = lib();
+        assert!(write_raw(&root, "../escape", "1700000000000-abcd1234.xml", false, b"x").is_err());
+        assert!(read(&root, "../escape", "1700000000000-abcd1234.xml", false).is_err());
+        assert!(remove(&root, "../escape", "1700000000000-abcd1234.xml", false).is_err());
+        assert!(set_label(&root, "../escape", "1700000000000-abcd1234.xml", Some("x"), false).is_err());
+        assert!(list(&root, "../escape", false).is_empty());
+        crate::vfs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

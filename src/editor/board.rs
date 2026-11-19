@@ -22,7 +22,7 @@ use std::sync::Arc;
 #[derive(Default)]
 pub struct BoardUi {
     /// The open board: its block and view.
-    open: Option<(BlockId, Entity<BoardView>, Subscription)>,
+    pub(super) open: Option<(BlockId, Entity<BoardView>, Subscription)>,
     /// The open board has written a change back (later ones join its undo step).
     saved_once: bool,
     /// Thumbnail painters by block (their caches key on element versions).
@@ -138,6 +138,10 @@ impl Editor {
     /// A board is open (in place of the document).
     pub fn board_open(&self) -> bool { self.boards.open.is_some() }
 
+    pub fn board_view_ref(&self) -> Option<(BlockId, Entity<BoardView>)> {
+        self.boards.open.as_ref().map(|o| (o.0, o.1.clone()))
+    }
+
     /// The open board's view (the harness drops files on it).
     #[cfg(feature = "devtools")]
     pub fn board_view(&self) -> Option<Entity<BoardView>> { self.boards.open.as_ref().map(|o| o.1.clone()) }
@@ -161,4 +165,31 @@ impl Editor {
 
     /// The open board belongs to the document (not a standalone file).
     pub fn board_block_open(&self) -> bool { self.boards.open.is_some() && !self.board_file }
+
+    /// Update the underlying `Core` block for the currently open board without creating a new undo step.
+    pub fn sync_open_board_to_core(&mut self, board: Arc<Board>) {
+        if let Some((id, ..)) = self.boards.open.as_ref()
+            && let Some(b) = self.core.block_mut(*id)
+            && let BlockKind::Board(dst) = &mut b.kind
+        {
+            *dst = board;
+        }
+    }
+}
+
+pub(super) fn collect_board_ids(blocks: &[Block], out: &mut Vec<BlockId>) {
+    for b in blocks {
+        match &b.kind {
+            BlockKind::Board(_) => out.push(b.id),
+            BlockKind::Table(t) => {
+                for row in &t.rows {
+                    for cell in row {
+                        collect_board_ids(&cell.blocks, out);
+                    }
+                }
+            }
+            _ => {}
+        }
+        collect_board_ids(&b.children, out);
+    }
 }

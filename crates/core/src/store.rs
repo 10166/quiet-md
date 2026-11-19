@@ -22,6 +22,47 @@ pub use layout::{file_name_for, relative, resolve};
 use layout::{parent_rel, base_name, stem_of, join_rel};
 #[path = "migrate.rs"] mod migrate;
 pub use migrate::{MigrationState, ConsentReason, DeviceHint, MigrationReport, RestoreReport, SyncService, sync_of, set_ubiquity_probe};
+#[path = "sync_bridge.rs"] mod sync_bridge;
+pub use sync_bridge::{InventoryDoc, InventoryFolder, InventoryHistory, InventoryTrash, RawEntitySnapshot, RemoteDocApplied, SyncInventory};
+
+pub(super) fn safe_remove_dir_no_symlinks(dir: &Path) -> std::io::Result<()> {
+    match dir.fs_symlink_metadata() {
+        Ok(m) if m.file_type().is_symlink() => {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "refusing to remove symlink directory"));
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    }
+    let rd = match crate::vfs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    for entry in rd {
+        let entry = entry?;
+        let p = entry.path();
+        let meta = p.fs_symlink_metadata()?;
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            crate::vfs::remove_file(&p)?;
+        } else {
+            safe_remove_dir_no_symlinks(&p)?;
+        }
+    }
+    crate::vfs::remove_dir(dir)
+}
+
+pub fn is_safe_entity_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+pub fn is_safe_doc_ext(ext: &str) -> bool {
+    matches!(ext, "xml" | "md" | "excalidraw")
+}
+
+fn is_safe_single_component(id: &str) -> bool {
+    !id.is_empty() && id != "." && id != ".." && !id.contains('/') && !id.contains('\\') && !id.contains('\0') && !id.contains("..")
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Meta {
@@ -1767,10 +1808,37 @@ impl Store {
     fn trash_path(&self, id: &str) -> PathBuf {
         let meta = self.trash.get(id).map(|t| &t.meta).or_else(|| self.index.get(id));
         let dir = self.internal().join("trash");
+        if !is_safe_single_component(id) {
+            return dir.join("__invalid__");
+        }
         match meta {
             Some(m) if m.folder.is_some() => dir.join(id),
-            m => dir.join(format!("{id}.{}", m.map_or("xml", ext_of))),
+            m => dir.join(format!("{id}.{}", m.map_or("xml", |m| {
+                let e = ext_of(m);
+                if is_safe_doc_ext(e) { e } else { "xml" }
+            }))),
         }
+    }
+
+    fn validated_trash_target(&self, id: &str) -> Option<PathBuf> {
+        if !is_safe_single_component(id) {
+            return None;
+        }
+        let dir = self.internal().join("trash");
+        if dir.fs_symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()) {
+            return None;
+        }
+        let p = self.trash_path(id);
+        if p.fs_symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()) {
+            return None;
+        }
+        if let Ok(canon_dir) = dir.fs_canonicalize() {
+            let parent_canon = p.parent()?.fs_canonicalize().ok()?;
+            if parent_canon != canon_dir {
+                return None;
+            }
+        }
+        Some(p)
     }
 
     fn save_trash(&self) -> Result<()> {
@@ -1811,12 +1879,13 @@ impl Store {
                     }
                 };
                 let p = e.path();
+                if p.fs_symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()) { continue; }
                 if p.fs_is_dir() {
-                    if let Some(id) = p.file_name().and_then(|s| s.to_str()) { on_disk.insert(id.to_string()); }
+                    if let Some(id) = p.file_name().and_then(|s| s.to_str()).filter(|id| is_safe_single_component(id)) { on_disk.insert(id.to_string()); }
                     continue;
                 }
                 let Some((kind, markdown)) = p.file_name().and_then(|s| s.to_str()).and_then(DocKind::of_name) else { continue };
-                let Some(id) = p.file_stem().and_then(|s| s.to_str()).map(str::to_string) else { continue };
+                let Some(id) = p.file_stem().and_then(|s| s.to_str()).filter(|id| is_safe_single_component(id)).map(str::to_string) else { continue };
                 if !self.trash.contains_key(&id) {
                     let t = e
                         .metadata()
@@ -1842,8 +1911,13 @@ impl Store {
         let cutoff = now().saturating_sub(TRASH_DAYS * 86_400);
         let expired: Vec<String> = self.trash.iter().filter(|(_, t)| t.deleted <= cutoff).map(|(k, _)| k.clone()).collect();
         for id in expired.into_iter().filter(|_| _lock.is_some()) {
-            let p = self.trash_path(&id);
-            let r = if p.fs_is_dir() { crate::vfs::remove_dir_all(&p) } else { crate::vfs::remove_file(&p) };
+            let Some(p) = self.validated_trash_target(&id) else {
+                self.trash.remove(&id);
+                dirty = true;
+                self.warnings.push(format!("已忽略不安全的回收站条目 {id}"));
+                continue;
+            };
+            let r = if p.fs_is_dir() { safe_remove_dir_no_symlinks(&p) } else { crate::vfs::remove_file(&p) };
             match r {
                 Ok(()) => { self.trash.remove(&id); dirty = true; crate::versions::purge(&self.history_base(), &id); }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => { self.trash.remove(&id); dirty = true; crate::versions::purge(&self.history_base(), &id); }
@@ -1970,12 +2044,13 @@ impl Store {
     pub fn purge(&mut self, id: &str) -> Result<()> {
         let _lock = self.begin_write()?;
         for k in self.trash_group(id) {
-            let p = self.trash_path(&k);
-            let r = if p.fs_is_dir() { crate::vfs::remove_dir_all(&p) } else { crate::vfs::remove_file(&p) };
-            match r {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e.into()),
+            if let Some(p) = self.validated_trash_target(&k) {
+                let r = if p.fs_is_dir() { safe_remove_dir_no_symlinks(&p) } else { crate::vfs::remove_file(&p) };
+                match r {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.into()),
+                }
             }
             self.trash.remove(&k);
             crate::versions::purge(&self.history_base(), &k);

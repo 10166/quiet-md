@@ -191,6 +191,19 @@ pub fn rebuild(cx: &mut App) {
     cx.clear_key_bindings(); cx.bind_keys(bindings);
 }
 
+pub fn reload(cx: &mut App) {
+    let custom: BTreeMap<String, String> = fdl_core::vfs::read(path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    if cx.has_global::<Shortcuts>() {
+        cx.global_mut::<Shortcuts>().custom = custom;
+    }
+    rebuild(cx);
+    if crate::settings::prefs().quick_hotkey {
+        let _ = crate::quick_note::set_hotkey(&global_key(), cx);
+        let _ = crate::quick_note::set_last_hotkey(&last_key(), cx);
+    }
+    cx.refresh_windows();
+}
+
 /// Settings groups, in order.
 const GROUPS: [(&str, &str); 5] = [("应用与窗口", "App & windows"), ("文档", "Documents"), ("编辑", "Editing"), ("文字样式", "Text styles"), ("段落与块", "Paragraphs & blocks")];
 
@@ -352,7 +365,9 @@ fn change(id: &str, key: Option<String>, cx: &mut App) -> anyhow::Result<()> {
     if crate::settings::prefs().quick_hotkey { set(&key, cx)?; }
     if let Err(e) = write(&custom) { if crate::settings::prefs().quick_hotkey { let _ = set(&old, cx); } return Err(e); }
     cx.global_mut::<Shortcuts>().custom = custom;
-    rebuild(cx); cx.refresh_windows(); Ok(())
+    rebuild(cx); cx.refresh_windows();
+    crate::sync::notify_config("shortcuts");
+    Ok(())
 }
 /// First launch's choice of the quick-note shortcut.
 pub(crate) fn set_global(key: &str, cx: &mut App) -> anyhow::Result<()> { change("global", Some(key.into()), cx) }

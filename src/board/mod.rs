@@ -404,6 +404,32 @@ impl BoardView {
         self.finish_pending(window, cx);
         cx.emit(BoardEvent::Close);
     }
+
+    pub fn is_busy(&self) -> bool {
+        self.gesture.is_some() || self.text.is_some() || self.frame_name.is_some() || self.multi.is_some() || self.slider
+    }
+
+    /// Hot-reload a remotely synced board without firing `BoardEvent::Changed`.
+    pub fn apply_remote_board(&mut self, board: Arc<Board>, cx: &mut Context<Self>) {
+        let vp = self.viewport();
+        let active_tool = self.app.active_tool.clone();
+        let mut selected = self.app.selected_element_ids.clone();
+        selected.retain(|id| board.elements.iter().any(|e| !e.is_deleted && e.id == *id));
+        self.scene = Scene::new(board.elements.clone());
+        self.files = board.files.clone();
+        self.height = board.height;
+        self.app.apply_exported(&board.app);
+        self.app.set_viewport(vp);
+        self.app.active_tool = active_tool;
+        self.app.selected_element_ids = selected;
+        self.aabbs.borrow_mut().clear();
+        *self.hits.borrow_mut() = canvas::HitIndex::default();
+        self.sync_linear();
+        self.store.schedule_action(CaptureUpdateAction::Never);
+        let _ = self.store.commit(Some(self.scene.elements_including_deleted()), Some(&self.app));
+        self.saved = self.scene_version();
+        cx.notify();
+    }
 }
 
 impl Render for BoardView {

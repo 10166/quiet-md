@@ -44,6 +44,8 @@ pub enum EditorEvent {
     Leave,
     /// Esc while 版本历史 is open: back to the live document, then close.
     HistoryEscape,
+    /// Pending IME composition finished or cancelled.
+    ImeCommitted,
 }
 
 /// A child page shown by 子页面列表 blocks.
@@ -545,6 +547,54 @@ impl Editor {
         self.core.sel = if scope(anchor) == scope(head) { Selection { anchor, head } } else { Selection::caret(head) };
         self.restore_top = self.scroll_top();
         self.receive_document(next, cx);
+    }
+
+    pub fn has_ime_composition(&self) -> bool {
+        self.marked.is_some()
+    }
+
+    /// Hot-reload a remotely synced document while rebasing or fencing local undo
+    /// history, keeping viewport scroll position and remapping open boards.
+    pub fn receive_remote(&mut self, doc: Document, is_markdown: bool, cx: &mut Context<Self>) {
+        self.restore_top = self.scroll_top();
+        if let Some((mut open_id, view, sub)) = self.boards.open.take() {
+            let mut old_ids = Vec::new();
+            super::board::collect_board_ids(&self.core.doc.blocks, &mut old_ids);
+            let old_ordinal = old_ids.iter().position(|id| *id == open_id);
+            self.core.receive_remote(doc, is_markdown);
+            if !self.core.block(open_id).is_some_and(|b| matches!(b.kind, BlockKind::Board(_))) {
+                let mut new_ids = Vec::new();
+                super::board::collect_board_ids(&self.core.doc.blocks, &mut new_ids);
+                if let Some(new_id) = old_ordinal.and_then(|ix| new_ids.get(ix).copied()) {
+                    open_id = new_id;
+                }
+            }
+            if let Some(BlockKind::Board(bd)) = self.core.block(open_id).map(|b| b.kind.clone()) {
+                if !view.read(cx).is_busy() {
+                    view.update(cx, |b, cx| b.apply_remote_board(bd, cx));
+                }
+                self.boards.open = Some((open_id, view, sub));
+            }
+        } else {
+            self.core.receive_remote(doc, is_markdown);
+        }
+        self.marked = None;
+        self.menu = None;
+        self.slash = None;
+        self.cat_generation = None;
+        self.ro_doc = self.read_only.then(|| self.core.doc.clone());
+        self.refresh_find(false, cx);
+        cx.notify();
+    }
+
+    pub fn apply_synced_meta(&mut self, meta: &crate::store::Meta, in_preview: bool, cx: &mut Context<Self>) {
+        self.page_width = meta.width;
+        self.cat_pinned = !meta.catalogue_closed;
+        self.info = meta.info;
+        if !self.board_file && !in_preview {
+            self.set_read_only(meta.reading, cx);
+        }
+        cx.notify();
     }
 
     /// Call after every command: emits Changed, keeps menus consistent,
@@ -2791,8 +2841,10 @@ impl EntityInputHandler for Editor {
         Some(to16(&t.text, r.start)..to16(&t.text, r.end))
     }
 
-    fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {
-        self.marked = None;
+    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        if self.marked.take().is_some() {
+            cx.emit(EditorEvent::ImeCommitted);
+        }
     }
 
     fn replace_text_in_range(&mut self, range: Option<Range<usize>>, text: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -2801,6 +2853,7 @@ impl EntityInputHandler for Editor {
             return;
         }
         let head = self.core.sel.head.block;
+        let had_marked = self.marked.is_some();
         if let Some((b, r)) = self.marked.take() {
             self.core.sel = Selection { anchor: Pos::new(b, r.start), head: Pos::new(b, r.end) };
         } else if let Some(r16) = range
@@ -2813,6 +2866,9 @@ impl EntityInputHandler for Editor {
             }
         }
         self.type_text(text, window, cx);
+        if had_marked && self.marked.is_none() {
+            cx.emit(EditorEvent::ImeCommitted);
+        }
     }
 
     fn replace_and_mark_text_in_range(
@@ -2844,7 +2900,11 @@ impl EntityInputHandler for Editor {
             _ => self.reported_range(&t).0,
         };
         self.core.replace_in_block(head, r.clone(), text);
+        let had_marked = self.marked.is_some();
         self.marked = (!text.is_empty()).then(|| (head, r.start..r.start + text.len()));
+        if had_marked && self.marked.is_none() {
+            cx.emit(EditorEvent::ImeCommitted);
+        }
         if let Some(ns) = new_sel {
             let t2 = self.core.text_of(head).map(|t| t.text.clone()).unwrap_or_default();
             let base = to16(&t2, r.start);

@@ -62,6 +62,8 @@ mod feishu_theme;
 mod editor_theme;
 #[allow(dead_code, unused_imports)]
 mod editor_ui;
+mod sync;
+mod sync_ui;
 mod theme;
 mod transfer;
 mod trash;
@@ -160,6 +162,7 @@ pub(crate) fn start(existed: bool, scripted: bool, into: Option<&mut Window>, in
     if !scripted && !cfg!(target_family = "wasm") { quick_note::install(cx); }
     app::set_menus(cx);
     update::init(cx);
+    sync::init(cx);
     let took = into.map(|window| window.replace_root(cx, app::Workspace::new));
     if took.is_none() { open_main_window(scripted, None, cx); }
     // A synced library (or one used elsewhere) moves to real folders only once the user agrees.

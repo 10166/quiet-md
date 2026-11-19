@@ -2,12 +2,15 @@
 
 Quiet.md 是一个单进程 GPUI 应用（Rust，约 9 万行，其中画板约 2.6 万行）。一篇文档在内存里是一棵 block 树（`model.rs`），在磁盘上是一份 DocxXML 文件（`docxml.rs`）。编辑器把这棵树画成一个虚拟化列表。
 
-仓库是一个 Cargo workspace，分两个 crate：
+仓库是一个 Cargo workspace，包含 5 个 crate：
 
-- **`crates/core`（`fdl_core`，约 3.6 万行，其中画板 2 万行）**：文档引擎。包括模型、DocxXML、编辑内核和撤销、磁盘上的文档库、Markdown / HTML 导入和 Markdown 导出，以及画板的模型和算法。它不依赖 GPUI，可以单独编译和测试（`cargo test -p fdl_core`），fuzzer 也在这里。
-- **根 crate（`quiet_md`）**：GPUI 应用，即窗口、视图、渲染、菜单和浮层。`main.rs` 把 `fdl_core` 的模块重新导出到 crate 根，`editor/mod.rs` 重新导出 `editor::core` 和 `editor::table_ops`，所以应用里仍然写 `crate::model`、`super::core`。
+- **`crates/core`（`fdl_core`，约 3.6 万行，其中画板 2 万行）**：文档引擎。包括模型、DocxXML、编辑内核和撤销、磁盘上的文档库、Markdown / HTML 导入和 Markdown 导出、三路合并（`merge.rs`）与同步存储桥（`sync_bridge.rs`），以及画板的模型和算法。它不依赖 GPUI 或网络库，可以单独编译和测试（`cargo test -p fdl_core`），fuzzer 也在这里。
+- **`crates/sync-proto`（`quiet_sync_proto`）**：云同步协议与加解密原语。定义实体类型、线协议、Argon2id + XChaCha20-Poly1305 零知识信封加密、HKDF 密钥派生和恢复密钥（`QMD1-...`）。
+- **`crates/sync-client`（`quiet_sync_client`）**：离线优先的异步客户端同步引擎。管理外部 SQLite 状态/发件箱（`state_db.rs`）、HTTPS 客户端（`http.rs`）、WebSocket 实时长连接（`ws.rs`）和通过 `LocalLibraryAdapter` 接入的三路合并调度（`engine.rs`）。
+- **`crates/sync-server`（`quiet_sync_server`）**：独立的自托管远程同步服务端二进制。基于 Axum + WebSocket + SQLite WAL + 可插拔本地目录或 S3 兼容对象存储（`blob.rs`），支持多用户、多文档库、CAS/OCC 版本校验、孤儿块 GC（`gc.rs`）、内嵌运维管理后台（`portal.rs` / `routes/admin.rs`）以及参考 MySQL 主从复制的 WAL 快照 + 行级 Binlog + Blob 异步补齐主从备份（`repl.rs` / `db_repl.rs` / `routes/repl.rs`）。
+- **根 crate（`quiet_md`）**：GPUI 桌面应用（以及通过条件编译支持的 Web 端），包含窗口、视图、渲染、菜单、浮层及云同步设置与实时热更新桥接（`src/sync.rs`、`src/sync_ui.rs`）。`main.rs` 把 `fdl_core` 的模块重新导出到 crate 根，`editor/mod.rs` 重新导出 `editor::core` 和 `editor::table_ops`，所以应用里仍然写 `crate::model`、`super::core`。
 
-依赖只能从应用指向 core。core 里的模块只引用 core 里的模块。
+依赖只能从应用 / 同步客户端指向 core 和 sync-proto。core 里的模块只引用 core 里的模块。
 
 ```
 main.rs ─ 窗口
@@ -121,6 +124,8 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 | `versions.rs` | 正文版本快照：目录即索引、节流、配额、回收站联动 |
 | `diff.rs` | 版本间的按行 LCS 差异（无第三方依赖） |
 | `changes.rs` | 版本间的块级 LCS：哪些块是新加的、哪些被改写，用来给快照上色 |
+| `merge.rs` | DocxXML 块级 / Markdown / 画板元素级 / 元数据与 JSON 配置的确定性三路合并 |
+| `sync_bridge.rs` | 面向云同步的库存枚举、`Store` 写锁内远端应用与冲突副本生成 |
 
 应用顶层（`src/`）：
 
@@ -129,6 +134,7 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 | `main.rs` | 入口；`FDL_SCRIPT` 脚本模式（仅 `devtools` 特性）；重新导出 `fdl_core` 的模块 |
 | `guides.rs` | 文档库是空的时放入内置的「开始指南」（只放一次） |
 | `app.rs` | `Workspace`：两栏窗口、打开 / 新建 / 保存 / 删除、保存状态、提醒调度 |
+| `sync.rs` / `sync_ui.rs` | `SyncManager`（桌面端接入 `quiet_sync_client`，WASM 为空实现）、IME/交互期延后热重载、冲突横幅、在线状态与设置 › 云同步界面 |
 | `html.rs` / `printing.rs` / `transfer.rs` | 导出 HTML / PDF、打印、导入导出的界面 |
 | `clipboard.rs` | 系统剪贴板的 HTML 读取，以及脚本模式的模拟剪贴板 |
 | `sidebar.rs` / `tree.rs` | 左栏与文档树（子文档、移动到） |
@@ -176,3 +182,11 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 文件夹是索引中的 `Meta::folder` 条目，只允许文件夹作为父级。Core 的 `store/folders.rs` 负责旧树迁移、层级校验和同级排序；应用的 `folders.rs`、`sidebar_drag.rs`、`home_folder.rs` 负责文件夹页面、拖拽和动画。
 
 新建、复制、重命名、移动、删除和恢复的撤销与文档正文撤销分开。存储层在写锁内记录实际成功的文件操作，避免将其他实例的变化纳入当前操作；异步拖拽落盘后用实际记录替换预览记录。撤销前检查文件状态和层级，正文读自当前磁盘，不恢复旧正文快照。管理操作修改标题时同步修正编辑器及其历史快照中的光标边界。
+
+## 多端实时云同步
+
+- **离线优先与本地闭环**：所有编辑照常先落盘，再由 `shared_store.rs` 等变更入口发送防抖通知（默认停止输入 30 秒后上传，可在设置 › 云同步调整为实时 300ms/1500ms 或 10 秒 / 30 秒 / 1 分钟 / 5 分钟空闲间隔）到后台 Tokio 同步线程；无网络或暂停时改动暂存在文档库外的发件箱，联网后通过 WebSocket 与 HTTPS 自动续传。
+- **块级与元素级三路合并**：后台线程依据本机保存的上一次同步基线（`base_blob`），调用 `fdl_core::merge` 对 DocxXML（含嵌套子块与表格单元格）、Markdown（保留 YAML front matter）、Excalidraw（确定性元素级版本号比较）以及元数据/配置 JSON 做无损合并；同一块并发冲突时在主文档保留本地版本，并将远端内容写入冲突副本同时弹出顶栏横幅提示。
+- **编辑器热重载与输入保护**：远端更新到达已打开的文档或画板时保留本地撤销栈、滚动位置与语义光标；若用户正在使用输入法组字（`Editor::has_ime_composition`）或正在画板上拖拽/输入（`BoardView::is_busy`），更新暂存到 `Workspace` 直到输入结束或画板空闲后应用；若本地有未保存改动则先就地做一次实时三路合并。
+- **可选零知识端到端加密**：创建加密文档库时在客户端生成随机 32 字节 Vault Master Key（VMK），分别通过 Argon2id + XChaCha20-Poly1305 口令包装和 `QMD1-...` 恢复密钥保护，再以 HKDF 派生实体系与同库收敛附件加密子密钥，服务端仅存储密文信封与加密块。
+- **跨平台编译约束**：桌面端启用完整同步引擎；`wasm32` 目标使用 `src/sync.rs` / `src/sync_ui.rs` 内的空实现，保持浏览器端可编译性。

@@ -278,6 +278,7 @@ impl Workspace {
         if self.store.file_task_busy() || self.file_history.busy || self.tree_writes_pending() || ids.is_empty() { return; }
         let Some(task_guard) = self.store.begin_file_task() else { return };
         let mut writer = self.store.tree_writer();
+        let orig_ids = ids.clone();
         let task = cx.background_executor().spawn(async move {
             let batch = writer.begin_batch().is_ok();
             let mut errors = vec![];
@@ -299,6 +300,8 @@ impl Workspace {
             let (done, listed) = task.await;
             let _ = this.update(cx, |w, cx| {
                 w.trash = listed.trash;
+                let purged: Vec<String> = orig_ids.into_iter().filter(|id| !w.trash.iter().any(|t| t.id == *id)).collect();
+                if !purged.is_empty() { crate::sync::notify_purged_trash(&purged); }
                 let mut errors = done.errors;
                 errors.extend(listed.warnings.iter().map(|s| crate::settings::diagnostic(s)));
                 if errors.is_empty() { w.show_toast(success, cx); }

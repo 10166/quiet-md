@@ -1,0 +1,12 @@
+target/
+dist/
+dist-preview/
+shared-mock/
+assets/
+site/
+web/
+tools/
+.git/
+._*
+**/._*
+sync-data/

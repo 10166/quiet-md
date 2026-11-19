@@ -1,0 +1,1371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quiet.md Sync Portal</title>
+<style>
+  :root {
+    --bg-window: #f5f5f4;
+    --bg-surface: #ffffff;
+    --bg-subtle: #f7f7f6;
+    --bg-hover: #efefec;
+    --border: #e6e5e2;
+    --border-strong: #d4d3cf;
+    --text: #1c1c1a;
+    --text-muted: #6b6a65;
+    --text-faint: #9a9891;
+    --accent: #2563eb;
+    --accent-soft: #eff6ff;
+    --accent-hover: #1d4ed8;
+    --ok: #15803d;
+    --ok-soft: #f0fdf4;
+    --warn: #b45309;
+    --warn-soft: #fffbeb;
+    --danger: #dc2626;
+    --danger-soft: #fef2f2;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.04);
+    --shadow-md: 0 10px 30px rgba(0,0,0,.10);
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg-window: #141413;
+      --bg-surface: #1c1c1b;
+      --bg-subtle: #232321;
+      --bg-hover: #2a2a27;
+      --border: #2e2e2b;
+      --border-strong: #3d3d39;
+      --text: #ecebe8;
+      --text-muted: #a1a09a;
+      --text-faint: #706f6a;
+      --accent: #60a5fa;
+      --accent-soft: rgba(59,130,246,.14);
+      --accent-hover: #93c5fd;
+      --ok: #4ade80;
+      --ok-soft: rgba(34,197,94,.14);
+      --warn: #fbbf24;
+      --warn-soft: rgba(245,158,11,.15);
+      --danger: #f87171;
+      --danger-soft: rgba(239,68,68,.15);
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.25);
+      --shadow-md: 0 12px 34px rgba(0,0,0,.45);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; background: var(--bg-window); color: var(--text); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .num { font-variant-numeric: tabular-nums; }
+  .muted { color: var(--text-muted); }
+  .faint { color: var(--text-faint); }
+  .hidden { display: none !important; }
+
+  /* Layout: Quiet.md sunken sidebar + full-height white plane */
+  .shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 252px; flex-shrink: 0; background: var(--bg-window); padding: 18px 14px; display: flex; flex-direction: column; gap: 14px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .brand { padding: 4px 8px; }
+  .brand-title { font-weight: 700; font-size: 15px; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
+  .brand-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+  .brand-node { font-size: 12px; color: var(--text-muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .role-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; margin-top: 8px; }
+  .role-primary { background: var(--ok-soft); color: var(--ok); }
+  .role-backup { background: var(--warn-soft); color: var(--warn); }
+
+  .nav { display: flex; flex-direction: column; gap: 3px; }
+  .nav button { width: 100%; border: none; background: transparent; color: var(--text-muted); padding: 8px 10px; border-radius: 8px; text-align: left; font-size: 13.5px; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: space-between; transition: background .12s, color .12s; }
+  .nav button:hover { background: var(--bg-hover); color: var(--text); }
+  .nav button.active { background: var(--bg-surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow-sm); }
+
+  .peer-box { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 11px 12px; font-size: 12.5px; }
+  .peer-box-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); margin-bottom: 8px; }
+  .peer-item { display: flex; flex-direction: column; gap: 5px; padding: 7px 0; border-top: 1px solid var(--border); }
+  .peer-item:first-of-type { border-top: none; padding-top: 0; }
+  .peer-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .peer-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .peer-jump { display: inline-flex; align-items: center; justify-content: center; gap: 4px; width: 100%; padding: 5px 8px; border-radius: 7px; font-size: 12px; font-weight: 500; background: var(--accent-soft); color: var(--accent); text-decoration: none; transition: opacity .12s; }
+  .peer-jump:hover { opacity: .85; text-decoration: none; }
+
+  .sidebar-footer { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+  .sidebar-footer-row { display: flex; gap: 6px; }
+
+  .main { flex: 1; background: var(--bg-surface); border-left: 1px solid var(--border); min-width: 0; padding: 26px 34px 48px; }
+  .page-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+  .page-head h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+  .page-sub { color: var(--text-muted); font-size: 13px; margin-top: 2px; }
+
+  /* Cards, grids, tables */
+  .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
+  @media (max-width: 1080px) { .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .grid-2 { grid-template-columns: 1fr; } }
+  @media (max-width: 780px) { .shell { flex-direction: column; } .sidebar { width: 100%; height: auto; position: static; } .main { padding: 18px; border-left: none; border-top: 1px solid var(--border); } }
+
+  .card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+  .card-subtle { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+  .card-title { font-size: 14px; font-weight: 600; margin: 0 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .kpi-label { font-size: 12px; color: var(--text-muted); }
+  .kpi-val { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; margin-top: 4px; }
+  .kpi-sub { font-size: 12px; color: var(--text-faint); margin-top: 4px; }
+
+  .banner { padding: 11px 14px; border-radius: 9px; margin-bottom: 18px; font-size: 13px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .banner-warn { background: var(--warn-soft); color: var(--warn); border: 1px solid rgba(245,158,11,.28); }
+  .banner-danger { background: var(--danger-soft); color: var(--danger); border: 1px solid rgba(239,68,68,.28); }
+  .banner-ok { background: var(--ok-soft); color: var(--ok); border: 1px solid rgba(34,197,94,.28); }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-weight: 600; font-size: 12px; color: var(--text-muted); background: var(--bg-subtle); padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--bg-subtle); }
+
+  /* Controls */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 13px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--bg-surface); color: var(--text); font-size: 13px; font-weight: 500; cursor: pointer; transition: background .12s, border-color .12s; white-space: nowrap; }
+  .btn:hover:not(:disabled) { background: var(--bg-hover); }
+  .btn:disabled { opacity: .48; cursor: not-allowed; }
+  .btn-sm { padding: 4px 9px; font-size: 12px; border-radius: 7px; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+  .btn-danger { color: var(--danger); border-color: rgba(220,38,38,.35); background: var(--danger-soft); }
+  .btn-danger:hover:not(:disabled) { background: var(--danger); color: #fff; border-color: var(--danger); }
+
+  .input, select { width: 100%; padding: 8px 11px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-surface); color: var(--text); font-size: 13.5px; outline: none; }
+  .input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .field { margin-bottom: 13px; }
+  .field label { display: block; font-size: 12.5px; font-weight: 500; color: var(--text-muted); margin-bottom: 5px; }
+  .field-hint { font-size: 11.5px; color: var(--text-faint); margin-top: 4px; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .row-between { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+  .pill-ok { background: var(--ok-soft); color: var(--ok); }
+  .pill-warn { background: var(--warn-soft); color: var(--warn); }
+  .pill-danger { background: var(--danger-soft); color: var(--danger); }
+  .pill-muted { background: var(--bg-hover); color: var(--text-muted); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+  .bar { height: 7px; border-radius: 999px; background: var(--bg-hover); overflow: hidden; display: flex; }
+  .bar-fill { height: 100%; background: var(--accent); transition: width .25s; }
+  .bar-fill-2 { height: 100%; background: #10b981; }
+  .bar-fill-3 { height: 100%; background: #f59e0b; }
+
+  /* Auth screen */
+  .auth-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .auth-card { width: 100%; max-width: 410px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 14px; padding: 28px; box-shadow: var(--shadow-md); }
+  .auth-card h2 { margin: 0 0 6px; font-size: 19px; }
+  .auth-card p { margin: 0 0 18px; color: var(--text-muted); font-size: 13px; }
+
+  /* Modal */
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.42); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+  .modal { width: 100%; max-width: 640px; max-height: 86vh; overflow-y: auto; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px 24px; box-shadow: var(--shadow-md); }
+  .modal-sm { max-width: 440px; }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .modal-head h3 { margin: 0; font-size: 16px; }
+
+  .toast-wrap { position: fixed; right: 20px; bottom: 20px; z-index: 80; display: flex; flex-direction: column; gap: 8px; }
+  .toast { background: var(--text); color: var(--bg-surface); padding: 10px 14px; border-radius: 9px; font-size: 13px; box-shadow: var(--shadow-md); max-width: 360px; }
+  .toast-err { background: var(--danger); color: #fff; }
+</style>
+</head>
+<body>
+
+<div id="auth-view" class="auth-wrap hidden">
+  <div class="auth-card">
+    <div class="row" style="margin-bottom:14px;">
+      <span class="brand-dot"></span>
+      <strong>Quiet.md Sync Portal</strong>
+      <span id="auth-version" class="faint mono" style="margin-left:auto;"></span>
+    </div>
+    <h2 id="auth-title">管理员登录</h2>
+    <p id="auth-desc">请输入本机管理员密码以进入运维控制台。</p>
+    <form id="auth-form">
+      <div id="setup-extra" class="hidden">
+        <div class="field">
+          <label>节点名称</label>
+          <input id="setup-node-name" class="input" placeholder="例如：Primary-Tokyo 或 NAS-Backup">
+        </div>
+        <div class="field">
+          <label>本机 Portal 访问地址（供主备双向快捷跳转）</label>
+          <input id="setup-portal-url" class="input" placeholder="例如：https://sync.example.com">
+        </div>
+      </div>
+      <div class="field">
+        <label>管理员密码</label>
+        <input id="auth-password" type="password" class="input" required autocomplete="current-password" placeholder="至少 8 位字符">
+      </div>
+      <div id="setup-confirm-wrap" class="field hidden">
+        <label>确认管理员密码</label>
+        <input id="auth-password-confirm" type="password" class="input" autocomplete="new-password" placeholder="再次输入密码">
+      </div>
+      <div id="auth-error" class="banner banner-danger hidden" style="margin-bottom:12px;"></div>
+      <button type="submit" id="auth-submit" class="btn btn-primary" style="width:100%;padding:9px 14px;">登录</button>
+    </form>
+  </div>
+</div>
+
+<div id="app-view" class="shell hidden">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-title"><span class="brand-dot"></span>Quiet.md Sync</div>
+      <div id="sb-node-name" class="brand-node"></div>
+      <div id="sb-role-badge" class="role-badge role-primary">主服务器</div>
+    </div>
+
+    <nav class="nav">
+      <button data-tab="overview" class="active"><span>概览</span></button>
+      <button data-tab="users"><span>用户管理</span><span id="nav-user-count" class="faint num"></span></button>
+      <button data-tab="storage"><span>存储使用</span></button>
+      <button data-tab="replication"><span>主从备份</span><span id="nav-repl-badge" class="faint num"></span></button>
+    </nav>
+
+    <div id="sb-peer-box" class="peer-box hidden"></div>
+
+    <div class="sidebar-footer">
+      <div class="row-between" style="font-size:11.5px;padding:0 4px;">
+        <span class="faint">版本</span>
+        <span id="sb-version" class="mono faint"></span>
+      </div>
+      <div class="sidebar-footer-row">
+        <button id="btn-change-pw" class="btn btn-sm" style="flex:1;">修改密码</button>
+        <button id="btn-logout" class="btn btn-sm" style="flex:1;">退出</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div id="global-backup-banner" class="banner banner-warn hidden">
+      <span>当前服务器运行在 <strong>备份模式（只读）</strong>，业务数据由主服务器实时同步，本地写入与删除用户已锁定。</span>
+      <span id="banner-primary-link"></span>
+    </div>
+
+    <!-- Tab: Overview -->
+    <section id="tab-overview">
+      <div class="page-head">
+        <div>
+          <h1>服务概览</h1>
+          <div id="ov-subtitle" class="page-sub"></div>
+        </div>
+        <div class="row">
+          <button id="btn-run-gc" class="btn">执行垃圾回收 (GC)</button>
+          <button id="btn-refresh-all" class="btn">刷新</button>
+        </div>
+      </div>
+
+      <div class="grid-4" id="ov-kpis"></div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">
+            <span>主从集群状态</span>
+            <button class="btn btn-sm" data-action="switch-tab" data-tab="replication">管理备份 →</button>
+          </div>
+          <div id="ov-cluster-body"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span>节点与注册设置</span></div>
+          <form id="node-settings-form">
+            <div class="field">
+              <label>节点名称</label>
+              <input id="set-node-name" class="input" maxlength="128">
+            </div>
+            <div class="field">
+              <label>本机 Portal 访问地址</label>
+              <div class="row">
+                <input id="set-portal-url" class="input" placeholder="http://192.168.1.50:8787 或 https://sync.example.com">
+                <button type="button" class="btn btn-sm" id="btn-fill-origin">当前地址</button>
+              </div>
+              <div class="field-hint">主备连接时会上报给对方，用于对方的「快捷跳转 Portal」按钮。</div>
+            </div>
+            <div class="field" id="set-register-group">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text);">
+                <input id="set-allow-register" type="checkbox"> 开放新用户注册
+              </label>
+            </div>
+            <div class="field" id="set-invite-group">
+              <label>注册邀请码（留空表示无需邀请码）</label>
+              <input id="set-invite-code" class="input" placeholder="可选邀请码">
+            </div>
+            <button type="submit" class="btn btn-primary">保存设置</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab: Users -->
+    <section id="tab-users" class="hidden">
+      <div class="page-head">
+        <div>
+          <h1>用户管理</h1>
+          <div class="page-sub">查看注册用户、设备活跃状态与存储占用，支持级联删除用户。</div>
+        </div>
+      </div>
+      <div class="row" style="margin-bottom:14px;flex-wrap:wrap;">
+        <input id="user-search" class="input" style="max-width:300px;" placeholder="搜索邮箱、昵称或用户 ID...">
+        <select id="user-sort" style="max-width:190px;">
+          <option value="storage_desc">按存储占用降序</option>
+          <option value="created_desc">按注册时间降序</option>
+          <option value="created_asc">按注册时间升序</option>
+          <option value="email_asc">按邮箱 A-Z</option>
+        </select>
+        <button id="btn-search-users" class="btn">查询</button>
+        <span id="users-total-hint" class="muted" style="margin-left:auto;font-size:12.5px;"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>用户</th>
+              <th>文档库</th>
+              <th>设备 (在线/活跃)</th>
+              <th>实体数</th>
+              <th>存储占用</th>
+              <th>最近活跃</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="users-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Tab: Storage -->
+    <section id="tab-storage" class="hidden">
+      <div class="page-head">
+        <div>
+          <h1>存储使用情况</h1>
+          <div id="st-subtitle" class="page-sub"></div>
+        </div>
+        <button id="btn-st-gc" class="btn">立即清理孤儿块</button>
+      </div>
+      <div class="grid-4" id="st-kpis"></div>
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-title"><span>存储构成分布</span><span id="st-dedup-note" class="faint" style="font-size:12px;font-weight:400;"></span></div>
+        <div id="st-bar" class="bar" style="height:12px;margin-bottom:10px;"></div>
+        <div id="st-legend" class="row" style="flex-wrap:wrap;font-size:12.5px;gap:16px;"></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title"><span>用户存储排行</span></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>用户</th><th>文档库</th><th>Blob</th><th>总占用</th></tr></thead>
+              <tbody id="st-top-users"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span>文档库存储排行</span></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>文档库</th><th>所属用户</th><th>加密</th><th>总占用</th></tr></thead>
+              <tbody id="st-top-vaults"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab: Replication -->
+    <section id="tab-replication" class="hidden">
+      <div class="page-head">
+        <div>
+          <h1>主从备份</h1>
+          <div class="page-sub">参考 MySQL 主从（WAL 快照 + 全局行级 Binlog + 内容寻址 Blob 队列），由内网备份节点主动连接主节点。</div>
+        </div>
+        <button id="btn-repl-refresh" class="btn">刷新状态</button>
+      </div>
+      <div id="repl-content"></div>
+    </section>
+  </main>
+</div>
+
+<div id="modal-root"></div>
+<div id="toast-wrap" class="toast-wrap"></div>
+
+<script>
+const state = {
+  auth: null,
+  overview: null,
+  storage: null,
+  replication: null,
+  users: { total: 0, users: [] },
+  tab: 'overview',
+  isSetupMode: false,
+  pollTimer: null,
+};
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function safePortalLink(url) {
+  if (!url) return null;
+  const u = String(url).trim().replace(/\/+$/, '');
+  if (!/^https?:\/\/[^\s]+$/i.test(u)) return null;
+  return u.endsWith('/portal') ? u : (u + '/portal');
+}
+
+function fmtBytes(n) {
+  n = Number(n || 0);
+  if (n < 1024) return n + ' B';
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let i = -1;
+  do { n /= 1024; i++; } while (n >= 1024 && i < units.length - 1);
+  return n.toFixed(n >= 100 ? 0 : n >= 10 ? 1 : 2) + ' ' + units[i];
+}
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  return new Date(ts * 1000).toLocaleString();
+}
+
+function fmtAgo(ts) {
+  if (!ts) return '从未';
+  const diff = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+  if (diff < 10) return '刚刚';
+  if (diff < 60) return diff + ' 秒前';
+  if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+  if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+  return Math.floor(diff / 86400) + ' 天前';
+}
+
+function fmtUptime(secs) {
+  secs = Number(secs || 0);
+  const d = Math.floor(secs / 86400);
+  const h = Math.floor((secs % 86400) / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  if (d > 0) return `${d}天 ${h}小时`;
+  if (h > 0) return `${h}小时 ${m}分`;
+  return `${m}分钟`;
+}
+
+function toast(msg, isErr = false) {
+  const el = document.createElement('div');
+  el.className = 'toast' + (isErr ? ' toast-err' : '');
+  el.textContent = msg;
+  document.getElementById('toast-wrap').appendChild(el);
+  setTimeout(() => el.remove(), 3600);
+}
+
+async function api(path, opts = {}) {
+  const headers = Object.assign({ 'X-Quiet-Portal': '1' }, opts.headers || {});
+  if (opts.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const resp = await fetch(path, Object.assign({}, opts, {
+    credentials: 'same-origin',
+    headers,
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+  }));
+  if (resp.status === 204) return null;
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    if (resp.status === 401 && !path.startsWith('/api/admin/auth/')) {
+      showAuthView();
+    }
+    const err = new Error(data.message || `请求失败 (${resp.status})`);
+    err.code = data.code || '';
+    err.status = resp.status;
+    throw err;
+  }
+  return data;
+}
+
+function openModal(html, small = false) {
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-backdrop" data-action="modal-backdrop">
+      <div class="modal ${small ? 'modal-sm' : ''}">${html}</div>
+    </div>`;
+}
+
+function closeModal() {
+  document.getElementById('modal-root').innerHTML = '';
+}
+
+function replStateBadge(st) {
+  switch (st) {
+    case 'streaming': return '<span class="pill pill-ok"><span class="dot"></span>实时同步中</span>';
+    case 'bootstrapping': return '<span class="pill pill-warn"><span class="dot"></span>全量快照同步中</span>';
+    case 'reconnecting': return '<span class="pill pill-warn"><span class="dot"></span>断线重连中</span>';
+    case 'evicted': return '<span class="pill pill-danger"><span class="dot"></span>已被主服务器剔除</span>';
+    default: return `<span class="pill pill-muted">${esc(st || '空闲')}</span>`;
+  }
+}
+
+async function checkAuth() {
+  const st = await api('/api/admin/auth/status');
+  state.auth = st;
+  document.getElementById('auth-version').textContent = 'v' + st.version;
+  if (!st.initialized) {
+    state.isSetupMode = true;
+    showAuthView();
+  } else if (!st.authenticated) {
+    state.isSetupMode = false;
+    showAuthView();
+  } else {
+    showAppView();
+  }
+}
+
+function showAuthView() {
+  stopPolling();
+  document.getElementById('app-view').classList.add('hidden');
+  document.getElementById('auth-view').classList.remove('hidden');
+  document.getElementById('auth-error').classList.add('hidden');
+  document.getElementById('auth-password').value = '';
+  document.getElementById('auth-password-confirm').value = '';
+  if (state.isSetupMode) {
+    document.getElementById('auth-title').textContent = '初始化管理员密码';
+    document.getElementById('auth-desc').textContent = '首次使用管理后台，请设置本机管理员密码（仅存本机，主从复制不会覆盖）。';
+    document.getElementById('setup-extra').classList.remove('hidden');
+    document.getElementById('setup-confirm-wrap').classList.remove('hidden');
+    document.getElementById('setup-node-name').value = state.auth?.node_name || '';
+    document.getElementById('setup-portal-url').value = state.auth?.portal_url || window.location.origin;
+    document.getElementById('auth-submit').textContent = '初始化并进入后台';
+  } else {
+    document.getElementById('auth-title').textContent = '管理员登录';
+    document.getElementById('auth-desc').textContent = `登录到 ${state.auth?.node_name || 'Quiet.md Sync'} 管理后台。`;
+    document.getElementById('setup-extra').classList.add('hidden');
+    document.getElementById('setup-confirm-wrap').classList.add('hidden');
+    document.getElementById('auth-submit').textContent = '登录';
+  }
+}
+
+async function showAppView() {
+  document.getElementById('auth-view').classList.add('hidden');
+  document.getElementById('app-view').classList.remove('hidden');
+  await refreshAll();
+  startPolling();
+}
+
+function startPolling() {
+  stopPolling();
+  state.pollTimer = setInterval(() => {
+    if (document.hidden) return;
+    if (state.tab === 'overview') {
+      loadOverview(true);
+    } else if (state.tab === 'replication') {
+      const active = document.activeElement;
+      const editingRepl = active && active.closest && active.closest('#tab-replication') &&
+        ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName);
+      const urlDraft = document.getElementById('bk-primary-url')?.value?.trim();
+      const pwDraft = document.getElementById('bk-primary-pw')?.value;
+      const hasDraft = Boolean(pwDraft) || (state.replication?.node?.role === 'primary' && Boolean(urlDraft));
+      if (!editingRepl && !hasDraft) loadReplication(true);
+    }
+  }, 5000);
+}
+
+function stopPolling() {
+  if (state.pollTimer) {
+    clearInterval(state.pollTimer);
+    state.pollTimer = null;
+  }
+}
+
+function switchTab(tab) {
+  state.tab = tab;
+  document.querySelectorAll('.nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  ['overview', 'users', 'storage', 'replication'].forEach(t => {
+    document.getElementById('tab-' + t).classList.toggle('hidden', t !== tab);
+  });
+  if (tab === 'overview') loadOverview();
+  else if (tab === 'users') loadUsers();
+  else if (tab === 'storage') loadStorage();
+  else if (tab === 'replication') loadReplication();
+}
+
+async function refreshAll() {
+  await loadOverview();
+  if (state.tab === 'users') await loadUsers();
+  else if (state.tab === 'storage') await loadStorage();
+  else if (state.tab === 'replication') await loadReplication();
+}
+
+function renderSidebar(ov) {
+  const { node, stats, replicas, upstream } = ov;
+  document.getElementById('sb-node-name').textContent = node.node_name;
+  document.getElementById('sb-version').textContent = 'v' + node.version;
+  document.getElementById('nav-user-count').textContent = stats.user_count;
+
+  const badge = document.getElementById('sb-role-badge');
+  const globalBanner = document.getElementById('global-backup-banner');
+  const peerBox = document.getElementById('sb-peer-box');
+
+  if (node.role === 'backup') {
+    badge.className = 'role-badge role-backup';
+    badge.textContent = '备份服务器 · 只读';
+    globalBanner.classList.remove('hidden');
+    const pLink = safePortalLink(upstream?.primary_portal_url || upstream?.primary_url);
+    document.getElementById('banner-primary-link').innerHTML = pLink
+      ? `<a class="btn btn-sm" href="${esc(pLink)}" target="_blank" rel="noopener noreferrer">前往主服务器 Portal ↗</a>`
+      : '';
+    document.getElementById('nav-repl-badge').textContent = upstream ? (upstream.lag_lsn === 0 ? '已同步' : `-${upstream.lag_lsn}`) : '';
+    if (upstream) {
+      peerBox.classList.remove('hidden');
+      peerBox.innerHTML = `
+        <div class="peer-box-title">上游主服务器</div>
+        <div class="peer-item">
+          <div class="peer-row">
+            <span class="peer-name">${esc(upstream.primary_name)}</span>
+            ${replStateBadge(upstream.state)}
+          </div>
+          <div class="faint num" style="font-size:11.5px;">LSN ${upstream.applied_lsn} / ${upstream.primary_head_lsn}${upstream.blob_pending ? ` · 待同步附件 ${upstream.blob_pending}` : ''}</div>
+          ${pLink ? `<a class="peer-jump" href="${esc(pLink)}" target="_blank" rel="noopener noreferrer">打开主服务器 Portal ↗</a>` : ''}
+        </div>`;
+    } else {
+      peerBox.classList.add('hidden');
+    }
+  } else {
+    badge.className = 'role-badge role-primary';
+    badge.textContent = '主服务器';
+    globalBanner.classList.add('hidden');
+    const onlineCount = replicas.filter(r => r.online).length;
+    document.getElementById('nav-repl-badge').textContent = replicas.length ? `${onlineCount}/${replicas.length}` : '';
+    if (replicas.length > 0) {
+      peerBox.classList.remove('hidden');
+      peerBox.innerHTML = `<div class="peer-box-title">备份服务器 (${onlineCount}/${replicas.length} 在线)</div>` +
+        replicas.slice(0, 3).map(r => {
+          const link = safePortalLink(r.portal_url);
+          return `<div class="peer-item">
+            <div class="peer-row">
+              <span class="peer-name">${esc(r.name)}</span>
+              <span class="pill ${r.online ? 'pill-ok' : 'pill-muted'}"><span class="dot"></span>${r.online ? '在线' : '离线'}</span>
+            </div>
+            ${link ? `<a class="peer-jump" href="${esc(link)}" target="_blank" rel="noopener noreferrer">打开备份 Portal ↗</a>` : '<span class="faint" style="font-size:11.5px;">未设置 Portal 地址</span>'}
+          </div>`;
+        }).join('');
+    } else {
+      peerBox.classList.add('hidden');
+    }
+  }
+}
+
+async function loadOverview(silent = false) {
+  try {
+    const ov = await api('/api/admin/overview');
+    state.overview = ov;
+    renderSidebar(ov);
+    const { node, stats, settings, replicas, upstream } = ov;
+    document.getElementById('ov-subtitle').textContent =
+      `节点 ID: ${node.node_id} · 存储后端: ${node.storage_backend === 's3' ? 'S3 对象存储' : '本地文件系统'} · 已运行 ${fmtUptime(node.uptime_secs)}`;
+
+    document.getElementById('ov-kpis').innerHTML = `
+      <div class="card">
+        <div class="kpi-label">用户总数</div>
+        <div class="kpi-val num">${stats.user_count}</div>
+        <div class="kpi-sub">活跃设备 ${stats.active_device_count} / 总计 ${stats.device_count}</div>
+      </div>
+      <div class="card">
+        <div class="kpi-label">文档库与实体</div>
+        <div class="kpi-val num">${stats.vault_count}</div>
+        <div class="kpi-sub">活跃实体 ${stats.entity_count} · 变更日志 ${stats.op_log_count}</div>
+      </div>
+      <div class="card">
+        <div class="kpi-label">实时连接</div>
+        <div class="kpi-val num">${stats.online_connections}</div>
+        <div class="kpi-sub">当前在线设备 ${stats.online_devices}</div>
+      </div>
+      <div class="card">
+        <div class="kpi-label">总存储占用</div>
+        <div class="kpi-val num">${fmtBytes(stats.total_storage_bytes)}</div>
+        <div class="kpi-sub">DB ${fmtBytes(stats.db_bytes + stats.wal_bytes)} · Blob ${fmtBytes(stats.unique_blob_bytes)} (${stats.unique_blob_count}个)</div>
+      </div>`;
+
+    if (node.role === 'backup') {
+      const pLink = safePortalLink(upstream?.primary_portal_url || upstream?.primary_url);
+      document.getElementById('ov-cluster-body').innerHTML = upstream ? `
+        <div class="row-between" style="margin-bottom:10px;">
+          <div>
+            <div style="font-weight:600;">${esc(upstream.primary_name)}</div>
+            <div class="mono faint">${esc(upstream.primary_url)}</div>
+          </div>
+          ${replStateBadge(upstream.state)}
+        </div>
+        <div class="muted num" style="font-size:12.5px;margin-bottom:12px;">
+          同步位点 LSN ${upstream.applied_lsn} / ${upstream.primary_head_lsn}（延迟 ${upstream.lag_lsn}） · 待拉取附件 ${upstream.blob_pending} · 上次同步 ${fmtAgo(upstream.last_sync_at)}
+        </div>
+        ${upstream.last_error ? `<div class="banner banner-danger" style="margin-bottom:10px;">${esc(upstream.last_error)}</div>` : ''}
+        ${pLink ? `<a class="btn btn-primary btn-sm" href="${esc(pLink)}" target="_blank" rel="noopener noreferrer">前往主服务器 Portal ↗</a>` : ''}
+      ` : '<div class="muted">未找到上游配置</div>';
+    } else {
+      document.getElementById('ov-cluster-body').innerHTML = replicas.length ? `
+        <div class="muted num" style="font-size:12.5px;margin-bottom:10px;">当前 Binlog LSN: <strong>${node.head_lsn}</strong>（已保留自 ${node.min_retained_lsn}）</div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          ${replicas.map(r => {
+            const link = safePortalLink(r.portal_url);
+            return `<div class="card-subtle" style="padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+              <div>
+                <div class="row" style="gap:7px;">
+                  <strong>${esc(r.name)}</strong>
+                  <span class="pill ${r.online ? 'pill-ok' : 'pill-muted'}"><span class="dot"></span>${r.online ? '在线' : '离线'}</span>
+                </div>
+                <div class="faint num" style="font-size:12px;margin-top:2px;">LSN ${r.applied_lsn}/${node.head_lsn} · 延迟 ${r.lag_lsn} · 附件队列 ${r.blob_pending} · ${fmtAgo(r.last_seen_at)}</div>
+              </div>
+              <div class="row">
+                ${link ? `<a class="btn btn-sm" href="${esc(link)}" target="_blank" rel="noopener noreferrer">Portal ↗</a>` : ''}
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      ` : `<div class="muted" style="font-size:13px;">当前为主服务器模式（LSN ${node.head_lsn}），尚无备份服务器接入。<br>你可以在另一台部署的服务器上进入「主从备份」输入本机地址与管理员密码进行自动备份。</div>`;
+    }
+
+    if (!silent) {
+      document.getElementById('set-node-name').value = node.node_name;
+      document.getElementById('set-portal-url').value = node.portal_url || '';
+      document.getElementById('set-allow-register').checked = settings.allow_register;
+      document.getElementById('set-invite-code').value = settings.invite_code || '';
+      const isBackup = node.role === 'backup';
+      document.getElementById('set-register-group').classList.toggle('hidden', isBackup);
+      document.getElementById('set-invite-group').classList.toggle('hidden', isBackup);
+    }
+  } catch (e) {
+    if (!silent) toast(e.message, true);
+  }
+}
+
+async function loadUsers() {
+  try {
+    const q = document.getElementById('user-search').value.trim();
+    const sort = document.getElementById('user-sort').value;
+    const res = await api(`/api/admin/users?q=${encodeURIComponent(q)}&sort=${encodeURIComponent(sort)}&limit=100`);
+    state.users = res;
+    document.getElementById('users-total-hint').textContent = `共 ${res.total} 位用户`;
+    const isBackup = state.overview?.node?.role === 'backup';
+    const maxBytes = Math.max(1, ...res.users.map(u => u.total_storage_bytes));
+    const tbody = document.getElementById('users-tbody');
+    if (!res.users.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:28px;">暂无匹配用户</td></tr>';
+      return;
+    }
+    tbody.innerHTML = res.users.map(u => {
+      const pct = Math.min(100, Math.round((u.total_storage_bytes / maxBytes) * 100));
+      return `<tr>
+        <td>
+          <div style="font-weight:600;">${esc(u.email)}</div>
+          <div class="faint" style="font-size:12px;">${esc(u.display_name)} · <span class="mono">${esc(u.id.slice(0,8))}</span></div>
+        </td>
+        <td class="num">${u.vault_count}</td>
+        <td class="num">
+          ${u.online_device_count > 0 ? `<span class="pill pill-ok"><span class="dot"></span>${u.online_device_count}</span> ` : ''}
+          <span class="muted">${u.active_device_count}/${u.device_count}</span>
+        </td>
+        <td class="num">${u.entity_count}</td>
+        <td class="num" style="min-width:150px;">
+          <div><strong>${fmtBytes(u.total_storage_bytes)}</strong> <span class="faint" style="font-size:11.5px;">(${u.blob_count} 附件)</span></div>
+          <div class="bar" style="margin-top:4px;"><div class="bar-fill" style="width:${pct}%"></div></div>
+        </td>
+        <td class="muted">${fmtAgo(u.last_seen_at)}</td>
+        <td>
+          <div class="row" style="gap:6px;">
+            <button class="btn btn-sm" data-action="user-detail" data-user-id="${esc(u.id)}">详情</button>
+            <button class="btn btn-sm btn-danger" ${isBackup ? 'disabled title="备份节点只读"' : ''} data-action="confirm-delete-user" data-user-id="${esc(u.id)}">删除</button>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function showUserDetail(userId) {
+  try {
+    const d = await api(`/api/admin/users/${encodeURIComponent(userId)}`);
+    const isBackup = state.overview?.node?.role === 'backup';
+    openModal(`
+      <div class="modal-head">
+        <div>
+          <h3>${esc(d.user.email)}</h3>
+          <div class="faint mono">${esc(d.user.id)} · 注册于 ${fmtTime(d.user.created_at)}</div>
+        </div>
+        <button class="btn btn-sm" data-action="close-modal">关闭</button>
+      </div>
+      <div class="card-subtle" style="margin-bottom:14px;display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;">
+        <div>总存储：<strong class="num">${fmtBytes(d.user.total_storage_bytes)}</strong></div>
+        <div>实体数据：<strong class="num">${fmtBytes(d.user.entity_bytes)}</strong></div>
+        <div>附件 Blob：<strong class="num">${fmtBytes(d.user.blob_bytes)}</strong> (${d.user.blob_count}个)</div>
+      </div>
+      <h4 style="margin:0 0 8px;font-size:13.5px;">文档库 (${d.vaults.length})</h4>
+      <div class="table-wrap" style="margin-bottom:16px;">
+        <table>
+          <thead><tr><th>名称</th><th>E2EE</th><th>Seq</th><th>实体</th><th>存储</th><th>操作</th></tr></thead>
+          <tbody>
+            ${d.vaults.length ? d.vaults.map(v => `<tr>
+              <td><strong>${esc(v.name)}</strong><div class="mono faint">${esc(v.id.slice(0,8))}</div></td>
+              <td>${v.e2ee_enabled ? '<span class="pill pill-ok">已加密</span>' : '<span class="pill pill-muted">明文</span>'}</td>
+              <td class="num">${v.head_seq}</td>
+              <td class="num">${v.entity_count}</td>
+              <td class="num">${fmtBytes(v.total_storage_bytes)}</td>
+              <td><button class="btn btn-sm btn-danger" ${isBackup ? 'disabled' : ''} data-action="delete-vault" data-vault-id="${esc(v.id)}" data-user-id="${esc(d.user.id)}">删除</button></td>
+            </tr>`).join('') : '<tr><td colspan="6" class="muted" style="text-align:center;">无文档库</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+      <h4 style="margin:0 0 8px;font-size:13.5px;">设备 (${d.devices.length})</h4>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>设备名</th><th>平台</th><th>状态</th><th>最近活跃</th><th>操作</th></tr></thead>
+          <tbody>
+            ${d.devices.length ? d.devices.map(dev => `<tr>
+              <td>${esc(dev.name)}<div class="mono faint">${esc(dev.id.slice(0,12))}</div></td>
+              <td>${esc(dev.platform)}</td>
+              <td>${dev.revoked ? '<span class="pill pill-muted">已注销</span>' : dev.online ? '<span class="pill pill-ok"><span class="dot"></span>在线</span>' : '<span class="pill pill-muted">离线</span>'}</td>
+              <td class="muted">${fmtAgo(dev.last_seen_at)}</td>
+              <td><button class="btn btn-sm btn-danger" ${isBackup || dev.revoked ? 'disabled' : ''} data-action="revoke-device" data-user-id="${esc(d.user.id)}" data-device-id="${esc(dev.id)}">注销</button></td>
+            </tr>`).join('') : '<tr><td colspan="5" class="muted" style="text-align:center;">无设备记录</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    `);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function confirmDeleteUser(userId) {
+  const u = (state.users?.users || []).find(x => x.id === userId);
+  if (!u) return;
+  openModal(`
+    <div class="modal-head"><h3>确认删除用户</h3><button class="btn btn-sm" data-action="close-modal">取消</button></div>
+    <div class="banner banner-danger">此操作不可恢复，将永久删除该用户及名下全部文档库、同步历史与设备会话，并同步到所有备份服务器。</div>
+    <p style="margin:0 0 14px;font-size:13.5px;">
+      目标用户：<strong>${esc(u.email)}</strong><br>
+      名下文档库：<strong class="num">${u.vault_count}</strong> 个 · 占用存储：<strong class="num">${fmtBytes(u.total_storage_bytes)}</strong>
+    </p>
+    <div class="row" style="justify-content:flex-end;">
+      <button class="btn" data-action="close-modal">取消</button>
+      <button class="btn btn-danger" data-action="do-delete-user" data-user-id="${esc(u.id)}">确认永久删除</button>
+    </div>
+  `, true);
+}
+
+async function doDeleteUser(userId) {
+  try {
+    const res = await api(`/api/admin/users/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+    closeModal();
+    toast(`已删除用户，并立即回收 ${res.reclaimed_blobs} 个孤儿附件块`);
+    await Promise.all([loadOverview(), loadUsers()]);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function revokeDevice(userId, deviceId) {
+  try {
+    await api(`/api/admin/users/${encodeURIComponent(userId)}/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
+    toast('已注销该设备并断开连接');
+    await showUserDetail(userId);
+    loadUsers();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteVault(vaultId, userId) {
+  if (!confirm('确认永久删除该文档库及其中所有云端数据？')) return;
+  try {
+    const res = await api(`/api/admin/vaults/${encodeURIComponent(vaultId)}`, { method: 'DELETE' });
+    toast(`文档库已删除，回收 ${res.reclaimed_blobs} 个孤儿附件块`);
+    await showUserDetail(userId);
+    loadOverview();
+    loadUsers();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function loadStorage() {
+  try {
+    const st = await api('/api/admin/storage');
+    state.storage = st;
+    document.getElementById('st-subtitle').textContent =
+      `后端：${st.storage_backend === 's3' ? 'S3 兼容对象存储' : '本地目录'} · 数据目录：${st.data_dir}`;
+
+    const dbTotal = st.db_bytes + st.wal_bytes + st.shm_bytes;
+    document.getElementById('st-kpis').innerHTML = `
+      <div class="card"><div class="kpi-label">实际总占用</div><div class="kpi-val num">${fmtBytes(st.total_storage_bytes)}</div><div class="kpi-sub">SQLite + 去重附件</div></div>
+      <div class="card"><div class="kpi-label">SQLite 数据库</div><div class="kpi-val num">${fmtBytes(dbTotal)}</div><div class="kpi-sub">DB ${fmtBytes(st.db_bytes)} · WAL ${fmtBytes(st.wal_bytes)}</div></div>
+      <div class="card"><div class="kpi-label">去重附件 Blob</div><div class="kpi-val num">${fmtBytes(st.unique_blob_bytes)}</div><div class="kpi-sub">${st.unique_blob_count} 个唯一对象（逻辑 ${fmtBytes(st.logical_blob_bytes)}）</div></div>
+      <div class="card"><div class="kpi-label">复制 Binlog</div><div class="kpi-val num">${fmtBytes(st.binlog_bytes)}</div><div class="kpi-sub">${st.binlog_count} 条保留日志</div></div>`;
+
+    document.getElementById('st-dedup-note').textContent =
+      st.dedup_saved_bytes > 0 ? `内容寻址去重已节省 ${fmtBytes(st.dedup_saved_bytes)}` : '内容寻址去重已启用';
+
+    const denom = Math.max(1, st.total_storage_bytes);
+    const pDb = Math.round((st.db_bytes / denom) * 100);
+    const pWal = Math.round(((st.wal_bytes + st.shm_bytes) / denom) * 100);
+    const pBlob = Math.max(0, 100 - pDb - pWal);
+    document.getElementById('st-bar').innerHTML = `
+      <div class="bar-fill" style="width:${pDb}%"></div>
+      <div class="bar-fill-3" style="width:${pWal}%"></div>
+      <div class="bar-fill-2" style="width:${pBlob}%"></div>`;
+    document.getElementById('st-legend').innerHTML = `
+      <span><strong style="color:var(--accent);">●</strong> sync.db ${fmtBytes(st.db_bytes)}</span>
+      <span><strong style="color:#f59e0b;">●</strong> WAL/SHM ${fmtBytes(st.wal_bytes + st.shm_bytes)}</span>
+      <span><strong style="color:#10b981;">●</strong> 唯一 Blob ${fmtBytes(st.unique_blob_bytes)}</span>
+      <span class="faint">实体载荷 ${fmtBytes(st.entity_bytes)} · OpLog ${fmtBytes(st.op_log_bytes)}</span>`;
+
+    document.getElementById('st-top-users').innerHTML = st.top_users.length
+      ? st.top_users.map(u => `<tr>
+          <td><strong>${esc(u.email)}</strong></td>
+          <td class="num">${u.vault_count}</td>
+          <td class="num">${fmtBytes(u.blob_bytes)}</td>
+          <td class="num"><strong>${fmtBytes(u.total_storage_bytes)}</strong></td>
+        </tr>`).join('')
+      : '<tr><td colspan="4" class="muted" style="text-align:center;">暂无数据</td></tr>';
+
+    document.getElementById('st-top-vaults').innerHTML = st.top_vaults.length
+      ? st.top_vaults.map(v => `<tr>
+          <td><strong>${esc(v.name)}</strong></td>
+          <td class="muted">${esc(v.owner_email)}</td>
+          <td>${v.e2ee_enabled ? 'E2EE' : '明文'}</td>
+          <td class="num"><strong>${fmtBytes(v.total_storage_bytes)}</strong></td>
+        </tr>`).join('')
+      : '<tr><td colspan="4" class="muted" style="text-align:center;">暂无数据</td></tr>';
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function loadReplication(silent = false) {
+  try {
+    const r = await api('/api/admin/replication');
+    state.replication = r;
+    const el = document.getElementById('repl-content');
+    const { node, replicas, upstream } = r;
+
+    if (node.role === 'primary') {
+      const hasLocalData = (state.overview?.stats?.user_count || 0) > 0;
+      el.innerHTML = `
+        <div class="card" style="margin-bottom:18px;">
+          <div class="card-title">
+            <span>当前角色：<span class="pill pill-ok">主服务器 (Primary)</span></span>
+            <span class="mono faint">Epoch ${esc(node.repl_epoch.slice(0,8))} · LSN ${node.head_lsn} (min ${node.min_retained_lsn})</span>
+          </div>
+          <div class="row-between" style="font-size:13px;">
+            <div class="muted">本机对外 Portal 地址：<strong>${esc(node.portal_url || '未设置（将使用接入时的 Host 推断）')}</strong></div>
+            <button class="btn btn-sm" data-action="switch-tab" data-tab="overview">编辑本机地址</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:18px;">
+          <div class="card-title">
+            <span>已接入的备份服务器 (${replicas.length})</span>
+            <span class="faint" style="font-size:12px;font-weight:400;">由备份节点主动发起外连 WebSocket 实时同步</span>
+          </div>
+          ${replicas.length ? `
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>备份节点</th>
+                  <th>状态</th>
+                  <th>LSN 同步进度</th>
+                  <th>待拉取附件</th>
+                  <th>备份存储</th>
+                  <th>最近心跳</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${replicas.map(rep => {
+                  const link = safePortalLink(rep.portal_url);
+                  const pct = node.head_lsn === 0 ? 100 : Math.min(100, Math.round((rep.applied_lsn / node.head_lsn) * 100));
+                  return `<tr>
+                    <td>
+                      <div style="font-weight:600;">${esc(rep.name)}</div>
+                      <div class="mono faint">${esc(rep.replica_id.slice(0,8))}${rep.remote_addr ? ' · ' + esc(rep.remote_addr) : ''}${rep.server_version ? ' · v' + esc(rep.server_version) : ''}</div>
+                    </td>
+                    <td>
+                      ${rep.online
+                        ? '<span class="pill pill-ok"><span class="dot"></span>在线同步中</span>'
+                        : '<span class="pill pill-muted"><span class="dot"></span>离线</span>'}
+                    </td>
+                    <td class="num" style="min-width:155px;">
+                      <div>${rep.applied_lsn} / ${node.head_lsn} <span class="faint">(延迟 ${rep.lag_lsn})</span></div>
+                      <div class="bar" style="margin-top:4px;"><div class="bar-fill" style="width:${pct}%"></div></div>
+                    </td>
+                    <td class="num">${rep.blob_pending > 0 ? `<span class="pill pill-warn">${rep.blob_pending}</span>` : '<span class="muted">0</span>'}</td>
+                    <td class="num">${fmtBytes(rep.storage_bytes)}</td>
+                    <td class="muted">${fmtAgo(rep.last_seen_at)}</td>
+                    <td>
+                      <div class="row" style="gap:6px;">
+                        ${link
+                          ? `<a class="btn btn-sm" href="${esc(link)}" target="_blank" rel="noopener noreferrer">打开 Portal ↗</a>`
+                          : '<button class="btn btn-sm" disabled title="备份服务器未上报 Portal 地址">无地址</button>'}
+                        <button class="btn btn-sm btn-danger" data-action="confirm-evict-replica" data-replica-id="${esc(rep.replica_id)}">剔除</button>
+                      </div>
+                    </td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>` : '<div class="muted" style="padding:12px 0;">暂无备份服务器接入。在目标备份服务器打开 Portal → 主从备份，输入本机地址与管理员密码即可自动配对并开始同步。</div>'}
+        </div>
+
+        <div class="card-subtle">
+          <div class="card-title"><span>将当前服务器配置为备份服务器</span></div>
+          <p class="muted" style="margin:0 0 14px;font-size:13px;">
+            输入主服务器的访问地址与主服务器管理员密码后，本机将切换为只读备份节点，主动连接主服务器拉取全量快照并实时增量同步（本机管理员密码保持独立不被覆盖）。
+          </p>
+          ${hasLocalData ? `<div class="banner banner-warn">注意：当前服务器已有 <strong>${state.overview.stats.user_count}</strong> 个用户与 <strong>${state.overview.stats.vault_count}</strong> 个文档库，切换为备份服务器后将被主服务器数据覆盖！</div>` : ''}
+          <form id="cfg-backup-form" style="max-width:520px;">
+            <div class="field">
+              <label>主服务器地址</label>
+              <input id="bk-primary-url" class="input" required placeholder="https://sync.example.com 或 http://10.0.0.10:8787">
+            </div>
+            <div class="field">
+              <label>主服务器管理员密码</label>
+              <input id="bk-primary-pw" type="password" class="input" required placeholder="用于一次性配对签发独立复制密钥（本机不会保存此密码）">
+            </div>
+            <div class="field">
+              <label>本机节点名称</label>
+              <input id="bk-node-name" class="input" value="${esc(node.node_name)}">
+            </div>
+            <div class="field">
+              <label>本机 Portal 访问地址（上报给主服务器用于快捷跳转）</label>
+              <input id="bk-portal-url" class="input" value="${esc(node.portal_url || window.location.origin)}">
+            </div>
+            <button type="submit" class="btn btn-primary">配对并开始自动备份</button>
+          </form>
+        </div>`;
+
+      document.getElementById('cfg-backup-form').onsubmit = handleConfigureBackupSubmit;
+    } else {
+      const pLink = safePortalLink(upstream?.primary_portal_url || upstream?.primary_url);
+      const pct = !upstream || upstream.primary_head_lsn === 0
+        ? (upstream?.bootstrapped ? 100 : 0)
+        : Math.min(100, Math.round((upstream.applied_lsn / upstream.primary_head_lsn) * 100));
+
+      el.innerHTML = `
+        <div class="card" style="margin-bottom:18px;">
+          <div class="card-title">
+            <span class="row">当前角色：<span class="pill pill-warn">备份服务器 · 只读</span> ${upstream ? replStateBadge(upstream.state) : ''}</span>
+            <div class="row">
+              ${pLink ? `<a class="btn btn-primary btn-sm" href="${esc(pLink)}" target="_blank" rel="noopener noreferrer">前往主服务器 Portal ↗</a>` : ''}
+            </div>
+          </div>
+          ${upstream ? `
+            ${upstream.state === 'evicted' ? `<div class="banner banner-danger">本机已被主服务器剔除，已停止自动重连。你可以重新输入主服务器管理员密码重新配对，或点击「提升为主服务器」独立运行。</div>` : ''}
+            ${upstream.last_error && upstream.state !== 'evicted' ? `<div class="banner banner-warn">最近同步提示：${esc(upstream.last_error)}</div>` : ''}
+            <div class="grid-4" style="margin-bottom:14px;">
+              <div class="card-subtle">
+                <div class="kpi-label">主服务器</div>
+                <div style="font-weight:700;margin-top:4px;">${esc(upstream.primary_name)}</div>
+                <div class="mono faint" style="margin-top:3px;word-break:break-all;">${esc(upstream.primary_url)}</div>
+              </div>
+              <div class="card-subtle">
+                <div class="kpi-label">LSN 同步进度</div>
+                <div class="kpi-val num" style="font-size:20px;">${upstream.applied_lsn} / ${upstream.primary_head_lsn}</div>
+                <div class="bar" style="margin-top:6px;"><div class="bar-fill" style="width:${pct}%"></div></div>
+              </div>
+              <div class="card-subtle">
+                <div class="kpi-label">待下载附件</div>
+                <div class="kpi-val num" style="font-size:20px;">${upstream.blob_pending}</div>
+                <div class="kpi-sub">本机存储 ${fmtBytes(r.local_storage_bytes)}</div>
+              </div>
+              <div class="card-subtle">
+                <div class="kpi-label">最近同步时间</div>
+                <div style="font-weight:600;margin-top:6px;">${fmtAgo(upstream.last_sync_at)}</div>
+                <div class="kpi-sub">${fmtTime(upstream.last_sync_at)}</div>
+              </div>
+            </div>
+            <div class="row" style="flex-wrap:wrap;">
+              <button class="btn" data-action="trigger-resync" ${upstream.state === 'evicted' ? 'disabled' : ''}>强制全量重同步</button>
+              <button class="btn btn-danger" data-action="confirm-promote">提升为主服务器（解除备份）</button>
+            </div>
+          ` : '<div class="muted">上游配置缺失</div>'}
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title"><span>本机上报信息（实时同步到主服务器 Portal）</span></div>
+            <form id="bk-self-info-form">
+              <div class="field">
+                <label>本机节点名称</label>
+                <input id="bk-self-name" class="input" value="${esc(node.node_name)}">
+              </div>
+              <div class="field">
+                <label>本机 Portal 访问地址</label>
+                <div class="row">
+                  <input id="bk-self-url" class="input" value="${esc(node.portal_url || '')}" placeholder="http://192.168.1.50:8787">
+                  <button type="button" class="btn btn-sm" data-action="fill-bk-origin">当前地址</button>
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary">更新并通知主服务器</button>
+            </form>
+          </div>
+
+          <div class="card-subtle">
+            <div class="card-title"><span>重新配对 / 更换主服务器</span></div>
+            <form id="cfg-backup-form">
+              <div class="field">
+                <label>主服务器地址</label>
+                <input id="bk-primary-url" class="input" required value="${esc(upstream?.primary_url || '')}">
+              </div>
+              <div class="field">
+                <label>主服务器管理员密码</label>
+                <input id="bk-primary-pw" type="password" class="input" required placeholder="主服务器管理员密码">
+              </div>
+              <input id="bk-node-name" type="hidden" value="${esc(node.node_name)}">
+              <input id="bk-portal-url" type="hidden" value="${esc(node.portal_url || window.location.origin)}">
+              <button type="submit" class="btn">重新配对并同步</button>
+            </form>
+          </div>
+        </div>`;
+
+      document.getElementById('cfg-backup-form').onsubmit = handleConfigureBackupSubmit;
+      document.getElementById('bk-self-info-form').onsubmit = async (ev) => {
+        ev.preventDefault();
+        try {
+          await api('/api/admin/node', {
+            method: 'PUT',
+            body: {
+              node_name: document.getElementById('bk-self-name').value.trim(),
+              portal_url: document.getElementById('bk-self-url').value.trim(),
+            },
+          });
+          toast('已更新本机信息并推送给主服务器');
+          await Promise.all([loadOverview(), loadReplication()]);
+        } catch (e) {
+          toast(e.message, true);
+        }
+      };
+    }
+  } catch (e) {
+    if (!silent) toast(e.message, true);
+  }
+}
+
+async function handleConfigureBackupSubmit(ev) {
+  ev.preventDefault();
+  const primary_url = document.getElementById('bk-primary-url').value.trim();
+  const primary_admin_password = document.getElementById('bk-primary-pw').value;
+  const node_name = document.getElementById('bk-node-name').value.trim();
+  const portal_url = document.getElementById('bk-portal-url').value.trim();
+  const userCount = state.overview?.stats?.user_count || 0;
+  const msg = userCount > 0
+    ? `当前服务器已有 ${userCount} 个用户数据。切换为备份服务器后，全量快照将覆盖本机业务数据（本机管理员密码保留）。确定继续？`
+    : '确定将当前服务器配置为备份服务器并立即开始从主服务器同步？';
+  if (!confirm(msg)) return;
+  try {
+    await api('/api/admin/replication/configure-backup', {
+      method: 'POST',
+      body: { primary_url, primary_admin_password, node_name, portal_url },
+    });
+    toast('已配对主服务器，正在进行全量快照与实时增量同步');
+    await Promise.all([loadOverview(), loadReplication()]);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function confirmEvictReplica(replicaId) {
+  const rep = (state.replication?.replicas || []).find(r => r.replica_id === replicaId);
+  if (!rep) return;
+  openModal(`
+    <div class="modal-head"><h3>确认剔除备份服务器</h3><button class="btn btn-sm" data-action="close-modal">取消</button></div>
+    <p style="margin:0 0 14px;font-size:13.5px;">
+      确定剔除备份服务器 <strong>${esc(rep.name)}</strong>（<span class="mono">${esc(rep.replica_id.slice(0,8))}</span>）？<br>
+      <span class="muted">将立即断开其同步长连接并吊销凭据；备份节点已同步的本地数据不会被删除。</span>
+    </p>
+    <div class="row" style="justify-content:flex-end;">
+      <button class="btn" data-action="close-modal">取消</button>
+      <button class="btn btn-danger" data-action="do-evict-replica" data-replica-id="${esc(rep.replica_id)}">确认剔除</button>
+    </div>
+  `, true);
+}
+
+async function doEvictReplica(replicaId) {
+  try {
+    await api(`/api/admin/replication/replicas/${encodeURIComponent(replicaId)}`, { method: 'DELETE' });
+    closeModal();
+    toast('已剔除该备份服务器');
+    await Promise.all([loadOverview(), loadReplication()]);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function triggerResync() {
+  if (!confirm('确认强制从主服务器重新拉取全量快照？')) return;
+  try {
+    await api('/api/admin/replication/resync', { method: 'POST' });
+    toast('已触发全量快照重同步');
+    await loadReplication();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function confirmPromote() {
+  openModal(`
+    <div class="modal-head"><h3>提升为主服务器（解除备份）</h3><button class="btn btn-sm" data-action="close-modal">取消</button></div>
+    <div class="banner banner-warn">解除与原主服务器的同步关系，保留本机已同步的全部用户、文档库与附件，并恢复客户端读写服务。</div>
+    <p class="muted" style="margin:0 0 14px;font-size:13px;">适用于主服务器故障时的灾备切换，或将本机改为独立运行的同步服务器。</p>
+    <div class="row" style="justify-content:flex-end;">
+      <button class="btn" data-action="close-modal">取消</button>
+      <button class="btn btn-danger" data-action="do-promote">确认提升为主服务器</button>
+    </div>
+  `, true);
+}
+
+async function doPromote() {
+  try {
+    await api('/api/admin/replication/promote', { method: 'POST' });
+    closeModal();
+    toast('已提升为主服务器，已恢复读写服务');
+    await Promise.all([loadOverview(), loadReplication()]);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function triggerGc() {
+  try {
+    const res = await api('/api/admin/gc', { method: 'POST' });
+    toast(`垃圾回收完成，清理 ${res.deleted_blobs} 个孤儿附件块`);
+    await refreshAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function openChangePasswordModal() {
+  openModal(`
+    <div class="modal-head"><h3>修改本机管理员密码</h3><button class="btn btn-sm" data-action="close-modal">取消</button></div>
+    <form id="chg-pw-form">
+      <div class="field"><label>当前密码</label><input id="cp-cur" type="password" class="input" required></div>
+      <div class="field"><label>新密码（至少 8 位）</label><input id="cp-new" type="password" class="input" required></div>
+      <div class="field"><label>确认新密码</label><input id="cp-cfm" type="password" class="input" required></div>
+      <div class="row" style="justify-content:flex-end;">
+        <button type="button" class="btn" data-action="close-modal">取消</button>
+        <button type="submit" class="btn btn-primary">更新密码</button>
+      </div>
+    </form>
+  `, true);
+  document.getElementById('chg-pw-form').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const cur = document.getElementById('cp-cur').value;
+    const np = document.getElementById('cp-new').value;
+    const cfm = document.getElementById('cp-cfm').value;
+    if (np !== cfm) { toast('两次输入的新密码不一致', true); return; }
+    try {
+      await api('/api/admin/auth/change-password', { method: 'POST', body: { current_password: cur, new_password: np } });
+      closeModal();
+      toast('管理员密码已更新，其他设备会话已失效');
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+}
+
+// Event bindings
+document.getElementById('auth-form').onsubmit = async (ev) => {
+  ev.preventDefault();
+  const errEl = document.getElementById('auth-error');
+  errEl.classList.add('hidden');
+  const password = document.getElementById('auth-password').value;
+  try {
+    if (state.isSetupMode) {
+      const cfm = document.getElementById('auth-password-confirm').value;
+      if (password !== cfm) throw new Error('两次输入的密码不一致');
+      await api('/api/admin/auth/setup', {
+        method: 'POST',
+        body: {
+          password,
+          node_name: document.getElementById('setup-node-name').value.trim() || undefined,
+          portal_url: document.getElementById('setup-portal-url').value.trim() || undefined,
+        },
+      });
+      state.isSetupMode = false;
+    } else {
+      await api('/api/admin/auth/login', { method: 'POST', body: { password } });
+    }
+    await showAppView();
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.classList.remove('hidden');
+  }
+};
+
+document.querySelectorAll('.nav button').forEach(btn => {
+  btn.onclick = () => switchTab(btn.dataset.tab);
+});
+
+document.getElementById('btn-logout').onclick = async () => {
+  await api('/api/admin/auth/logout', { method: 'POST' }).catch(() => {});
+  state.isSetupMode = false;
+  showAuthView();
+};
+document.getElementById('btn-change-pw').onclick = openChangePasswordModal;
+document.getElementById('btn-run-gc').onclick = triggerGc;
+document.getElementById('btn-st-gc').onclick = triggerGc;
+document.getElementById('btn-refresh-all').onclick = () => refreshAll();
+document.getElementById('btn-repl-refresh').onclick = () => loadReplication();
+document.getElementById('btn-fill-origin').onclick = () => {
+  document.getElementById('set-portal-url').value = window.location.origin;
+};
+document.getElementById('btn-search-users').onclick = () => loadUsers();
+document.getElementById('user-sort').onchange = () => loadUsers();
+document.getElementById('user-search').onkeydown = (e) => { if (e.key === 'Enter') loadUsers(); };
+
+document.getElementById('node-settings-form').onsubmit = async (ev) => {
+  ev.preventDefault();
+  const isBackup = state.overview?.node?.role === 'backup';
+  const body = {
+    node_name: document.getElementById('set-node-name').value.trim(),
+    portal_url: document.getElementById('set-portal-url').value.trim(),
+  };
+  if (!isBackup) {
+    body.allow_register = document.getElementById('set-allow-register').checked;
+    body.invite_code = document.getElementById('set-invite-code').value.trim();
+  }
+  try {
+    await api('/api/admin/node', { method: 'PUT', body });
+    toast('设置已保存');
+    await loadOverview();
+  } catch (e) {
+    toast(e.message, true);
+  }
+};
+
+document.addEventListener('click', (ev) => {
+  const el = ev.target.closest('[data-action]');
+  if (!el) return;
+  const action = el.dataset.action;
+  if (action === 'modal-backdrop') {
+    if (ev.target === el) closeModal();
+    return;
+  }
+  if (el.disabled) return;
+  switch (action) {
+    case 'close-modal': closeModal(); break;
+    case 'switch-tab': switchTab(el.dataset.tab); break;
+    case 'user-detail': showUserDetail(el.dataset.userId); break;
+    case 'confirm-delete-user': confirmDeleteUser(el.dataset.userId); break;
+    case 'do-delete-user': doDeleteUser(el.dataset.userId); break;
+    case 'delete-vault': deleteVault(el.dataset.vaultId, el.dataset.userId); break;
+    case 'revoke-device': revokeDevice(el.dataset.userId, el.dataset.deviceId); break;
+    case 'confirm-evict-replica': confirmEvictReplica(el.dataset.replicaId); break;
+    case 'do-evict-replica': doEvictReplica(el.dataset.replicaId); break;
+    case 'trigger-resync': triggerResync(); break;
+    case 'confirm-promote': confirmPromote(); break;
+    case 'do-promote': doPromote(); break;
+    case 'fill-bk-origin': {
+      const inp = document.getElementById('bk-self-url');
+      if (inp) inp.value = window.location.origin;
+      break;
+    }
+  }
+});
+
+checkAuth();
+</script>
+</body>
+</html>

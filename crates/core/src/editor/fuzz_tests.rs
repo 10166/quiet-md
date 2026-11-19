@@ -108,7 +108,7 @@ fn tables(doc: &Document) -> Vec<BlockId> {
 }
 
 /// One editing command; returns its name for the failure report.
-fn step(c: &mut Core, rng: &mut Rng) -> String {
+fn step(c: &mut Core, rng: &mut Rng, allow_remote: bool) -> String {
     if rng.chance(70) {
         random_selection(c, rng);
     }
@@ -120,7 +120,8 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
     }
     let us = c.units();
     let any = |rng: &mut Rng| rng.pick(&us).id;
-    match rng.below(24) {
+    let n_choices = if allow_remote { 25 } else { 24 };
+    match rng.below(n_choices) {
         0..=2 => {
             let s = *rng.pick(TEXTS);
             c.insert_text(s);
@@ -223,9 +224,22 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
             }
             "paste_image".into()
         }
-        _ => {
+        23 => {
             c.trailing_line();
             "trailing_line".into()
+        }
+        _ => {
+            let mut remote = c.doc.clone();
+            if rng.chance(50) {
+                remote.blocks.push(Block::text("remote-sync"));
+            } else if let Some(b) = remote.blocks.first_mut()
+                && b.kind.has_text()
+            {
+                b.text = RichText::plain("remote-edit");
+            }
+            let is_md = rng.chance(50);
+            c.receive_remote(remote, is_md);
+            format!("receive_remote({is_md})")
         }
     }
 }
@@ -582,7 +596,9 @@ fn run(seed: u64, steps: usize) {
     let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
     let mut c = Core::new(parse(SEED_DOC).unwrap());
     assert!(c.doc.blocks.iter().any(|b| matches!(&b.kind, BlockKind::Board(bd) if bd.elements.len() == 2)), "the seed's board reads");
+    let allow_remote = seed % 2 == 1;
     let start = unfolded(&c.doc);
+    let mut had_remote = false;
     let mut log: Vec<String> = vec![];
     let fail = |log: &[String], c: &Core, e: String| -> ! {
         let tail = log.iter().rev().take(12).rev().cloned().collect::<Vec<_>>().join("\n  ");
@@ -590,7 +606,11 @@ fn run(seed: u64, steps: usize) {
     };
     for i in 0..steps {
         let (before, generation) = (c.doc.clone(), c.generation);
-        log.push(step(&mut c, &mut rng));
+        let op = step(&mut c, &mut rng, allow_remote);
+        if op.starts_with("receive_remote") {
+            had_remote = true;
+        }
+        log.push(op);
         // The editor caches per-frame work against `generation`.
         if c.generation == generation && c.doc != before {
             fail(&log, &c, "the document changed without bumping `generation`".into());
@@ -615,11 +635,21 @@ fn run(seed: u64, steps: usize) {
     // Every change is undoable (steps < UNDO_STEPS), and redo replays it.
     while c.redo() {}
     let end = unfolded(&c.doc);
-    while c.undo() {}
-    if unfolded(&c.doc) != start {
+    while c.undo() {
+        c.reveal_caret();
+        if let Err(e) = check(&c) {
+            fail(&log, &c, format!("during undo: {e}"));
+        }
+    }
+    if !had_remote && unfolded(&c.doc) != start {
         fail(&log, &c, format!("undoing everything does not restore the seed document, {}", diff(&start, &unfolded(&c.doc))));
     }
-    while c.redo() {}
+    while c.redo() {
+        c.reveal_caret();
+        if let Err(e) = check(&c) {
+            fail(&log, &c, format!("during redo: {e}"));
+        }
+    }
     if unfolded(&c.doc) != end {
         fail(&log, &c, format!("redoing everything does not restore the final document, {}", diff(&end, &unfolded(&c.doc))));
     }

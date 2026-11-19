@@ -104,6 +104,8 @@ pub struct TextField {
     /// Draw no caret even when focused (a field that takes keys before it
     /// looks focused, like the emoji search).
     pub hide_caret: bool,
+    /// Mask characters visually with `•` and disable copy/cut (password / passphrase fields).
+    pub masked: bool,
     selecting: bool,
     /// Typing hides the mouse pointer until it moves (see the editor's).
     pointer_hidden: bool,
@@ -144,6 +146,7 @@ impl TextField {
             digits: false,
             tab_events: false,
             hide_caret: false,
+            masked: false,
             selecting: false,
             pointer_hidden: false,
             scroll: Rc::new(Cell::new(px(0.))),
@@ -325,12 +328,18 @@ impl TextField {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        if self.masked {
+            return;
+        }
         if !self.sel.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(self.text[self.sel.clone()].to_string()));
         }
     }
 
     fn cut(&mut self, _: &Cut, _: &mut Window, cx: &mut Context<Self>) {
+        if self.masked {
+            return;
+        }
         if !self.sel.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(self.text[self.sel.clone()].to_string()));
             self.replace(self.sel.clone(), "", cx);
@@ -385,16 +394,16 @@ impl TextField {
         let target = {
             let cache = self.cache.borrow();
             let Some(l) = cache.get(&self.id) else { return };
-            let at = l.position_for(self.cursor());
+            let at = l.position_for(self.to_disp(self.cursor()));
             let y = at.y + l.line_height * (0.5 + dir);
             let first = l.position_for(0).y;
-            let last = l.position_for(self.text.len()).y;
+            let last = l.position_for(self.to_disp(self.text.len())).y;
             if y < first {
                 0
             } else if y > last + l.line_height {
                 self.text.len()
             } else {
-                l.index_for(point(at.x, y)).min(self.text.len())
+                self.from_disp(l.index_for(point(at.x, y)))
             }
         };
         self.move_to(target, cx);
@@ -418,8 +427,16 @@ impl TextField {
         cx.emit(TextFieldEvent::Down);
     }
 
+    fn to_disp(&self, o: usize) -> usize {
+        if self.masked { raw_to_masked(&self.text, o) } else { o.min(self.text.len()) }
+    }
+
+    fn from_disp(&self, o: usize) -> usize {
+        if self.masked { masked_to_raw(&self.text, o) } else { o.min(self.text.len()) }
+    }
+
     fn index_for(&self, p: Point<Pixels>) -> usize {
-        self.cache.borrow().get(&self.id).map(|l| l.index_for(p)).unwrap_or(0).min(self.text.len())
+        self.cache.borrow().get(&self.id).map(|l| self.from_disp(l.index_for(p))).unwrap_or(0).min(self.text.len())
     }
 
     fn on_down(&mut self, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -479,7 +496,7 @@ impl EntityInputHandler for TextField {
     ) -> Option<String> {
         let r = self.range8(&range);
         actual.replace(self.range16(&r));
-        Some(self.text[r].to_string())
+        Some(if self.masked { "•".repeat(self.text[r].chars().count()) } else { self.text[r].to_string() })
     }
 
     fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {
@@ -535,8 +552,8 @@ impl EntityInputHandler for TextField {
         let r = self.range8(&range);
         let cache = self.cache.borrow();
         let l = cache.get(&self.id)?;
-        let a = l.position_for(r.start);
-        let b = l.position_for(r.end);
+        let a = l.position_for(self.to_disp(r.start));
+        let b = l.position_for(self.to_disp(r.end));
         Some(Bounds::from_corners(a, point(b.x, b.y + l.line_height)))
     }
 
@@ -556,19 +573,20 @@ impl Render for TextField {
         spec.wrap = self.wrap;
         spec.mono = self.mono;
         spec.font_runs = self.font_runs.clone();
+        let disp = if self.masked { "•".repeat(self.text.chars().count()) } else { self.text.clone() };
         let el = RichTextElement {
             id: self.id,
-            text: RichText::plain(self.text.clone()),
+            text: RichText::plain(disp),
             spec,
             align: self.align,
             placeholder: Some(crate::settings::label(self.placeholder.clone()).into()),
             placeholder_color: Some(self.placeholder_color),
             placeholder_dx: 0.,
-            selection: (focused && !self.sel.is_empty()).then(|| self.sel.clone()),
-            caret: Some(self.cursor()),
+            selection: (focused && !self.sel.is_empty()).then(|| self.to_disp(self.sel.start)..self.to_disp(self.sel.end)),
+            caret: Some(self.to_disp(self.cursor())),
             caret_row_end: false,
             fit_content: false,
-            marked: self.marked.clone(),
+            marked: self.marked.as_ref().map(|r| self.to_disp(r.start)..self.to_disp(r.end)),
             cache: self.cache.clone(),
             show_caret: focused && !self.hide_caret && self.sel.is_empty(),
             highlight: None,
@@ -642,5 +660,35 @@ impl Render for TextField {
                 .absolute()
                 .size_full(),
             )
+    }
+}
+
+fn raw_to_masked(text: &str, raw_byte: usize) -> usize {
+    let mut o = raw_byte.min(text.len());
+    while o > 0 && !text.is_char_boundary(o) {
+        o -= 1;
+    }
+    text[..o].chars().count() * '•'.len_utf8()
+}
+
+fn masked_to_raw(text: &str, masked_byte: usize) -> usize {
+    text.char_indices().nth(masked_byte / '•'.len_utf8()).map_or(text.len(), |(i, _)| i)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{masked_to_raw, raw_to_masked};
+
+    #[test]
+    fn masked_offset_mapping_round_trips() {
+        for s in ["abc123", "密码口令", "p@ss🔐中文!"] {
+            for (byte, _) in s.char_indices() {
+                let m = raw_to_masked(s, byte);
+                assert_eq!(masked_to_raw(s, m), byte);
+            }
+            let end = raw_to_masked(s, s.len());
+            assert_eq!(end, s.chars().count() * '•'.len_utf8());
+            assert_eq!(masked_to_raw(s, end), s.len());
+        }
     }
 }

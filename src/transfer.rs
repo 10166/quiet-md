@@ -420,6 +420,7 @@ impl Workspace {
                 w.entries = entries;
                 w.sort();
                 w.remember_file_changes(imported.changes, crate::settings::tr("导入", "Import"));
+                crate::sync::notify_scan();
                 if let Some(id) = imported.last.filter(|_| open) { w.open(&id, window, cx); }
                 if imported.failed { w.show_toast_kind(ToastKind::Error, crate::settings::text("导入失败，请检查文件格式"), cx); }
                 else if w.toast.as_ref().is_some_and(|t| matches!(t.0, ToastKind::Info) && t.1.as_ref() == crate::settings::tr("正在导入…", "Importing…")) { w.toast = None; }
@@ -592,6 +593,7 @@ impl Workspace {
         self.entries = entries;
         self.sort();
         self.remember_file_changes(changes, crate::settings::tr("导入文件夹", "Import folder"));
+        crate::sync::notify_scan();
         if let Some(id) = top {
             if let Some(then) = then { then(self, &id); }
             self.reveal_in_tree(&id);
