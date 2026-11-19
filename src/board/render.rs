@@ -724,6 +724,7 @@ impl Sources {
         // been fetched (asked again on the redraw its arrival brings; the
         // count moves either way, so that redraw isn't served from the cache).
         if cfg!(target_family = "wasm") {
+            self.map.entry(fd.id.clone()).or_default();  // where `get` keeps the result
             self.jobs.fetch_add(2, std::sync::atomic::Ordering::Relaxed);
             if fd.path.as_deref().and_then(crate::store::image_path).is_some_and(|p| fdl_core::vfs::pending(&p)) { return None }
             return Some(source_of(fd, cap));
