@@ -275,9 +275,8 @@ document.getElementById("lang").addEventListener("change", e => {
   try { localStorage.setItem("lang", e.target.value); } catch {}
 });
 // The windows run the real app (/demo/?lib=<id>): the first at once, the
-// next as it comes near. A clear shield keeps the wheel on the page until the
-// window is clicked; that click (any button: a held wheel pans a board) goes
-// on to the app, which then keeps the wheel until the page is clicked elsewhere.
+// next as it comes near. A clear shield on the window lets a page scroll pass
+// over it and hands a click or a fresh wheel to the app (shieldUp).
 // Phones get a picture.
 const wide = matchMedia("(min-width: 641px)").matches;
 function handOver(f, e) {
@@ -303,8 +302,29 @@ function mount(w) {
   const f = document.createElement("iframe");
   f.src = `/demo/?lib=${id}`; f.title = NOTEBOOKS[id].name; f.allow = "clipboard-read; clipboard-write";
   w.prepend(f);
-  shield.addEventListener("pointerdown", e => { e.preventDefault(); shield.hidden = true; f.focus(); handOver(f, e); });
-  document.addEventListener("pointerdown", e => { if (!w.contains(e.target)) shield.hidden = false; });
+  shieldUp(w, () => f);
+}
+// A wheel that starts while the pointer rests on a window goes to its app (a
+// board pans, a note scrolls); one that carries a page scroll on as the window
+// slides under the pointer keeps scrolling the page.
+let lastWheel = -1e9;
+addEventListener("wheel", e => { e.gap = e.timeStamp - lastWheel; lastWheel = e.timeStamp; }, { capture: true, passive: true });
+function wheelInto(f, e) {
+  let doc; try { doc = f.contentDocument; } catch { return; }
+  const r = f.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  const target = doc && (doc.elementFromPoint(x, y) || doc.querySelector("canvas"));
+  if (target) target.dispatchEvent(new f.contentWindow.WheelEvent("wheel", { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y,
+    deltaX: e.deltaX, deltaY: e.deltaY, deltaMode: e.deltaMode, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey, altKey: e.altKey }));
+}
+// The shield: gone while the app has the pointer. A click in keeps it away
+// until the page is clicked elsewhere; a wheel in, until the pointer leaves.
+function shieldUp(w, frame) {
+  const shield = w.querySelector(".shield");
+  let held = false;
+  shield.addEventListener("pointerdown", e => { const f = frame(); if (!f) return; e.preventDefault(); held = true; shield.hidden = true; f.focus(); handOver(f, e); });
+  shield.addEventListener("wheel", e => { const f = frame(); if (!f || e.gap < 400) return; e.preventDefault(); shield.hidden = true; wheelInto(f, e); }, { passive: false });
+  w.addEventListener("pointerleave", () => { if (!held && frame()) shield.hidden = false; });
+  document.addEventListener("pointerdown", e => { if (!w.contains(e.target) && frame()) { held = false; shield.hidden = false; } });
 }
 const near = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { near.unobserve(e.target); mount(e.target); } }), { rootMargin: "500px 0px" });
 document.querySelectorAll(".window[data-live]").forEach(w => near.observe(w));
