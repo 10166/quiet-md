@@ -1995,7 +1995,7 @@ impl Store {
         let Some(m) = self.index.get(id) else { return false };
         if m.folder.is_some() { return self.flat || self.abs(&m.rel).fs_is_dir() }
         #[cfg(test)]
-        crate::store::DISK_LOOKUPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        crate::store::DISK_LOOKUPS.with(|n| n.set(n.get() + 1));
         self.path(id).fs_exists()
     }
 
@@ -2205,10 +2205,13 @@ impl Store {
     }
 }
 
-/// Disk existence checks performed by `index_has`; compiled only in tests,
-/// to keep imports O(N) instead of O(N × library) (#216).
 #[cfg(test)]
-pub(crate) static DISK_LOOKUPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+thread_local! {
+    /// Disk existence checks performed by `index_has`; compiled only in tests,
+    /// to keep imports O(N) instead of O(N × library) (#216). Per thread:
+    /// tests run in parallel and each counts only its own lookups.
+    pub(crate) static DISK_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 #[cfg(test)]
 mod tests {
@@ -2251,12 +2254,12 @@ mod tests {
         let mut store = lib.open();
         let folder = store.create_folder("imported", None).unwrap();
         for _ in 0..30 { store.create_from(&doc("background")).unwrap(); }
-        DISK_LOOKUPS.store(0, std::sync::atomic::Ordering::Relaxed);
+        DISK_LOOKUPS.with(|n| n.set(0));
         for _ in 0..10 {
             let id = store.create_from(&doc("page")).unwrap();
             store.set_parent(&id, Some(&folder)).unwrap();
         }
-        let looked = DISK_LOOKUPS.load(std::sync::atomic::Ordering::Relaxed);
+        let looked = DISK_LOOKUPS.with(|n| n.get());
         assert!(looked <= 20, "10 imports made {looked} disk checks, not O(N)");
     }
 
