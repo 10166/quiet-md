@@ -347,19 +347,26 @@ document.getElementById("lang").addEventListener("change", e => {
   try { localStorage.setItem("lang", e.target.value); } catch {}
 });
 // The windows run the real app (/demo/?lib=<id>). A clear shield keeps the
-// wheel on the page until the window is clicked; that click goes on to the
-// app. Phones get a picture.
+// wheel on the page until the window is clicked; that click (any button: a
+// held wheel pans a board) goes on to the app, which then keeps the wheel until
+// the page is clicked elsewhere. Phones get a picture.
 const wide = matchMedia("(min-width: 641px)").matches;
 function handOver(f, e) {
   let doc; try { doc = f.contentDocument; } catch { return; }
   const r = f.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
   const target = doc && (doc.elementFromPoint(x, y) || doc.querySelector("canvas"));
   if (!target) return;
-  const W = f.contentWindow, init = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: 0, buttons: 1, pointerId: 1, pointerType: "mouse", isPrimary: true, view: W };
+  const W = f.contentWindow, init = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: e.button, buttons: e.buttons || 1, pointerId: 1, pointerType: "mouse", isPrimary: true, view: W };
   target.dispatchEvent(new W.PointerEvent("pointerdown", init));
   target.dispatchEvent(new W.MouseEvent("mousedown", init));
-  addEventListener("pointerup", () => { const u = { ...init, buttons: 0 };
-    target.dispatchEvent(new W.PointerEvent("pointerup", u)); target.dispatchEvent(new W.MouseEvent("mouseup", u)); target.dispatchEvent(new W.MouseEvent("click", u)); }, { once: true });
+  // The release lands in the app itself once the shield is gone; only one
+  // that lands on the page is handed on (a wait left over would later click
+  // the app wherever this press was).
+  const up = () => { done(); const u = { ...init, buttons: 0 };
+    target.dispatchEvent(new W.PointerEvent("pointerup", u)); target.dispatchEvent(new W.MouseEvent("mouseup", u)); if (e.button === 0) target.dispatchEvent(new W.MouseEvent("click", u)); };
+  const done = () => { removeEventListener("pointerup", up); W.removeEventListener("pointerup", done, true); };
+  addEventListener("pointerup", up);
+  W.addEventListener("pointerup", done, true);
 }
 // One app runs at a time: a window starts its app when it comes within reach
 // of the screen, and a window that has left the screen gives its app up when
@@ -384,7 +391,7 @@ function unmount(w) { w.querySelector("iframe")?.remove(); running.delete(w); w.
 document.querySelectorAll(".window[data-live]").forEach(w => {
   const shield = w.querySelector(".shield");
   shield.addEventListener("pointerdown", e => { const f = w.querySelector("iframe"); if (!f) return; e.preventDefault(); shield.hidden = true; f.focus(); handOver(f, e); });
-  w.addEventListener("pointerleave", () => { if (w.querySelector("iframe")) shield.hidden = false; });
+  document.addEventListener("pointerdown", e => { if (!w.contains(e.target) && w.querySelector("iframe")) shield.hidden = false; });
 });
 const near = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) mount(e.target); }), { rootMargin: "0px 0px -12% 0px" });
 const visible = new IntersectionObserver(es => es.forEach(e => {
