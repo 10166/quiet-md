@@ -1082,10 +1082,10 @@ fn md_blocks(lines: &[&str], off: Off, mut spans: Option<&mut Vec<(usize, usize)
             i += n;
             continue;
         }
-        if let Some((alt, src)) = image_line(body).filter(|_| off.file) {
-            let caption = (off.alt && !alt.is_empty()).then(|| md_inline(alt).text);
+        if off.file && let Some((alt, src, width)) = image_line(body).map(|(a, s)| (md_inline(a).text, s.to_string(), None)).or_else(|| html_image_line(body)) {
+            let caption = (off.alt && !alt.is_empty()).then_some(alt);
             let mut b = Block::new(
-                BlockKind::Image { src_kind: "src".into(), src: src.to_string(), width: None, height: None, caption, crop: None },
+                BlockKind::Image { src_kind: "src".into(), src, width, height: None, caption, crop: None },
                 RichText::default(),
             );
             b.align = crate::model::Align::Center;
@@ -1108,6 +1108,20 @@ fn image_line(s: &str) -> Option<(&str, &str)> {
     let src = inner.split_once([' ', '\t']).map_or(inner, |(a, _)| a);
     let src = src.trim_start_matches('<').trim_end_matches('>');
     (!src.is_empty() && !inner.contains(')')).then_some((alt, src))
+}
+
+/// `<img src="…" alt="…" width="…">` filling the whole line, as GitHub
+/// READMEs and some editors write a picture: its alt, src and width in px
+/// (`auto`, percentages and the height are left to the picture itself).
+fn html_image_line(s: &str) -> Option<(String, String, Option<f32>)> {
+    if !s.get(..4)?.eq_ignore_ascii_case("<img") || !s.ends_with('>') { return None; }
+    let dom = html5ever::parse_document(RcDom::default(), Default::default()).from_utf8().read_from(&mut s.as_bytes()).ok()?;
+    let body = find(&dom.document, "body")?;
+    let kids = body.children.borrow();
+    let [img] = &kids[..] else { return None };
+    if tag(img).as_deref() != Some("img") { return None; }
+    let src = attr(img, "src")?.trim().to_string();
+    (!src.is_empty()).then(|| (attr(img, "alt").unwrap_or_default().trim().to_string(), src, width_px(img)))
 }
 
 /// A quote that is really a callout: GitHub's / Obsidian's `[!NOTE] Title`
@@ -1684,6 +1698,26 @@ mod tests {
         let t = super::md_inline("Total: $x / 2$; tax($7$) not math, matrix $a \\\\ b$ is.");
         let equations: Vec<_> = t.spans().filter_map(|(_, m)| m.inline.as_ref().and_then(|i| i.equation().map(str::to_string))).collect();
         assert_eq!(equations, vec!["x / 2", "a \\\\ b"]);
+    }
+
+    #[test]
+    fn markdown_html_images() {
+        use crate::model::BlockKind;
+        let off = super::Off { file: true, alt: true, ..Default::default() };
+        let img = |line: &str| match super::markdown_to_blocks(line, off).as_slice() {
+            [b] => match &b.kind { BlockKind::Image { src, width, caption, .. } => Some((src.clone(), *width, caption.clone())), _ => None },
+            _ => None,
+        };
+        assert_eq!(img(r#"<img src="https://file.oss/image.png" alt="" width="auto" height="auto" >"#), Some(("https://file.oss/image.png".into(), None, None)));
+        assert_eq!(img(r#"<IMG SRC='img/a b.png' alt="Cat" width="300" />"#), Some(("img/a b.png".into(), Some(300.), Some("Cat".into()))));
+        assert_eq!(img(r#"<img src="a.png" style="width: 120px" height="50%">"#), Some(("a.png".into(), Some(120.), None)));
+        assert_eq!(img(r#"<img src="https://x.y/a.png?a=1&amp;b=2">"#).map(|i| i.0), Some("https://x.y/a.png?a=1&b=2".into()));
+        // Anything else on the line, or no src: not a picture.
+        for line in [r#"<img src="a.png"> and text"#, r#"<img alt="x">"#, r#"<img src="">"#, "<imgx src=\"a.png\">", r#"<img src="a.png"><img src="b.png">"#] {
+            assert_eq!(img(line), None, "{line}");
+        }
+        // Pasting keeps it as text, as with `![](…)`.
+        assert!(matches!(super::markdown_to_blocks(r#"<img src="a.png">"#, super::Off::default())[0].kind, BlockKind::Text));
     }
 
     #[test]

@@ -903,6 +903,20 @@ mod tests {
         out
     }
 
+    /// An `<img>` line is a picture like `![](…)`: relative paths resolve
+    /// beside the file, and saving keeps the tag as written.
+    #[test]
+    fn html_images() {
+        let src = "a\n\n<img src=\"img/a%20b.png\" width=\"240\">\n\n<img src=\"https://file.oss/image.png\" alt=\"\" width=\"auto\" height=\"auto\" >\n";
+        let base = Path::new(if cfg!(windows) { "C:/notes" } else { "/notes" });
+        let imgs: Vec<_> = parse_file(src, "t", Some(base)).blocks.into_iter().filter_map(|b| match b.kind {
+            BlockKind::Image { src, width, .. } => Some((PathBuf::from(src), width)),
+            _ => None,
+        }).collect();
+        assert_eq!(imgs, [(base.join("img").join("a b.png"), Some(240.)), (PathBuf::from("https://file.oss/image.png"), None)]);
+        assert_eq!(preserved(src, |_| {}), src);
+    }
+
     /// Only what changed is rewritten: other blocks keep their own syntax
     /// and the blank lines around them.
     #[test]
