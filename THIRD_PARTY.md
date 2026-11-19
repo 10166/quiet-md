@@ -4,7 +4,7 @@ Quiet.md is distributed under the [MIT license](LICENSE). The following third-pa
 
 ## Rust dependencies
 
-This table lists 769 packages from `cargo metadata` and their declared licenses, including MPL-2.0. Consult each component's license text for its terms.
+This table lists 772 packages from `cargo metadata` and their declared licenses, including MPL-2.0. Consult each component's license text for its terms.
 
 Run `scripts/licences.sh` to regenerate the table from the full dependency list.
 
@@ -158,6 +158,8 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | event-listener | 5.4.2 | Apache-2.0 OR MIT |
 | event-listener-strategy | 0.5.4 | Apache-2.0 OR MIT |
 | exr | 1.74.2 | BSD-3-Clause |
+| fallible-iterator | 0.3.0 | MIT/Apache-2.0 |
+| fallible-streaming-iterator | 0.1.9 | MIT/Apache-2.0 |
 | fastrand | 2.5.0 | Apache-2.0 OR MIT |
 | fax | 0.2.7 | MIT |
 | fdeflate | 0.3.7 | MIT OR Apache-2.0 |
@@ -225,6 +227,7 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | hashbrown | 0.14.5 | MIT OR Apache-2.0 |
 | hashbrown | 0.16.1 | MIT OR Apache-2.0 |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 |
+| hashlink | 0.12.2 | MIT OR Apache-2.0 |
 | heapless | 0.9.3 | MIT OR Apache-2.0 |
 | heck | 0.4.1 | MIT OR Apache-2.0 |
 | heck | 0.5.0 | MIT OR Apache-2.0 |
@@ -288,6 +291,7 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | libloading | 0.8.9 | ISC |
 | libm | 0.2.16 | MIT |
 | libredox | 0.1.25 | MIT |
+| libsqlite3-sys | 0.40.0 | MIT |
 | linebender_resource_handle | 0.1.1 | Apache-2.0 OR MIT |
 | linux-raw-sys | 0.4.15 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | linux-raw-sys | 0.12.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
@@ -459,6 +463,8 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | rgb | 0.8.53 | MIT |
 | roxmltree | 0.20.0 | MIT OR Apache-2.0 |
 | roxmltree | 0.21.2 | MIT OR Apache-2.0 |
+| rsqlite-vfs | 0.2.0 | MIT |
+| rusqlite | 0.43.0 | MIT |
 | rustc-demangle | 0.1.28 | MIT/Apache-2.0 |
 | rustc-hash | 1.1.0 | Apache-2.0/MIT |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT |
@@ -508,6 +514,7 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | spin | 0.9.9 | MIT |
 | spin | 0.10.1 | MIT |
 | spirv | 0.4.0+sdk-1.4.341.0 | Apache-2.0 |
+| sqlite-wasm-rs | 0.6.3 | MIT |
 | stable_deref_trait | 1.2.1 | MIT OR Apache-2.0 |
 | static_assertions | 1.1.0 | MIT OR Apache-2.0 |
 | strict-num | 0.1.1 | MIT |
@@ -583,6 +590,7 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | value-bag | 1.14.1 | Apache-2.0 OR MIT |
 | value-bag-serde1 | 1.14.1 | Apache-2.0 OR MIT |
 | value-bag-sval2 | 1.14.1 | Apache-2.0 OR MIT |
+| vcpkg | 0.2.15 | MIT/Apache-2.0 |
 | vello_common | 0.3.0 | Apache-2.0 OR MIT |
 | vello_cpu | 0.3.0 | Apache-2.0 OR MIT |
 | version_check | 0.9.5 | MIT/Apache-2.0 |
@@ -802,7 +810,7 @@ Upstream distributes the Excalidraw board fonts as WOFF2 subsets by Unicode rang
 
 ## Covers and illustrations
 
-The 26 covers and their thumbnails in `assets/covers/` and the three project-drawn empty-state illustrations in `assets/illus/` are distributed under MIT.
+The 26 covers and their thumbnails in `assets/covers/` and the project-drawn illustrations in `assets/illus/` (three empty-state illustrations, and under `kinds/` the five colored kind icons of the New menu) are distributed under MIT.
 
 ## Built-in theme values
 

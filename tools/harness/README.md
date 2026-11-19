@@ -46,6 +46,7 @@ Write one command per line. Lines beginning with `#` are comments. See the top o
 | `type <text>` | Type text, including trailing spaces. |
 | `move x y` / `click x y` / `dclick x y` / `rclick x y` / `drag x1 y1 x2 y2` | Move, click, double-click, right-click or drag in window coordinates. |
 | `down x y` / `dragto x y` / `dragby dx dy` / `up x y` | Press, drag to an absolute point, drag relative to the last point or release. Use `bench 30 dragby 4 0` to time individual steps. |
+| `mods shift cmd` / `mods none` | Hold these modifier keys (shift, cmd, alt, ctrl) for the mouse steps that follow; `none` lets go. |
 | `mdown x y` / `mdragto x y` / `mup x y` | Press, drag or release the middle (wheel) button. |
 | `wheel x y dy [dx]` | Send one wheel event. Optional horizontal delta simulates a trackpad. Positive values reveal content to the right. |
 | `shot <name>` / `burst <name> n` | Take one screenshot or n shots about 8 ms apart. |

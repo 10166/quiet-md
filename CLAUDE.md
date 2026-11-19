@@ -9,7 +9,7 @@ Maintain the code, bundled guides, documentation and assets in this repository. 
 ## Product principles
 
 - Preserve existing elements, their order, behavior, shortcuts and wording. Use the existing semantic Theme tokens.
-- The sidebar sits directly on the window background without a panel, border or shadow. The note is a flat white surface flush with the top, right and bottom edges of the window, without gutters, rounded corners, borders or shadows. This is the only structural exception.
+- The sidebar sits directly on the window background without a panel, border or shadow. The note is a flat white surface flush with the top, right and bottom edges of the window, without gutters, rounded corners or borders; its left edge casts one faint shadow (`theme::shadow_note`) to set it apart from the sidebar. This is the only structural exception.
 
 ## Code
 

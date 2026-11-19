@@ -55,6 +55,7 @@ mod home_folder;
 mod folders;
 mod file_history;
 mod settings;
+mod table;
 mod l10n;
 mod themes;
 mod shortcuts;
