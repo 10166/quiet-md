@@ -24,7 +24,7 @@ use web_time::Instant;
 const SAVE_DELAY: Duration = Duration::from_millis(500);
 const SAVE_MAX_DELAY: Duration = Duration::from_secs(2);
 
-actions!(workspace, [NewDoc, OpenFile, ImportDoc, ImportFolder, ToggleSidebar, FocusSearch, FindInDoc, ReplaceInDoc, OpenSettings, OpenAbout, CheckForUpdates, GoHome, CloseWindow, Quit,
+actions!(workspace, [NewDoc, OpenFile, OpenFolder, ImportDoc, ImportFolder, ToggleSidebar, FocusSearch, FindInDoc, ReplaceInDoc, OpenSettings, OpenAbout, CheckForUpdates, GoHome, CloseWindow, Quit,
     ReplayOnboarding, HideApp, HideOthers, ShowAll, Minimize, Zoom, ToggleFullScreen]);
 
 /// The menu bar, in the interface language.
@@ -55,6 +55,7 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::action(tr("新建文档", "New Document"), NewDoc),
                 MenuItem::action(tr("新建笔记窗口", "New Note Window"), crate::quick_note::QuickNew),
                 MenuItem::action(tr("打开 Markdown 文件…", "Open Markdown File…"), OpenFile),
+                MenuItem::action(tr("打开文件夹…", "Open Folder…"), OpenFolder),
                 MenuItem::action(tr("导入为文档…", "Import as Document…"), ImportDoc),
                 MenuItem::action(tr("导入文件夹…", "Import Folder…"), ImportFolder),
                 MenuItem::separator(),
@@ -106,6 +107,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-alt-shift-o", ReplayOnboarding, None),
         KeyBinding::new("cmd-shift-i", ImportDoc, None),
         KeyBinding::new("cmd-o", OpenFile, None),
+        KeyBinding::new("cmd-shift-o", OpenFolder, None),
         KeyBinding::new("cmd-alt-home", GoHome, None),
         KeyBinding::new("cmd-w", CloseWindow, None),
         KeyBinding::new("cmd-]", ToggleSidebar, None),
@@ -367,7 +369,7 @@ pub struct Workspace {
     /// The 快捷键 drawer, and the help button's menu (open while hovered).
     pub shortcuts: bool,
     pub(crate) focus: FocusHandle,
-    save_task: Option<Task<()>>,
+    pub(crate) save_task: Option<Task<()>>,
     /// When the oldest edit not yet on disk was made: a save waits for a
     /// pause in typing, but never longer than `SAVE_MAX_DELAY` after it.
     dirty_since: Option<Instant>,
@@ -484,15 +486,16 @@ impl Workspace {
         // A file written into the library from outside (a model writing a
         // note, say) joins it without going away and back: the library's
         // shape is compared every couple of seconds and the list re-read only
-        // when it changed.
+        // when it changed. The folders opened under 本机文件 are watched the same way.
         cx.spawn(async move |this, cx| {
             let bg = cx.background_executor().clone();
-            let shape = || bg.spawn(async { crate::store::Store::shape_at(&crate::store::Store::root_dir()) });
-            let mut last = shape().await;
+            let shape = |dirs: Vec<std::path::PathBuf>| bg.spawn(async move { (crate::store::Store::shape_at(&crate::store::Store::root_dir()), crate::store::Store::shape_of(&dirs)) });
+            let dirs = |cx: &mut AsyncApp| this.update(cx, |w, _| w.store.mount_dirs()).unwrap_or_default();
+            let mut last = shape(dirs(cx)).await;
             let mut last_file = None;
             loop {
                 bg.timer(Duration::from_secs(2)).await;
-                let now = shape().await;
+                let now = shape(dirs(cx)).await;
                 let Ok(path) = this.update(cx, |w, _| w.current.as_ref()
                     .filter(|id| !w.store.file_task_busy() && w.store.is_markdown(id))
                     .and_then(|id| w.store.file_path(id))) else { break };
@@ -1454,12 +1457,15 @@ impl Workspace {
             .unwrap_or_default();
         let mut crumbs: Vec<AnyElement> = vec![];
         let sep = || div().mx(px(3.)).flex_none().child(icon("chevron-right", 12., Theme::icon())).into_any_element();
-        // Every path starts at the library, as a folder page's does.
+        // Every path starts at the library, as a folder page's does; a file
+        // under 本机文件 starts there, which has no page of its own.
+        let local = self.current.as_ref().and_then(|id| self.entries.iter().find(|e| &e.id == id)).is_some_and(|e| e.meta.local());
+        let start = if local { crate::settings::tr("本机文件", "Files on this computer") } else { crate::settings::tr("我的文档", "My documents") };
         if self.current.is_some() {
-            crumbs.push(div().id("crumb-library").no_drag().flex_none().px(px(4.)).rounded(px(4.)).cursor_pointer()
-                .whitespace_nowrap().text_color(Theme::text_caption()).hover(|s| s.text_color(Theme::primary_500()))
-                .child(ui_text(crate::settings::tr("我的文档", "My documents").to_string()))
-                .on_click(cx.listener(|w, _, _, cx| w.show_view(View::Home, cx)))
+            crumbs.push(div().id("crumb-library").no_drag().flex_none().px(px(4.)).rounded(px(4.))
+                .whitespace_nowrap().text_color(Theme::text_caption())
+                .when(!local, |d| d.cursor_pointer().hover(|s| s.text_color(Theme::primary_500())).on_click(cx.listener(|w, _, _, cx| w.show_view(View::Home, cx))))
+                .child(ui_text(start.to_string()))
                 .into_any_element());
             crumbs.push(sep());
         }
@@ -1526,7 +1532,7 @@ impl Workspace {
         let left = if self.sidebar_open { 18. } else { theme::TRAFFIC_LIGHTS_W + 4. + 28. + 4. + 28. + 25. };
         let room = pane_w - left - crate::ui::header_right_inset() - 3. * HEADER_ACTIONS_H - 8. - 16.;
         if room < 360. && !crumbs.is_empty() {
-            let path: Vec<&str> = std::iter::once(crate::settings::tr("我的文档", "My documents")).chain(chain.iter().map(|c| c.1.as_str())).collect();
+            let path: Vec<&str> = std::iter::once(start).chain(chain.iter().map(|c| c.1.as_str())).collect();
             crumbs = vec![
                 div().id("crumb-more").no_drag().flex_none().size(px(20.)).flex().items_center().justify_center().rounded(px(4.))
                     .text_color(Theme::text_caption()).tip(&path.join(" / "), None).child("…").into_any_element(),
@@ -1781,6 +1787,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &NewDoc, window, cx| w.new_doc(window, cx)))
             .on_action(cx.listener(|w, _: &ImportDoc, window, cx| w.open_import(window, cx)))
             .on_action(cx.listener(|w, _: &OpenFile, window, cx| w.open_file_dialog(window, cx)))
+            .on_action(cx.listener(|w, _: &OpenFolder, window, cx| w.open_folder_dialog(window, cx)))
             .on_action(cx.listener(|w, _: &ImportFolder, window, cx| w.open_import_folder(window, cx)))
             .on_action(cx.listener(|w, _: &ToggleSidebar, _, cx| {
                 w.sidebar_open = !w.sidebar_open;

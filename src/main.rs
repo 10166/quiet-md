@@ -47,6 +47,8 @@ mod printing;
 mod search;
 mod sidebar;
 mod local_files;
+mod local_folders;
+mod system_trash;
 mod sidebar_drag;
 mod sidebar_drop;
 mod home_folder;

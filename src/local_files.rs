@@ -1,5 +1,6 @@
 //! 本机文件: Markdown files opened where they are (打开文件…, the Finder),
-//! edited in place and listed under 我的文档, last opened first. The library
+//! edited in place and listed under 本机文件, last opened first (folders
+//! opened the same way are `local_folders.rs`). The library
 //! only remembers them: 从列表中移除 never touches the file, and 导入到文档库
 //! makes a copy.
 
@@ -33,9 +34,9 @@ fn pick(cx: &mut App) -> impl std::future::Future<Output = Option<Vec<PathBuf>>>
 }
 
 impl Workspace {
-    /// 本机文件, last opened first.
+    /// 本机文件 (single files and opened folders, not what is in them), last opened first.
     pub(crate) fn local_entries(&self) -> Vec<&Entry> {
-        let mut v: Vec<&Entry> = self.entries.iter().filter(|e| e.meta.local()).collect();
+        let mut v: Vec<&Entry> = self.entries.iter().filter(|e| e.meta.local() && e.meta.parent.is_none()).collect();
         v.sort_by(|a, b| b.meta.opened.cmp(&a.meta.opened).then_with(|| a.id.cmp(&b.id)));
         v
     }
@@ -51,11 +52,13 @@ impl Workspace {
         .detach();
     }
 
-    /// Open Markdown files where they are (the last one shows); anything
-    /// else is imported as before.
+    /// Open Markdown files and folders where they are (the last file shows);
+    /// anything else is imported as before.
     pub fn open_paths(&mut self, paths: &[PathBuf], window: &mut Window, cx: &mut Context<Self>) {
-        let (md, other): (Vec<PathBuf>, Vec<PathBuf>) = paths.iter().cloned().partition(|p| is_markdown_path(p));
+        let (dirs, files): (Vec<PathBuf>, Vec<PathBuf>) = paths.iter().cloned().partition(|p| p.fs_is_dir());
+        let (md, other): (Vec<PathBuf>, Vec<PathBuf>) = files.into_iter().partition(|p| is_markdown_path(p));
         if !other.is_empty() { self.import_paths(&other, None, true, window, cx); }
+        if !dirs.is_empty() { self.mount_dirs(&dirs, window, cx); }
         let mut last = None;
         for p in &md {
             match self.store.open_local(p) {
@@ -73,7 +76,7 @@ impl Workspace {
     }
 
     /// 导入到文档库: a Markdown copy at the top of 我的文档.
-    fn import_local(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn import_local(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.row_menu = None;
         let Some(doc) = self.doc_of(id, cx) else { return };
         let front = self.store.front_matter_of(id);
@@ -100,7 +103,7 @@ impl Workspace {
         let (import, rename, reveal, forget) = (m.id.clone(), m.id.clone(), m.id.clone(), m.id.clone());
         let row = |id: &'static str, glyph: &'static str, label: &'static str| crate::ui::menu_row(id, SharedString::from(id)).child(icon(glyph, 16., Theme::icon())).child(label);
         let pos = if m.pos.x < px(0.) { point(-m.pos.x, m.pos.y + px(22.)) } else { m.pos };
-        let shown = if cfg!(target_os = "macos") { tr("在访达中显示", "Show in Finder") } else if cfg!(target_os = "windows") { tr("在文件资源管理器中显示", "Show in File Explorer") } else { tr("在文件管理器中显示", "Show in File Manager") };
+        let shown = crate::local_folders::show_in_files();
         vec![deferred(anchored().position(pos).snap_to_window_with_margin(px(8.)).child(popover().id("local-row-menu").occlude().min_w(px(200.)).py(px(crate::ui::MENU_PAD_Y))
             .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.row_menu = None; cx.notify(); }))
             .child(row("lr-import", "folder-input", tr("导入到文档库", "Import into library")).on_click(cx.listener(move |w, _, window, cx| w.import_local(&import, window, cx))))
@@ -121,16 +124,16 @@ impl Workspace {
 pub struct Incoming(std::rc::Rc<std::cell::RefCell<Vec<PathBuf>>>);
 
 impl Incoming {
-    /// Markdown files named on the command line (Windows and Linux "Open with").
+    /// Markdown files and folders named on the command line (Windows and Linux "Open with").
     pub fn from_args() -> Self {
         let me = Self::default();
-        me.0.borrow_mut().extend(std::env::args_os().skip(1).map(PathBuf::from).filter(|p| is_markdown_path(p) && p.fs_is_file()));
+        me.0.borrow_mut().extend(std::env::args_os().skip(1).map(PathBuf::from).filter(|p| (is_markdown_path(p) && p.fs_is_file()) || p.fs_is_dir()));
         me
     }
 
     pub fn push_urls(&self, urls: Vec<String>) {
-        let paths = urls.iter().filter_map(|u| u.strip_prefix("file://")).map(|p| PathBuf::from(crate::markdown::percent_decode(p)));
-        self.0.borrow_mut().extend(paths.filter(|p| is_markdown_path(p)));
+        let paths = urls.iter().filter_map(|u| u.strip_prefix("file://")).map(|p| PathBuf::from(crate::markdown::percent_decode(p.trim_end_matches('/'))));
+        self.0.borrow_mut().extend(paths.filter(|p| is_markdown_path(p) || p.fs_is_dir()));
     }
 
     /// Hand waiting files to the front main window, now and whenever more arrive.
