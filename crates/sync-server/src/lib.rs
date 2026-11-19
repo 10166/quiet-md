@@ -151,6 +151,9 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(portal::redirect_root))
         .route("/portal", get(portal::serve_portal))
+        .route("/portal/assets/bg.png", get(portal::serve_bg))
+        .route("/portal/assets/logo.png", get(portal::serve_logo))
+        .route("/portal/assets/icon.png", get(portal::serve_icon))
         .route("/healthz", get(healthz))
         // Sync client API
         .route("/v1/auth/register", post(routes::auth::register))

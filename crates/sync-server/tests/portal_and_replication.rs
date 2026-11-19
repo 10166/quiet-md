@@ -173,6 +173,14 @@ async fn portal_admin_auth_and_ops_lifecycle() {
     assert!(html.contains("Quiet.md Sync Portal"));
     assert!(!html.contains("onclick="));
 
+    // Embedded portal visual assets are served with image/png.
+    for asset in ["/portal/assets/bg.png", "/portal/assets/logo.png", "/portal/assets/icon.png"] {
+        let resp = client.get(format!("{}{asset}", node.base)).send().await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "asset {asset}");
+        assert_eq!(resp.headers().get("content-type").and_then(|v| v.to_str().ok()), Some("image/png"));
+        assert!(!resp.bytes().await.unwrap().is_empty());
+    }
+
     // Uninitialized status hides internal node_id/role until authenticated.
     let st: Value = client.get(format!("{}/api/admin/auth/status", node.base)).send().await.unwrap().json().await.unwrap();
     assert_eq!(st["initialized"], false);

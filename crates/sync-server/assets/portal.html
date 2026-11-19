@@ -2,384 +2,1158 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Quiet.md Sync Portal</title>
+<meta name="theme-color" content="#5f95d6">
+<link rel="icon" href="/portal/assets/icon.png" type="image/png">
+<link rel="preload" as="image" href="/portal/assets/bg.png">
 <style>
   :root {
-    --bg-window: #f5f5f4;
-    --bg-surface: #ffffff;
-    --bg-subtle: #f7f7f6;
-    --bg-hover: #efefec;
-    --border: #e6e5e2;
-    --border-strong: #d4d3cf;
-    --text: #1c1c1a;
-    --text-muted: #6b6a65;
-    --text-faint: #9a9891;
+    color-scheme: light;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei", Inter, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+    /* Quiet.md Sky & Glass Palette */
+    --ink: #1d211f;
+    --ink-2: #4a514d;
+    --ink-3: #7c837f;
+    --dark: #18191b;
+    --dark-hover: #090a0b;
+
+    --glass: rgba(255, 255, 255, .64);
+    --glass-strong: rgba(255, 255, 255, .86);
+    --glass-hover: rgba(255, 255, 255, .88);
+    --glass-line: rgba(255, 255, 255, .82);
+
+    /* Window & Workspace Surfaces (exact Quiet.md #f3f3f2 sidebar + #ffffff plane) */
+    --sidebar-bg: #f3f3f2;
+    --surface: #ffffff;
+    --surface-subtle: #f8f8f7;
+    --surface-hover: #efefed;
+    --border: rgba(29, 33, 31, .085);
+    --border-strong: rgba(29, 33, 31, .16);
+
+    /* Semantic Accents (Quiet.md Forest Green + Refined Status Tones) */
+    --brand: #2f7d4f;
+    --brand-deep: #23663d;
+    --brand-soft: rgba(47, 125, 79, .10);
+    --brand-ring: rgba(47, 125, 79, .24);
+
     --accent: #2563eb;
-    --accent-soft: #eff6ff;
-    --accent-hover: #1d4ed8;
-    --ok: #15803d;
-    --ok-soft: #f0fdf4;
+    --accent-soft: rgba(37, 99, 235, .10);
+    --ok: #1f7a44;
+    --ok-soft: rgba(31, 122, 68, .11);
     --warn: #b45309;
-    --warn-soft: #fffbeb;
+    --warn-soft: rgba(217, 119, 6, .12);
     --danger: #dc2626;
-    --danger-soft: #fef2f2;
-    --shadow-sm: 0 1px 2px rgba(0,0,0,.04);
-    --shadow-md: 0 10px 30px rgba(0,0,0,.10);
-    --radius: 10px;
-    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --danger-soft: rgba(220, 38, 38, .10);
+    --violet: #6d28d9;
+    --violet-soft: rgba(109, 40, 217, .10);
+
+    --shadow-win: 0 0 0 .5px rgba(0, 0, 0, .24), 0 0 0 1px rgba(255, 255, 255, .36) inset, 0 32px 80px -16px rgba(10, 28, 22, .42), 0 12px 28px -8px rgba(0, 0, 0, .18);
+    --shadow-card: 0 1px 2px rgba(16, 24, 20, .04), 0 4px 12px -4px rgba(16, 24, 20, .04);
+    --shadow-card-hover: 0 4px 16px -4px rgba(16, 24, 20, .09), 0 1px 3px rgba(16, 24, 20, .05);
+    --shadow-glass: 0 18px 50px -14px rgba(10, 34, 48, .35), 0 1px 0 rgba(255, 255, 255, .7) inset;
+    --shadow-modal: 0 24px 64px -12px rgba(0, 0, 0, .36), 0 0 0 1px rgba(255, 255, 255, .3) inset;
+
+    --radius-sm: 8px;
+    --radius: 12px;
+    --radius-lg: 16px;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg-window: #141413;
-      --bg-surface: #1c1c1b;
-      --bg-subtle: #232321;
-      --bg-hover: #2a2a27;
-      --border: #2e2e2b;
-      --border-strong: #3d3d39;
-      --text: #ecebe8;
-      --text-muted: #a1a09a;
-      --text-faint: #706f6a;
-      --accent: #60a5fa;
-      --accent-soft: rgba(59,130,246,.14);
-      --accent-hover: #93c5fd;
-      --ok: #4ade80;
-      --ok-soft: rgba(34,197,94,.14);
-      --warn: #fbbf24;
-      --warn-soft: rgba(245,158,11,.15);
-      --danger: #f87171;
-      --danger-soft: rgba(239,68,68,.15);
-      --shadow-sm: 0 1px 2px rgba(0,0,0,.25);
-      --shadow-md: 0 12px 34px rgba(0,0,0,.45);
-    }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ink: #eeedea;
+    --ink-2: #a4a7a4;
+    --ink-3: #727673;
+    --dark: #eeedea;
+    --dark-hover: #ffffff;
+
+    --glass: rgba(22, 24, 23, .62);
+    --glass-strong: rgba(22, 24, 23, .84);
+    --glass-hover: rgba(34, 38, 36, .82);
+    --glass-line: rgba(255, 255, 255, .14);
+
+    --sidebar-bg: #191a19;
+    --surface: #121312;
+    --surface-subtle: #1b1c1b;
+    --surface-hover: #242624;
+    --border: rgba(255, 255, 255, .085);
+    --border-strong: rgba(255, 255, 255, .16);
+
+    --brand: #4ade80;
+    --brand-deep: #22c55e;
+    --brand-soft: rgba(74, 222, 128, .13);
+    --brand-ring: rgba(74, 222, 128, .28);
+
+    --accent: #60a5fa;
+    --accent-soft: rgba(96, 165, 250, .14);
+    --ok: #4ade80;
+    --ok-soft: rgba(74, 222, 128, .14);
+    --warn: #fbbf24;
+    --warn-soft: rgba(251, 191, 36, .15);
+    --danger: #f87171;
+    --danger-soft: rgba(248, 113, 113, .15);
+    --violet: #c4b5fd;
+    --violet-soft: rgba(167, 139, 250, .14);
+
+    --shadow-win: 0 0 0 .5px rgba(0, 0, 0, .7), 0 0 0 1px rgba(255, 255, 255, .09) inset, 0 36px 90px -14px rgba(0, 0, 0, .72), 0 12px 28px -8px rgba(0, 0, 0, .48);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, .28);
+    --shadow-card-hover: 0 8px 24px -6px rgba(0, 0, 0, .48);
+    --shadow-glass: 0 24px 60px -14px rgba(0, 0, 0, .65), 0 1px 0 rgba(255, 255, 255, .08) inset;
+    --shadow-modal: 0 28px 72px -12px rgba(0, 0, 0, .75), 0 0 0 1px rgba(255, 255, 255, .1) inset;
   }
+
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; background: var(--bg-window); color: var(--text); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
-  a { color: var(--accent); text-decoration: none; }
+  html, body { min-height: 100%; margin: 0; }
+  body {
+    font-family: var(--font);
+    color: var(--ink);
+    background: #5f95d6;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  img { image-rendering: auto; }
+  a { color: var(--brand); text-decoration: none; }
   a:hover { text-decoration: underline; }
+  button, input, select { font-family: inherit; }
+
   .mono { font-family: var(--mono); font-size: 12px; }
   .num { font-variant-numeric: tabular-nums; }
-  .muted { color: var(--text-muted); }
-  .faint { color: var(--text-faint); }
+  .muted { color: var(--ink-2); }
+  .faint { color: var(--ink-3); }
   .hidden { display: none !important; }
 
-  /* Layout: Quiet.md sunken sidebar + full-height white plane */
-  .shell { display: flex; min-height: 100vh; }
-  .sidebar { width: 252px; flex-shrink: 0; background: var(--bg-window); padding: 18px 14px; display: flex; flex-direction: column; gap: 14px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
-  .brand { padding: 4px 8px; }
-  .brand-title { font-weight: 700; font-size: 15px; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
-  .brand-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
-  .brand-node { font-size: 12px; color: var(--text-muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .role-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; margin-top: 8px; }
+  /* Signature Quiet.md Dithered Sunlit Meadow & Sky Backdrop */
+  .sky-backdrop {
+    position: fixed; inset: 0; z-index: -2; pointer-events: none;
+    background: #dfe6e2 url(/portal/assets/bg.png) center 30% / cover no-repeat;
+    image-rendering: pixelated;
+    transition: filter .35s ease;
+  }
+  :root[data-theme="dark"] .sky-backdrop {
+    filter: brightness(.27) contrast(1.08) saturate(.88) hue-rotate(8deg);
+  }
+  .sky-wash {
+    position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background:
+      radial-gradient(ellipse 62% 44% at 50% 18%, rgba(16, 54, 112, .22), rgba(16, 54, 112, 0)),
+      linear-gradient(180deg, rgba(16, 48, 96, .10) 0%, rgba(16, 48, 96, 0) 36%, rgba(14, 34, 22, .14) 100%);
+  }
+  :root[data-theme="dark"] .sky-wash {
+    background:
+      radial-gradient(ellipse 62% 44% at 50% 18%, rgba(14, 36, 68, .35), rgba(8, 14, 20, .25)),
+      linear-gradient(180deg, rgba(8, 12, 16, .35) 0%, rgba(8, 12, 16, .18) 50%, rgba(6, 10, 10, .48) 100%);
+  }
+
+  /* Page Wrapper */
+  .page-shell {
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Floating Top Navigation (matches quiet.md website nav) */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    height: 64px;
+    padding: 0 max(18px, 2.5vw);
+    flex-shrink: 0;
+  }
+  .topbar-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #fff;
+    font-weight: 650;
+    font-size: 17px;
+    letter-spacing: -.015em;
+    text-shadow: 0 1px 8px rgba(10, 40, 90, .42);
+    user-select: none;
+  }
+  .topbar-brand img {
+    width: 30px; height: 30px; border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, .22);
+  }
+  .topbar-tag {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 24px; padding: 0 9px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 600; letter-spacing: .01em;
+    color: var(--ink);
+    background: var(--glass);
+    border: 1px solid var(--glass-line);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    text-shadow: none;
+  }
+  .topbar-end {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end;
+  }
+  .glass-pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    height: 34px; padding: 0 13px; border-radius: 999px;
+    color: var(--ink); text-decoration: none; font-size: 13px; font-weight: 550;
+    background: var(--glass); border: 1px solid var(--glass-line);
+    backdrop-filter: blur(16px) saturate(1.45);
+    -webkit-backdrop-filter: blur(16px) saturate(1.45);
+    box-shadow: 0 2px 10px rgba(12, 32, 48, .10);
+    cursor: pointer;
+    transition: background .15s, transform .15s, box-shadow .15s;
+  }
+  .glass-pill:hover { background: var(--glass-hover); text-decoration: none; transform: translateY(-1px); }
+  .glass-pill.static { cursor: default; }
+  .glass-pill.static:hover { transform: none; background: var(--glass); }
+  .glass-pill svg { width: 15px; height: 15px; flex: none; }
+  .glass-pill-icon { padding: 0; width: 34px; justify-content: center; }
+
+  /* Pulsing live dot */
+  .pulse-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: currentColor; position: relative; flex-shrink: 0;
+  }
+  .pulse-dot.live::after {
+    content: ""; position: absolute; inset: -3px; border-radius: 50%;
+    border: 1.5px solid currentColor; opacity: .55;
+    animation: ping 2s cubic-bezier(0, 0, .2, 1) infinite;
+  }
+  @keyframes ping {
+    0% { transform: scale(.85); opacity: .7; }
+    75%, 100% { transform: scale(1.9); opacity: 0; }
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: none; }
+  }
+  .anim-in { animation: fadeUp .42s cubic-bezier(.2, .8, .2, 1) both; }
+
+  /* ==================== AUTH / SETUP HERO VIEW ==================== */
+  .auth-stage {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: clamp(12px, 3vh, 36px) 18px 40px;
+  }
+  .auth-hero {
+    text-align: center;
+    margin-bottom: clamp(20px, 3vh, 28px);
+    max-width: 560px;
+  }
+  .hero-badge {
+    display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 13px 0 4px;
+    border-radius: 999px; font-size: 12.5px; font-weight: 550; color: var(--ink-2);
+    background: var(--glass); border: 1px solid var(--glass-line);
+    backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  }
+  .hero-badge b {
+    padding: 2px 9px; border-radius: 999px; background: #2f7d4f; color: #fff; font-size: 11.5px; font-weight: 600;
+  }
+  .auth-hero h1 {
+    margin: 14px 0 0;
+    font-size: clamp(32px, 4.4vw, 52px);
+    line-height: 1.12;
+    font-weight: 650;
+    letter-spacing: -.03em;
+    color: #fff;
+    text-shadow: 0 2px 18px rgba(10, 40, 90, .38);
+  }
+  .auth-hero h1 .hl { color: #e4f7c6; }
+  .auth-hero p {
+    margin: 10px auto 0;
+    max-width: 460px;
+    font-size: 15px;
+    line-height: 1.6;
+    font-weight: 500;
+    color: rgba(255, 255, 255, .94);
+    text-shadow: 0 1px 8px rgba(10, 40, 90, .45);
+  }
+
+  .auth-card {
+    width: 100%;
+    max-width: 440px;
+    background: var(--glass-strong);
+    border: 1px solid var(--glass-line);
+    border-radius: 20px;
+    padding: 28px 28px 26px;
+    backdrop-filter: blur(24px) saturate(1.55);
+    -webkit-backdrop-filter: blur(24px) saturate(1.55);
+    box-shadow: var(--shadow-glass);
+  }
+  @supports (corner-shape: squircle) { .auth-card { border-radius: 26px; corner-shape: squircle; } }
+  .auth-card-head {
+    display: flex; align-items: center; gap: 11px;
+    padding-bottom: 16px; margin-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .auth-card-head img { width: 34px; height: 34px; border-radius: 9px; }
+  .auth-card-head-title { font-weight: 650; font-size: 15px; letter-spacing: -.01em; }
+  .auth-card-head-sub { font-size: 12px; color: var(--ink-2); margin-top: 1px; }
+
+  .auth-footer {
+    margin-top: 22px;
+    padding: 5px 14px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, .94);
+    background: rgba(16, 26, 22, .36);
+    border: 1px solid rgba(255, 255, 255, .18);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    display: inline-flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+  }
+
+  /* ==================== MAIN FLOATING MACOS WINDOW SHELL ==================== */
+  .window-stage {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 4px max(16px, 2.2vw) 22px;
+  }
+  .app-window {
+    width: min(1340px, 100%);
+    height: calc(100svh - 90px);
+    min-height: 580px;
+    display: flex;
+    border-radius: 18px;
+    overflow: hidden;
+    isolation: isolate;
+    background: var(--surface);
+    box-shadow: var(--shadow-win);
+    animation: fadeUp .4s cubic-bezier(.2, .8, .2, 1) both;
+  }
+  @supports (corner-shape: squircle) { .app-window { border-radius: 24px; corner-shape: squircle; } }
+
+  /* Sunken Sidebar (exact Quiet.md #f3f3f2 feel) */
+  .sidebar {
+    width: 264px;
+    flex-shrink: 0;
+    background: var(--sidebar-bg);
+    padding: 16px 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+  }
+  .win-chrome {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 2px 6px 6px;
+  }
+  .traffic-lights { display: flex; gap: 8px; align-items: center; }
+  .traffic-lights i {
+    width: 12px; height: 12px; border-radius: 50%;
+    box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .14);
+  }
+  .traffic-lights i:nth-child(1) { background: #ff5f57; }
+  .traffic-lights i:nth-child(2) { background: #febc2e; }
+  .traffic-lights i:nth-child(3) { background: #28c840; }
+
+  .node-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    padding: 12px 13px;
+    box-shadow: var(--shadow-card);
+  }
+  .node-card-top { display: flex; align-items: center; gap: 10px; }
+  .node-card-top img { width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0; }
+  .node-card-meta { min-width: 0; flex: 1; }
+  .node-card-name {
+    font-weight: 650; font-size: 14px; letter-spacing: -.01em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .node-card-sub {
+    font-size: 11.5px; color: var(--ink-3); margin-top: 1px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .role-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11.5px; font-weight: 600;
+    padding: 4px 10px; border-radius: 999px; margin-top: 10px;
+  }
   .role-primary { background: var(--ok-soft); color: var(--ok); }
   .role-backup { background: var(--warn-soft); color: var(--warn); }
 
+  /* Sidebar Navigation */
+  .nav-group-label {
+    font-size: 11px; font-weight: 600; color: var(--ink-3);
+    padding: 0 10px; margin-bottom: -8px; letter-spacing: .03em; text-transform: uppercase;
+  }
   .nav { display: flex; flex-direction: column; gap: 3px; }
-  .nav button { width: 100%; border: none; background: transparent; color: var(--text-muted); padding: 8px 10px; border-radius: 8px; text-align: left; font-size: 13.5px; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: space-between; transition: background .12s, color .12s; }
-  .nav button:hover { background: var(--bg-hover); color: var(--text); }
-  .nav button.active { background: var(--bg-surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow-sm); }
+  .nav button {
+    width: 100%; border: none; background: transparent; color: var(--ink-2);
+    padding: 9px 11px; border-radius: 10px; text-align: left;
+    font-size: 13.5px; font-weight: 550; cursor: pointer;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    transition: background .14s, color .14s, box-shadow .14s;
+  }
+  .nav-left { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
+  .nav button svg { width: 16px; height: 16px; flex-shrink: 0; opacity: .76; transition: opacity .14s, color .14s; }
+  .nav button:hover { background: var(--surface-hover); color: var(--ink); }
+  .nav button:hover svg { opacity: 1; }
+  .nav button.active {
+    background: var(--surface);
+    color: var(--ink);
+    font-weight: 650;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .06), 0 0 0 1px var(--border);
+  }
+  .nav button.active svg { opacity: 1; color: var(--brand); }
+  .nav-chip {
+    font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
+    background: var(--surface-hover); color: var(--ink-2);
+  }
+  .nav button.active .nav-chip { background: var(--brand-soft); color: var(--brand); }
 
-  .peer-box { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 11px 12px; font-size: 12.5px; }
-  .peer-box-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); margin-bottom: 8px; }
-  .peer-item { display: flex; flex-direction: column; gap: 5px; padding: 7px 0; border-top: 1px solid var(--border); }
+  /* Cluster Peer Sidebar Box */
+  .peer-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    padding: 12px 13px;
+    font-size: 12.5px;
+    box-shadow: var(--shadow-card);
+  }
+  .peer-box-title {
+    font-size: 11px; font-weight: 650; letter-spacing: .03em; text-transform: uppercase;
+    color: var(--ink-3); margin-bottom: 9px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .peer-item { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid var(--border); }
   .peer-item:first-of-type { border-top: none; padding-top: 0; }
+  .peer-item:last-of-type { padding-bottom: 0; }
   .peer-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
   .peer-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .peer-jump { display: inline-flex; align-items: center; justify-content: center; gap: 4px; width: 100%; padding: 5px 8px; border-radius: 7px; font-size: 12px; font-weight: 500; background: var(--accent-soft); color: var(--accent); text-decoration: none; transition: opacity .12s; }
-  .peer-jump:hover { opacity: .85; text-decoration: none; }
+  .peer-jump {
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    width: 100%; padding: 6px 9px; border-radius: 8px;
+    font-size: 12px; font-weight: 600;
+    background: var(--brand-soft); color: var(--brand);
+    text-decoration: none; transition: background .14s, transform .14s;
+  }
+  .peer-jump:hover { background: var(--brand); color: #fff; text-decoration: none; }
 
-  .sidebar-footer { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+  .sidebar-footer {
+    margin-top: auto;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .sidebar-meta-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    font-size: 11.5px; padding: 0 4px; color: var(--ink-3);
+  }
   .sidebar-footer-row { display: flex; gap: 6px; }
 
-  .main { flex: 1; background: var(--bg-surface); border-left: 1px solid var(--border); min-width: 0; padding: 26px 34px 48px; }
-  .page-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
-  .page-head h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
-  .page-sub { color: var(--text-muted); font-size: 13px; margin-top: 2px; }
+  /* Pure White Right Workspace Plane */
+  .main {
+    flex: 1;
+    background: var(--surface);
+    min-width: 0;
+    padding: 26px 32px 36px;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+  .page-head {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap;
+    margin-bottom: 22px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .page-head h1 {
+    margin: 0; font-size: 23px; font-weight: 700; letter-spacing: -.028em; line-height: 1.2;
+  }
+  .page-sub {
+    color: var(--ink-2); font-size: 13px; margin-top: 6px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .meta-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 9px; border-radius: 999px;
+    background: var(--surface-subtle); border: 1px solid var(--border);
+    font-size: 12px; color: var(--ink-2);
+  }
+  .meta-chip.copyable { cursor: pointer; transition: border-color .14s, background .14s; }
+  .meta-chip.copyable:hover { background: var(--surface-hover); border-color: var(--border-strong); color: var(--ink); }
 
-  /* Cards, grids, tables */
+  /* Grids & Bento Cards */
   .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
   .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
-  @media (max-width: 1080px) { .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .grid-2 { grid-template-columns: 1fr; } }
-  @media (max-width: 780px) { .shell { flex-direction: column; } .sidebar { width: 100%; height: auto; position: static; } .main { padding: 18px; border-left: none; border-top: 1px solid var(--border); } }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 
-  .card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
-  .card-subtle { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
-  .card-title { font-size: 14px; font-weight: 600; margin: 0 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .kpi-label { font-size: 12px; color: var(--text-muted); }
-  .kpi-val { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; margin-top: 4px; }
-  .kpi-sub { font-size: 12px; color: var(--text-faint); margin-top: 4px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 15px;
+    padding: 18px 20px;
+    box-shadow: var(--shadow-card);
+    transition: border-color .16s, box-shadow .16s, transform .16s;
+  }
+  .card-subtle {
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 18px;
+  }
+  .kpi-card {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 15px;
+    padding: 16px 18px;
+    box-shadow: var(--shadow-card);
+    transition: transform .18s cubic-bezier(.2, .8, .2, 1), box-shadow .18s, border-color .18s;
+  }
+  .kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-card-hover);
+    border-color: var(--border-strong);
+  }
+  .kpi-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+  .kpi-label { font-size: 12.5px; font-weight: 550; color: var(--ink-2); }
+  .kpi-icon {
+    width: 30px; height: 30px; border-radius: 9px;
+    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .kpi-icon svg { width: 15px; height: 15px; }
+  .kpi-icon.green { background: var(--brand-soft); color: var(--brand); }
+  .kpi-icon.blue { background: var(--accent-soft); color: var(--accent); }
+  .kpi-icon.violet { background: var(--violet-soft); color: var(--violet); }
+  .kpi-icon.amber { background: var(--warn-soft); color: var(--warn); }
 
-  .banner { padding: 11px 14px; border-radius: 9px; margin-bottom: 18px; font-size: 13px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-  .banner-warn { background: var(--warn-soft); color: var(--warn); border: 1px solid rgba(245,158,11,.28); }
-  .banner-danger { background: var(--danger-soft); color: var(--danger); border: 1px solid rgba(239,68,68,.28); }
-  .banner-ok { background: var(--ok-soft); color: var(--ok); border: 1px solid rgba(34,197,94,.28); }
+  .kpi-val {
+    font-size: 27px; font-weight: 700; letter-spacing: -.03em; line-height: 1.12;
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .kpi-sub { font-size: 12px; color: var(--ink-3); margin-top: 7px; line-height: 1.4; }
 
-  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+  .card-title {
+    font-size: 14.5px; font-weight: 650; letter-spacing: -.01em;
+    margin: 0 0 14px;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  }
+  .card-title-left { display: inline-flex; align-items: center; gap: 8px; }
+  .card-title-left svg { width: 16px; height: 16px; color: var(--brand); }
+
+  /* Visual Cluster Topology Strip */
+  .topo-box {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 14px 16px; border-radius: 12px; margin-bottom: 14px;
+    background: linear-gradient(135deg, var(--surface-subtle), var(--brand-soft));
+    border: 1px solid var(--border);
+  }
+  .topo-node {
+    display: flex; align-items: center; gap: 9px; min-width: 0;
+    background: var(--surface); border: 1px solid var(--border);
+    padding: 8px 12px; border-radius: 10px; box-shadow: var(--shadow-card);
+    max-width: 44%;
+  }
+  .topo-node-badge {
+    width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .topo-node-badge.primary { background: var(--brand-soft); color: var(--brand); }
+  .topo-node-badge.backup { background: var(--warn-soft); color: var(--warn); }
+  .topo-node-badge svg { width: 15px; height: 15px; }
+  .topo-node-text { min-width: 0; }
+  .topo-node-name { font-weight: 650; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .topo-node-sub { font-size: 11px; color: var(--ink-3); }
+  .topo-link {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 56px;
+  }
+  .topo-line {
+    width: 100%; height: 2px; border-radius: 2px;
+    background: repeating-linear-gradient(90deg, var(--brand) 0 6px, transparent 6px 12px);
+    background-size: 24px 2px;
+    animation: flow 1.1s linear infinite;
+  }
+  .topo-line.idle { background: var(--border-strong); animation: none; }
+  @keyframes flow { from { background-position: 0 0; } to { background-position: 24px 0; } }
+  .topo-caption { font-size: 11px; font-weight: 600; color: var(--brand); white-space: nowrap; }
+
+  /* Telemetry Footer Strip */
+  .telemetry-strip {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px;
+    padding: 14px 18px; border-radius: 14px;
+    background: var(--surface-subtle); border: 1px solid var(--border);
+  }
+  .tele-item { display: flex; flex-direction: column; gap: 2px; }
+  .tele-label { font-size: 11.5px; color: var(--ink-3); }
+  .tele-val { font-size: 13px; font-weight: 600; color: var(--ink); }
+
+  /* Banners */
+  .banner {
+    padding: 12px 15px; border-radius: 12px; margin-bottom: 18px; font-size: 13px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  .banner-inner { display: flex; align-items: center; gap: 9px; }
+  .banner-inner svg { width: 16px; height: 16px; flex-shrink: 0; }
+  .banner-warn { background: var(--warn-soft); color: var(--warn); border: 1px solid rgba(217, 119, 6, .24); }
+  .banner-danger { background: var(--danger-soft); color: var(--danger); border: 1px solid rgba(220, 38, 38, .24); }
+  .banner-ok { background: var(--ok-soft); color: var(--ok); border: 1px solid rgba(31, 122, 68, .24); }
+
+  /* Tables */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { text-align: left; font-weight: 600; font-size: 12px; color: var(--text-muted); background: var(--bg-subtle); padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-  td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th {
+    text-align: left; font-weight: 600; font-size: 11.5px; letter-spacing: .02em;
+    color: var(--ink-3); background: var(--surface-subtle);
+    padding: 10px 14px; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  td { padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
   tr:last-child td { border-bottom: none; }
-  tr:hover td { background: var(--bg-subtle); }
+  tbody tr { transition: background .12s; }
+  tbody tr:hover td { background: var(--surface-subtle); }
 
-  /* Controls */
-  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 13px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--bg-surface); color: var(--text); font-size: 13px; font-weight: 500; cursor: pointer; transition: background .12s, border-color .12s; white-space: nowrap; }
-  .btn:hover:not(:disabled) { background: var(--bg-hover); }
-  .btn:disabled { opacity: .48; cursor: not-allowed; }
-  .btn-sm { padding: 4px 9px; font-size: 12px; border-radius: 7px; }
-  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
-  .btn-danger { color: var(--danger); border-color: rgba(220,38,38,.35); background: var(--danger-soft); }
+  /* Avatar Monogram */
+  .user-cell { display: flex; align-items: center; gap: 10px; }
+  .avatar {
+    width: 32px; height: 32px; border-radius: 10px; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12.5px; letter-spacing: -.02em;
+  }
+
+  /* Controls & Buttons (Obsidian Dark CTA matching quiet.md) */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 8px 14px; border-radius: 10px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface); color: var(--ink);
+    font-size: 13px; font-weight: 550; cursor: pointer;
+    transition: background .14s, border-color .14s, transform .14s, box-shadow .14s;
+    white-space: nowrap; text-decoration: none;
+  }
+  .btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+  .btn:hover:not(:disabled) { background: var(--surface-hover); text-decoration: none; transform: translateY(-1px); }
+  .btn:active:not(:disabled) { transform: translateY(0); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 8px; }
+
+  .btn-primary {
+    background: var(--dark); border-color: var(--dark); color: #fff;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .14) inset, 0 6px 18px -6px rgba(0, 0, 0, .38);
+  }
+  :root[data-theme="dark"] .btn-primary { color: #121312; }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--dark-hover); border-color: var(--dark-hover);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .16) inset, 0 10px 22px -6px rgba(0, 0, 0, .46);
+  }
+  .btn-brand {
+    background: var(--brand); border-color: var(--brand); color: #fff;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .18) inset, 0 6px 18px -6px rgba(47, 125, 79, .45);
+  }
+  :root[data-theme="dark"] .btn-brand { color: #0b1b11; }
+  .btn-brand:hover:not(:disabled) { background: var(--brand-deep); border-color: var(--brand-deep); }
+  .btn-danger { color: var(--danger); border-color: rgba(220, 38, 38, .30); background: var(--danger-soft); }
   .btn-danger:hover:not(:disabled) { background: var(--danger); color: #fff; border-color: var(--danger); }
 
-  .input, select { width: 100%; padding: 8px 11px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-surface); color: var(--text); font-size: 13.5px; outline: none; }
-  .input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-  .field { margin-bottom: 13px; }
-  .field label { display: block; font-size: 12.5px; font-weight: 500; color: var(--text-muted); margin-bottom: 5px; }
-  .field-hint { font-size: 11.5px; color: var(--text-faint); margin-top: 4px; }
+  /* Inputs & Switch */
+  .input, select {
+    width: 100%; padding: 9px 12px;
+    border: 1px solid var(--border-strong); border-radius: 10px;
+    background: var(--surface); color: var(--ink);
+    font-size: 13.5px; outline: none;
+    transition: border-color .14s, box-shadow .14s, background .14s;
+  }
+  .input:focus, select:focus { border-color: var(--brand); box-shadow: 0 0 0 3.5px var(--brand-soft); }
+  .input-icon-wrap { position: relative; flex: 1; max-width: 320px; }
+  .input-icon-wrap svg {
+    position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+    width: 15px; height: 15px; color: var(--ink-3); pointer-events: none;
+  }
+  .input-icon-wrap .input { padding-left: 34px; }
+
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12.5px; font-weight: 550; color: var(--ink-2); margin-bottom: 6px; }
+  .field-hint { font-size: 11.5px; color: var(--ink-3); margin-top: 5px; line-height: 1.45; }
+
+  /* Apple-style Toggle Switch */
+  .field label.switch-row,
+  .switch-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 11px 13px; border-radius: 11px; margin-bottom: 0;
+    background: var(--surface-subtle); border: 1px solid var(--border);
+    cursor: pointer; user-select: none;
+  }
+  .switch-text strong { display: block; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+  .switch-text span { display: block; font-size: 11.5px; color: var(--ink-3); }
+  .switch {
+    display: inline-block; position: relative; width: 42px; height: 24px; flex-shrink: 0;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .switch-slider {
+    position: absolute; inset: 0; border-radius: 999px;
+    background: var(--border-strong); transition: background .2s;
+  }
+  .switch-slider::before {
+    content: ""; position: absolute; left: 3px; top: 3px; width: 18px; height: 18px;
+    border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+    transition: transform .2s cubic-bezier(.2, .8, .2, 1);
+  }
+  .switch input:checked + .switch-slider { background: var(--brand); }
+  .switch input:checked + .switch-slider::before { transform: translateX(18px); }
+  .switch input:focus-visible + .switch-slider { box-shadow: 0 0 0 3px var(--brand-ring); }
+
   .row { display: flex; align-items: center; gap: 10px; }
   .row-between { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 
-  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+  /* Status Pills */
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 9px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  }
   .pill-ok { background: var(--ok-soft); color: var(--ok); }
   .pill-warn { background: var(--warn-soft); color: var(--warn); }
   .pill-danger { background: var(--danger-soft); color: var(--danger); }
-  .pill-muted { background: var(--bg-hover); color: var(--text-muted); }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .pill-brand { background: var(--brand-soft); color: var(--brand); }
+  .pill-muted { background: var(--surface-hover); color: var(--ink-2); }
+  .dot { width: 6.5px; height: 6.5px; border-radius: 50%; background: currentColor; }
 
-  .bar { height: 7px; border-radius: 999px; background: var(--bg-hover); overflow: hidden; display: flex; }
-  .bar-fill { height: 100%; background: var(--accent); transition: width .25s; }
-  .bar-fill-2 { height: 100%; background: #10b981; }
-  .bar-fill-3 { height: 100%; background: #f59e0b; }
+  /* Progress & Stacked Bars */
+  .bar { height: 7px; border-radius: 999px; background: var(--surface-hover); overflow: hidden; display: flex; gap: 2px; }
+  .bar-lg { height: 14px; border-radius: 999px; padding: 2px; background: var(--surface-subtle); border: 1px solid var(--border); }
+  .bar-fill { height: 100%; background: var(--brand); border-radius: 999px; transition: width .35s cubic-bezier(.2, .8, .2, 1); }
+  .bar-seg-db { height: 100%; background: #2563eb; border-radius: 999px; transition: width .35s; }
+  .bar-seg-wal { height: 100%; background: #f59e0b; border-radius: 999px; transition: width .35s; }
+  .bar-seg-blob { height: 100%; background: #2f7d4f; border-radius: 999px; transition: width .35s; }
 
-  /* Auth screen */
-  .auth-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
-  .auth-card { width: 100%; max-width: 410px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 14px; padding: 28px; box-shadow: var(--shadow-md); }
-  .auth-card h2 { margin: 0 0 6px; font-size: 19px; }
-  .auth-card p { margin: 0 0 18px; color: var(--text-muted); font-size: 13px; }
+  .legend-grid {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 14px;
+  }
+  .legend-tile {
+    padding: 10px 12px; border-radius: 11px;
+    background: var(--surface-subtle); border: 1px solid var(--border);
+  }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .legend-label { font-size: 11.5px; color: var(--ink-3); display: flex; align-items: center; }
+  .legend-val { font-size: 14.5px; font-weight: 700; margin-top: 3px; }
+
+  /* Empty States */
+  .empty-state {
+    text-align: center; padding: 28px 20px; border-radius: 13px;
+    background: var(--surface-subtle); border: 1px dashed var(--border-strong);
+  }
+  .empty-icon {
+    width: 40px; height: 40px; border-radius: 12px; margin: 0 auto 10px;
+    background: var(--surface); border: 1px solid var(--border);
+    display: inline-flex; align-items: center; justify-content: center; color: var(--brand);
+    box-shadow: var(--shadow-card);
+  }
+  .empty-icon svg { width: 20px; height: 20px; }
+  .empty-title { font-weight: 650; font-size: 14px; margin-bottom: 4px; }
+  .empty-desc { font-size: 12.5px; color: var(--ink-2); max-width: 440px; margin: 0 auto; line-height: 1.55; }
 
   /* Modal */
-  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.42); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
-  .modal { width: 100%; max-width: 640px; max-height: 86vh; overflow-y: auto; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px 24px; box-shadow: var(--shadow-md); }
-  .modal-sm { max-width: 440px; }
-  .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-  .modal-head h3 { margin: 0; font-size: 16px; }
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(10, 16, 14, .46);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    display: flex; align-items: center; justify-content: center; z-index: 60; padding: 20px;
+    animation: fadeUp .18s ease both;
+  }
+  .modal {
+    width: 100%; max-width: 680px; max-height: 86vh; overflow-y: auto;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 18px; padding: 24px 26px; box-shadow: var(--shadow-modal);
+  }
+  .modal-sm { max-width: 450px; }
+  .modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  .modal-head h3 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -.015em; }
 
-  .toast-wrap { position: fixed; right: 20px; bottom: 20px; z-index: 80; display: flex; flex-direction: column; gap: 8px; }
-  .toast { background: var(--text); color: var(--bg-surface); padding: 10px 14px; border-radius: 9px; font-size: 13px; box-shadow: var(--shadow-md); max-width: 360px; }
-  .toast-err { background: var(--danger); color: #fff; }
+  /* Toast */
+  .toast-wrap { position: fixed; right: 22px; bottom: 22px; z-index: 90; display: flex; flex-direction: column; gap: 8px; }
+  .toast {
+    display: inline-flex; align-items: center; gap: 9px;
+    background: rgba(24, 25, 27, .94); color: #fff;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    padding: 11px 15px; border-radius: 12px; font-size: 13px; font-weight: 500;
+    box-shadow: 0 14px 36px -8px rgba(0, 0, 0, .42); max-width: 380px;
+    border: 1px solid rgba(255, 255, 255, .12);
+    animation: fadeUp .22s cubic-bezier(.2, .8, .2, 1) both;
+  }
+  .toast svg { width: 15px; height: 15px; flex-shrink: 0; color: #4ade80; }
+  .toast-err { background: rgba(185, 28, 28, .95); }
+  .toast-err svg { color: #fecaca; }
+
+  /* Responsive Breakpoints */
+  @media (max-width: 1120px) {
+    .grid-4, .telemetry-strip, .legend-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-2 { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 840px) {
+    .window-stage { padding: 0 10px 18px; }
+    .app-window { flex-direction: column; height: auto; min-height: auto; border-radius: 16px; }
+    .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); padding: 14px; overflow-y: visible; }
+    .win-chrome { display: none; }
+    .nav { flex-direction: row; overflow-x: auto; gap: 4px; }
+    .nav button { width: auto; flex-shrink: 0; padding: 7px 11px; }
+    .nav-group-label { display: none; }
+    .sidebar-footer { flex-direction: row; align-items: center; justify-content: space-between; }
+    .main { padding: 20px 18px 34px; overflow-y: visible; }
+    .topo-box { flex-direction: column; align-items: stretch; }
+    .topo-node { max-width: 100%; }
+  }
+  @media (max-width: 560px) {
+    .grid-4, .telemetry-strip, .legend-grid, .grid-3 { grid-template-columns: 1fr; }
+    .topbar-tag, .topbar-hide-sm { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .anim-in, .app-window, .pulse-dot::after, .topo-line { animation: none !important; }
+  }
 </style>
 </head>
 <body>
+<div class="sky-backdrop" aria-hidden="true"></div>
+<div class="sky-wash" aria-hidden="true"></div>
 
-<div id="auth-view" class="auth-wrap hidden">
-  <div class="auth-card">
-    <div class="row" style="margin-bottom:14px;">
-      <span class="brand-dot"></span>
-      <strong>Quiet.md Sync Portal</strong>
-      <span id="auth-version" class="faint mono" style="margin-left:auto;"></span>
+<div class="page-shell">
+  <!-- Floating Topbar matching quiet.md -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <img src="/portal/assets/logo.png" alt="Quiet.md">
+      <span>quiet.md</span>
+      <span class="topbar-tag">Sync Portal</span>
     </div>
-    <h2 id="auth-title">管理员登录</h2>
-    <p id="auth-desc">请输入本机管理员密码以进入运维控制台。</p>
-    <form id="auth-form">
-      <div id="setup-extra" class="hidden">
-        <div class="field">
-          <label>节点名称</label>
-          <input id="setup-node-name" class="input" placeholder="例如：Primary-Tokyo 或 NAS-Backup">
+    <div class="topbar-end">
+      <span id="top-role-pill" class="glass-pill static hidden"></span>
+      <a id="top-peer-jump" class="glass-pill hidden" target="_blank" rel="noopener noreferrer"></a>
+      <span id="top-live-pill" class="glass-pill static topbar-hide-sm hidden" title="每 5 秒自动同步最新状态">
+        <span class="pulse-dot live" style="color:var(--brand);"></span>
+        <span>实时监控</span>
+      </span>
+      <span id="top-version-pill" class="glass-pill static mono topbar-hide-sm">v—</span>
+      <button type="button" id="btn-theme-toggle" class="glass-pill glass-pill-icon" title="切换日间 / 暮色主题" aria-label="切换主题"></button>
+    </div>
+  </header>
+
+  <!-- ==================== AUTH / SETUP HERO ==================== -->
+  <div id="auth-view" class="auth-stage hidden">
+    <div class="auth-hero anim-in">
+      <div class="hero-badge">
+        <b id="auth-badge-tag">Self-Hosted</b>
+        <span id="auth-badge-text">本地优先 · 零知识加密 · 主从容灾同步</span>
+      </div>
+      <h1 id="auth-hero-heading">欢迎回到<br><span class="hl">Quiet.md Sync</span></h1>
+      <p id="auth-desc">请输入本机管理员密码以进入同步服务运维控制台。</p>
+    </div>
+
+    <div class="auth-card anim-in">
+      <div class="auth-card-head">
+        <img src="/portal/assets/logo.png" alt="">
+        <div style="min-width:0;flex:1;">
+          <div id="auth-title" class="auth-card-head-title">管理员登录</div>
+          <div id="auth-node-sub" class="auth-card-head-sub">Quiet.md Sync Portal</div>
+        </div>
+        <span id="auth-version" class="pill pill-brand mono"></span>
+      </div>
+
+      <form id="auth-form">
+        <div id="setup-extra" class="hidden">
+          <div class="field">
+            <label>节点名称</label>
+            <input id="setup-node-name" class="input" placeholder="例如：Primary-Tokyo 或 NAS-Backup">
+          </div>
+          <div class="field">
+            <label>本机 Portal 访问地址（供主备双向快捷跳转）</label>
+            <input id="setup-portal-url" class="input" placeholder="例如：https://sync.example.com">
+          </div>
         </div>
         <div class="field">
-          <label>本机 Portal 访问地址（供主备双向快捷跳转）</label>
-          <input id="setup-portal-url" class="input" placeholder="例如：https://sync.example.com">
+          <label>管理员密码</label>
+          <input id="auth-password" type="password" class="input" required autocomplete="current-password" placeholder="至少 8 位字符">
         </div>
-      </div>
-      <div class="field">
-        <label>管理员密码</label>
-        <input id="auth-password" type="password" class="input" required autocomplete="current-password" placeholder="至少 8 位字符">
-      </div>
-      <div id="setup-confirm-wrap" class="field hidden">
-        <label>确认管理员密码</label>
-        <input id="auth-password-confirm" type="password" class="input" autocomplete="new-password" placeholder="再次输入密码">
-      </div>
-      <div id="auth-error" class="banner banner-danger hidden" style="margin-bottom:12px;"></div>
-      <button type="submit" id="auth-submit" class="btn btn-primary" style="width:100%;padding:9px 14px;">登录</button>
-    </form>
+        <div id="setup-confirm-wrap" class="field hidden">
+          <label>确认管理员密码</label>
+          <input id="auth-password-confirm" type="password" class="input" autocomplete="new-password" placeholder="再次输入管理员密码">
+        </div>
+        <div id="auth-error" class="banner banner-danger hidden" style="margin-bottom:14px;"></div>
+        <button type="submit" id="auth-submit" class="btn btn-primary" style="width:100%;padding:10px 16px;font-size:14px;">登录控制台</button>
+      </form>
+    </div>
+
+    <div class="auth-footer">
+      <span>© 2026 quiet.md</span>
+      <span>·</span>
+      <span>Rust + SQLite WAL + XChaCha20-Poly1305</span>
+    </div>
   </div>
-</div>
 
-<div id="app-view" class="shell hidden">
-  <aside class="sidebar">
-    <div class="brand">
-      <div class="brand-title"><span class="brand-dot"></span>Quiet.md Sync</div>
-      <div id="sb-node-name" class="brand-node"></div>
-      <div id="sb-role-badge" class="role-badge role-primary">主服务器</div>
-    </div>
-
-    <nav class="nav">
-      <button data-tab="overview" class="active"><span>概览</span></button>
-      <button data-tab="users"><span>用户管理</span><span id="nav-user-count" class="faint num"></span></button>
-      <button data-tab="storage"><span>存储使用</span></button>
-      <button data-tab="replication"><span>主从备份</span><span id="nav-repl-badge" class="faint num"></span></button>
-    </nav>
-
-    <div id="sb-peer-box" class="peer-box hidden"></div>
-
-    <div class="sidebar-footer">
-      <div class="row-between" style="font-size:11.5px;padding:0 4px;">
-        <span class="faint">版本</span>
-        <span id="sb-version" class="mono faint"></span>
-      </div>
-      <div class="sidebar-footer-row">
-        <button id="btn-change-pw" class="btn btn-sm" style="flex:1;">修改密码</button>
-        <button id="btn-logout" class="btn btn-sm" style="flex:1;">退出</button>
-      </div>
-    </div>
-  </aside>
-
-  <main class="main">
-    <div id="global-backup-banner" class="banner banner-warn hidden">
-      <span>当前服务器运行在 <strong>备份模式（只读）</strong>，业务数据由主服务器实时同步，本地写入与删除用户已锁定。</span>
-      <span id="banner-primary-link"></span>
-    </div>
-
-    <!-- Tab: Overview -->
-    <section id="tab-overview">
-      <div class="page-head">
-        <div>
-          <h1>服务概览</h1>
-          <div id="ov-subtitle" class="page-sub"></div>
-        </div>
-        <div class="row">
-          <button id="btn-run-gc" class="btn">执行垃圾回收 (GC)</button>
-          <button id="btn-refresh-all" class="btn">刷新</button>
-        </div>
-      </div>
-
-      <div class="grid-4" id="ov-kpis"></div>
-
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-title">
-            <span>主从集群状态</span>
-            <button class="btn btn-sm" data-action="switch-tab" data-tab="replication">管理备份 →</button>
-          </div>
-          <div id="ov-cluster-body"></div>
+  <!-- ==================== FLOATING APP WINDOW ==================== -->
+  <div id="app-view" class="window-stage hidden">
+    <div class="app-window">
+      <aside class="sidebar">
+        <div class="win-chrome">
+          <div class="traffic-lights" aria-hidden="true"><i></i><i></i><i></i></div>
+          <span id="sb-uptime-mini" class="faint mono" style="font-size:11px;"></span>
         </div>
 
-        <div class="card">
-          <div class="card-title"><span>节点与注册设置</span></div>
-          <form id="node-settings-form">
-            <div class="field">
-              <label>节点名称</label>
-              <input id="set-node-name" class="input" maxlength="128">
+        <div class="node-card">
+          <div class="node-card-top">
+            <img src="/portal/assets/logo.png" alt="">
+            <div class="node-card-meta">
+              <div id="sb-node-name" class="node-card-name">Quiet.md Sync</div>
+              <div id="sb-node-id" class="node-card-sub mono"></div>
             </div>
-            <div class="field">
-              <label>本机 Portal 访问地址</label>
-              <div class="row">
-                <input id="set-portal-url" class="input" placeholder="http://192.168.1.50:8787 或 https://sync.example.com">
-                <button type="button" class="btn btn-sm" id="btn-fill-origin">当前地址</button>
+          </div>
+          <div id="sb-role-badge" class="role-badge role-primary">
+            <span class="pulse-dot live"></span>
+            <span>主服务器</span>
+          </div>
+        </div>
+
+        <div class="nav-group-label">控制台</div>
+        <nav class="nav">
+          <button data-tab="overview" class="active">
+            <span class="nav-left">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg>
+              <span>服务概览</span>
+            </span>
+          </button>
+          <button data-tab="users">
+            <span class="nav-left">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span>用户管理</span>
+            </span>
+            <span id="nav-user-count" class="nav-chip num">0</span>
+          </button>
+          <button data-tab="storage">
+            <span class="nav-left">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+              <span>存储使用</span>
+            </span>
+          </button>
+          <button data-tab="replication">
+            <span class="nav-left">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M9 6h6"/><path d="M18 9v6"/><path d="M6 9v3a6 6 0 0 0 6 6h3"/></svg>
+              <span>主从备份</span>
+            </span>
+            <span id="nav-repl-badge" class="nav-chip num"></span>
+          </button>
+        </nav>
+
+        <div id="sb-peer-box" class="peer-box hidden"></div>
+
+        <div class="sidebar-footer">
+          <div class="sidebar-meta-row">
+            <span id="sb-backend-tag">本地文件系统</span>
+            <span id="sb-version" class="mono"></span>
+          </div>
+          <div class="sidebar-footer-row">
+            <button id="btn-change-pw" class="btn btn-sm" style="flex:1;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <span>改密</span>
+            </button>
+            <button id="btn-logout" class="btn btn-sm" style="flex:1;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              <span>退出</span>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div id="global-backup-banner" class="banner banner-warn hidden">
+          <div class="banner-inner">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span>当前服务器运行在 <strong>备份模式（只读）</strong>，业务数据由主服务器实时同步，本地写入与删除操作已锁定。</span>
+          </div>
+          <span id="banner-primary-link"></span>
+        </div>
+
+        <!-- ==================== TAB: OVERVIEW ==================== -->
+        <section id="tab-overview">
+          <div class="page-head">
+            <div>
+              <h1>服务概览</h1>
+              <div id="ov-subtitle" class="page-sub"></div>
+            </div>
+            <div class="row">
+              <button id="btn-run-gc" class="btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                <span>垃圾回收 (GC)</span>
+              </button>
+              <button id="btn-refresh-all" class="btn btn-primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                <span>刷新状态</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="grid-4" id="ov-kpis"></div>
+
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-title">
+                <span class="card-title-left">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M9 6h6"/><path d="M18 9v6"/><path d="M6 9v3a6 6 0 0 0 6 6h3"/></svg>
+                  <span>主从集群拓扑</span>
+                </span>
+                <button class="btn btn-sm" data-action="switch-tab" data-tab="replication">管理备份 →</button>
               </div>
-              <div class="field-hint">主备连接时会上报给对方，用于对方的「快捷跳转 Portal」按钮。</div>
+              <div id="ov-cluster-body"></div>
             </div>
-            <div class="field" id="set-register-group">
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text);">
-                <input id="set-allow-register" type="checkbox"> 开放新用户注册
-              </label>
-            </div>
-            <div class="field" id="set-invite-group">
-              <label>注册邀请码（留空表示无需邀请码）</label>
-              <input id="set-invite-code" class="input" placeholder="可选邀请码">
-            </div>
-            <button type="submit" class="btn btn-primary">保存设置</button>
-          </form>
-        </div>
-      </div>
-    </section>
 
-    <!-- Tab: Users -->
-    <section id="tab-users" class="hidden">
-      <div class="page-head">
-        <div>
-          <h1>用户管理</h1>
-          <div class="page-sub">查看注册用户、设备活跃状态与存储占用，支持级联删除用户。</div>
-        </div>
-      </div>
-      <div class="row" style="margin-bottom:14px;flex-wrap:wrap;">
-        <input id="user-search" class="input" style="max-width:300px;" placeholder="搜索邮箱、昵称或用户 ID...">
-        <select id="user-sort" style="max-width:190px;">
-          <option value="storage_desc">按存储占用降序</option>
-          <option value="created_desc">按注册时间降序</option>
-          <option value="created_asc">按注册时间升序</option>
-          <option value="email_asc">按邮箱 A-Z</option>
-        </select>
-        <button id="btn-search-users" class="btn">查询</button>
-        <span id="users-total-hint" class="muted" style="margin-left:auto;font-size:12.5px;"></span>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>用户</th>
-              <th>文档库</th>
-              <th>设备 (在线/活跃)</th>
-              <th>实体数</th>
-              <th>存储占用</th>
-              <th>最近活跃</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="users-tbody"></tbody>
-        </table>
-      </div>
-    </section>
+            <div class="card">
+              <div class="card-title">
+                <span class="card-title-left">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                  <span>节点与注册策略</span>
+                </span>
+              </div>
+              <form id="node-settings-form">
+                <div class="field">
+                  <label>节点名称</label>
+                  <input id="set-node-name" class="input" maxlength="128">
+                </div>
+                <div class="field">
+                  <label>本机 Portal 访问地址</label>
+                  <div class="row">
+                    <input id="set-portal-url" class="input" placeholder="https://sync.example.com 或 http://192.168.1.50:8787">
+                    <button type="button" class="btn btn-sm" id="btn-fill-origin">当前地址</button>
+                  </div>
+                  <div class="field-hint">主备连接时自动上报给对端，用于在集群视图中一键跳转管理后台。</div>
+                </div>
+                <div class="field" id="set-register-group">
+                  <label class="switch-row" for="set-allow-register">
+                    <div class="switch-text">
+                      <strong>开放新用户注册</strong>
+                      <span>允许桌面客户端通过本服务器注册新同步账号</span>
+                    </div>
+                    <span class="switch">
+                      <input id="set-allow-register" type="checkbox">
+                      <span class="switch-slider"></span>
+                    </span>
+                  </label>
+                </div>
+                <div class="field" id="set-invite-group">
+                  <label>注册邀请码（留空表示无需邀请码）</label>
+                  <input id="set-invite-code" class="input" placeholder="可选邀请码">
+                </div>
+                <button type="submit" class="btn btn-primary">保存节点设置</button>
+              </form>
+            </div>
+          </div>
 
-    <!-- Tab: Storage -->
-    <section id="tab-storage" class="hidden">
-      <div class="page-head">
-        <div>
-          <h1>存储使用情况</h1>
-          <div id="st-subtitle" class="page-sub"></div>
-        </div>
-        <button id="btn-st-gc" class="btn">立即清理孤儿块</button>
-      </div>
-      <div class="grid-4" id="st-kpis"></div>
-      <div class="card" style="margin-bottom:20px;">
-        <div class="card-title"><span>存储构成分布</span><span id="st-dedup-note" class="faint" style="font-size:12px;font-weight:400;"></span></div>
-        <div id="st-bar" class="bar" style="height:12px;margin-bottom:10px;"></div>
-        <div id="st-legend" class="row" style="flex-wrap:wrap;font-size:12.5px;gap:16px;"></div>
-      </div>
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-title"><span>用户存储排行</span></div>
+          <div id="ov-telemetry" class="telemetry-strip"></div>
+        </section>
+
+        <!-- ==================== TAB: USERS ==================== -->
+        <section id="tab-users" class="hidden">
+          <div class="page-head">
+            <div>
+              <h1>用户管理</h1>
+              <div class="page-sub">查看注册用户、设备在线活跃状态与云端存储占用，支持按需注销设备或级联删除账号。</div>
+            </div>
+            <span id="users-total-hint" class="pill pill-brand num">共 0 位用户</span>
+          </div>
+
+          <div class="row" style="margin-bottom:16px;flex-wrap:wrap;">
+            <div class="input-icon-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input id="user-search" class="input" placeholder="搜索邮箱、昵称或用户 ID...">
+            </div>
+            <select id="user-sort" style="max-width:196px;">
+              <option value="storage_desc">按存储占用降序</option>
+              <option value="created_desc">按注册时间降序</option>
+              <option value="created_asc">按注册时间升序</option>
+              <option value="email_asc">按邮箱 A-Z</option>
+            </select>
+            <button id="btn-search-users" class="btn btn-primary">查询</button>
+          </div>
+
           <div class="table-wrap">
             <table>
-              <thead><tr><th>用户</th><th>文档库</th><th>Blob</th><th>总占用</th></tr></thead>
-              <tbody id="st-top-users"></tbody>
+              <thead>
+                <tr>
+                  <th>用户</th>
+                  <th>文档库</th>
+                  <th>设备 (在线 / 活跃)</th>
+                  <th>实体数</th>
+                  <th>存储占用</th>
+                  <th>最近活跃</th>
+                  <th style="text-align:right;">操作</th>
+                </tr>
+              </thead>
+              <tbody id="users-tbody"></tbody>
             </table>
           </div>
-        </div>
-        <div class="card">
-          <div class="card-title"><span>文档库存储排行</span></div>
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>文档库</th><th>所属用户</th><th>加密</th><th>总占用</th></tr></thead>
-              <tbody id="st-top-vaults"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </section>
+        </section>
 
-    <!-- Tab: Replication -->
-    <section id="tab-replication" class="hidden">
-      <div class="page-head">
-        <div>
-          <h1>主从备份</h1>
-          <div class="page-sub">参考 MySQL 主从（WAL 快照 + 全局行级 Binlog + 内容寻址 Blob 队列），由内网备份节点主动连接主节点。</div>
-        </div>
-        <button id="btn-repl-refresh" class="btn">刷新状态</button>
-      </div>
-      <div id="repl-content"></div>
-    </section>
-  </main>
+        <!-- ==================== TAB: STORAGE ==================== -->
+        <section id="tab-storage" class="hidden">
+          <div class="page-head">
+            <div>
+              <h1>存储使用情况</h1>
+              <div id="st-subtitle" class="page-sub"></div>
+            </div>
+            <button id="btn-st-gc" class="btn btn-primary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              <span>立即清理孤儿块</span>
+            </button>
+          </div>
+
+          <div class="grid-4" id="st-kpis"></div>
+
+          <div class="card" style="margin-bottom:20px;">
+            <div class="card-title">
+              <span class="card-title-left">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                <span>物理存储构成与去重效率</span>
+              </span>
+              <span id="st-dedup-note" class="pill pill-brand"></span>
+            </div>
+            <div id="st-bar" class="bar bar-lg"></div>
+            <div id="st-legend" class="legend-grid"></div>
+          </div>
+
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-title"><span>用户存储排行</span></div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>用户</th><th>文档库</th><th>附件 Blob</th><th>总占用</th></tr></thead>
+                  <tbody id="st-top-users"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title"><span>文档库存储排行</span></div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>文档库</th><th>所属用户</th><th>加密</th><th>总占用</th></tr></thead>
+                  <tbody id="st-top-vaults"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== TAB: REPLICATION ==================== -->
+        <section id="tab-replication" class="hidden">
+          <div class="page-head">
+            <div>
+              <h1>主从备份</h1>
+              <div class="page-sub">WAL 快照 + 全局行级 Binlog + 内容寻址 Blob 队列，内网备份节点主动外连主节点实时同步。</div>
+            </div>
+            <button id="btn-repl-refresh" class="btn btn-primary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              <span>刷新状态</span>
+            </button>
+          </div>
+          <div id="repl-content"></div>
+        </section>
+      </main>
+    </div>
+  </div>
 </div>
 
 <div id="modal-root"></div>
@@ -396,6 +1170,29 @@ const state = {
   isSetupMode: false,
   pollTimer: null,
 };
+
+const ICON_SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>';
+const ICON_MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+const ICON_EXT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
+const ICON_SERVER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><line x1="6" y1="6.5" x2="6.01" y2="6.5"/><line x1="6" y1="17.5" x2="6.01" y2="17.5"/></svg>';
+const ICON_SHIELD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>';
+const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+const ICON_ALERT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+
+function applyTheme(theme) {
+  const dark = theme === 'dark';
+  if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+  else document.documentElement.removeAttribute('data-theme');
+  const btn = document.getElementById('btn-theme-toggle');
+  if (btn) btn.innerHTML = dark ? ICON_SUN : ICON_MOON;
+  try { localStorage.setItem('quiet-portal-theme', dark ? 'dark' : 'light'); } catch {}
+}
+
+(function initTheme() {
+  let saved = 'light';
+  try { saved = localStorage.getItem('quiet-portal-theme') || 'light'; } catch {}
+  applyTheme(saved);
+})();
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -442,19 +1239,47 @@ function fmtUptime(secs) {
   return `${m}分钟`;
 }
 
+function avatarStyle(seed) {
+  const palettes = [
+    ['rgba(47,125,79,.14)', '#1f7a44'],
+    ['rgba(37,99,235,.13)', '#2563eb'],
+    ['rgba(109,40,217,.13)', '#6d28d9'],
+    ['rgba(217,119,6,.14)', '#b45309'],
+    ['rgba(13,148,136,.14)', '#0f766e'],
+    ['rgba(219,39,119,.13)', '#be185d'],
+  ];
+  let h = 0;
+  const str = String(seed || 'Q');
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
+  const [bg, fg] = palettes[h % palettes.length];
+  return `background:${bg};color:${fg};`;
+}
+
+function avatarInitials(email, displayName) {
+  const src = (displayName || email || 'Q').trim();
+  return src.slice(0, 2).toUpperCase();
+}
+
 function toast(msg, isErr = false) {
   const el = document.createElement('div');
   el.className = 'toast' + (isErr ? ' toast-err' : '');
-  el.textContent = msg;
+  el.innerHTML = `${isErr ? ICON_ALERT : ICON_CHECK}<span>${esc(msg)}</span>`;
   document.getElementById('toast-wrap').appendChild(el);
   setTimeout(() => el.remove(), 3600);
 }
 
+async function copyText(text, label = '已复制到剪贴板') {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(label);
+  } catch {
+    toast('复制失败，请手动选中复制', true);
+  }
+}
+
 async function api(path, opts = {}) {
   const headers = Object.assign({ 'X-Quiet-Portal': '1' }, opts.headers || {});
-  if (opts.body !== undefined) {
-    headers['Content-Type'] = 'application/json';
-  }
+  if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
   const resp = await fetch(path, Object.assign({}, opts, {
     credentials: 'same-origin',
     headers,
@@ -463,9 +1288,7 @@ async function api(path, opts = {}) {
   if (resp.status === 204) return null;
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
-    if (resp.status === 401 && !path.startsWith('/api/admin/auth/')) {
-      showAuthView();
-    }
+    if (resp.status === 401 && !path.startsWith('/api/admin/auth/')) showAuthView();
     const err = new Error(data.message || `请求失败 (${resp.status})`);
     err.code = data.code || '';
     err.status = resp.status;
@@ -487,8 +1310,8 @@ function closeModal() {
 
 function replStateBadge(st) {
   switch (st) {
-    case 'streaming': return '<span class="pill pill-ok"><span class="dot"></span>实时同步中</span>';
-    case 'bootstrapping': return '<span class="pill pill-warn"><span class="dot"></span>全量快照同步中</span>';
+    case 'streaming': return '<span class="pill pill-ok"><span class="pulse-dot live"></span>实时同步中</span>';
+    case 'bootstrapping': return '<span class="pill pill-warn"><span class="pulse-dot live"></span>全量快照同步中</span>';
     case 'reconnecting': return '<span class="pill pill-warn"><span class="dot"></span>断线重连中</span>';
     case 'evicted': return '<span class="pill pill-danger"><span class="dot"></span>已被主服务器剔除</span>';
     default: return `<span class="pill pill-muted">${esc(st || '空闲')}</span>`;
@@ -498,7 +1321,9 @@ function replStateBadge(st) {
 async function checkAuth() {
   const st = await api('/api/admin/auth/status');
   state.auth = st;
-  document.getElementById('auth-version').textContent = 'v' + st.version;
+  const ver = 'v' + st.version;
+  document.getElementById('auth-version').textContent = ver;
+  document.getElementById('top-version-pill').textContent = ver;
   if (!st.initialized) {
     state.isSetupMode = true;
     showAuthView();
@@ -514,29 +1339,39 @@ function showAuthView() {
   stopPolling();
   document.getElementById('app-view').classList.add('hidden');
   document.getElementById('auth-view').classList.remove('hidden');
+  document.getElementById('top-role-pill').classList.add('hidden');
+  document.getElementById('top-peer-jump').classList.add('hidden');
+  document.getElementById('top-live-pill').classList.add('hidden');
   document.getElementById('auth-error').classList.add('hidden');
   document.getElementById('auth-password').value = '';
   document.getElementById('auth-password-confirm').value = '';
+  document.getElementById('auth-node-sub').textContent = state.auth?.node_name || 'Quiet.md Sync Portal';
+
   if (state.isSetupMode) {
+    document.getElementById('auth-badge-tag').textContent = 'First Setup';
+    document.getElementById('auth-hero-heading').innerHTML = '初始化你的<br><span class="hl">同步控制台</span>';
     document.getElementById('auth-title').textContent = '初始化管理员密码';
-    document.getElementById('auth-desc').textContent = '首次使用管理后台，请设置本机管理员密码（仅存本机，主从复制不会覆盖）。';
+    document.getElementById('auth-desc').textContent = '首次启动管理后台，请设置本机管理员密码（仅存本机，主从复制不会覆盖）。';
     document.getElementById('setup-extra').classList.remove('hidden');
     document.getElementById('setup-confirm-wrap').classList.remove('hidden');
     document.getElementById('setup-node-name').value = state.auth?.node_name || '';
     document.getElementById('setup-portal-url').value = state.auth?.portal_url || window.location.origin;
-    document.getElementById('auth-submit').textContent = '初始化并进入后台';
+    document.getElementById('auth-submit').textContent = '初始化并进入控制台';
   } else {
+    document.getElementById('auth-badge-tag').textContent = 'Self-Hosted';
+    document.getElementById('auth-hero-heading').innerHTML = '欢迎回到<br><span class="hl">Quiet.md Sync</span>';
     document.getElementById('auth-title').textContent = '管理员登录';
-    document.getElementById('auth-desc').textContent = `登录到 ${state.auth?.node_name || 'Quiet.md Sync'} 管理后台。`;
+    document.getElementById('auth-desc').textContent = `登录到 ${state.auth?.node_name || 'Quiet.md Sync'} 节点，管理用户、存储与主从实时备份。`;
     document.getElementById('setup-extra').classList.add('hidden');
     document.getElementById('setup-confirm-wrap').classList.add('hidden');
-    document.getElementById('auth-submit').textContent = '登录';
+    document.getElementById('auth-submit').textContent = '登录控制台';
   }
 }
 
 async function showAppView() {
   document.getElementById('auth-view').classList.add('hidden');
   document.getElementById('app-view').classList.remove('hidden');
+  document.getElementById('top-live-pill').classList.remove('hidden');
   await refreshAll();
   startPolling();
 }
@@ -588,32 +1423,54 @@ async function refreshAll() {
 function renderSidebar(ov) {
   const { node, stats, replicas, upstream } = ov;
   document.getElementById('sb-node-name').textContent = node.node_name;
+  document.getElementById('sb-node-id').textContent = node.node_id.slice(0, 12);
   document.getElementById('sb-version').textContent = 'v' + node.version;
+  document.getElementById('top-version-pill').textContent = 'v' + node.version;
+  document.getElementById('sb-uptime-mini').textContent = 'up ' + fmtUptime(node.uptime_secs);
+  document.getElementById('sb-backend-tag').textContent = node.storage_backend === 's3' ? 'S3 对象存储' : '本地文件系统';
   document.getElementById('nav-user-count').textContent = stats.user_count;
 
   const badge = document.getElementById('sb-role-badge');
+  const topRole = document.getElementById('top-role-pill');
+  const topPeer = document.getElementById('top-peer-jump');
   const globalBanner = document.getElementById('global-backup-banner');
   const peerBox = document.getElementById('sb-peer-box');
 
+  topRole.classList.remove('hidden');
+
   if (node.role === 'backup') {
     badge.className = 'role-badge role-backup';
-    badge.textContent = '备份服务器 · 只读';
+    badge.innerHTML = '<span class="pulse-dot live"></span><span>备份服务器 · 只读</span>';
+    topRole.innerHTML = '<span class="pulse-dot live" style="color:var(--warn);"></span><span>备份节点 · 只读</span>';
     globalBanner.classList.remove('hidden');
+
     const pLink = safePortalLink(upstream?.primary_portal_url || upstream?.primary_url);
     document.getElementById('banner-primary-link').innerHTML = pLink
-      ? `<a class="btn btn-sm" href="${esc(pLink)}" target="_blank" rel="noopener noreferrer">前往主服务器 Portal ↗</a>`
+      ? `<a class="btn btn-sm btn-primary" href="${esc(pLink)}" target="_blank" rel="noopener noreferrer">前往主服务器 Portal ${ICON_EXT}</a>`
       : '';
+    if (pLink) {
+      topPeer.classList.remove('hidden');
+      topPeer.href = pLink;
+      topPeer.innerHTML = `<span>主服务器 Portal</span>${ICON_EXT}`;
+    } else {
+      topPeer.classList.add('hidden');
+    }
+
     document.getElementById('nav-repl-badge').textContent = upstream ? (upstream.lag_lsn === 0 ? '已同步' : `-${upstream.lag_lsn}`) : '';
     if (upstream) {
+      const pct = upstream.primary_head_lsn === 0
+        ? (upstream.bootstrapped ? 100 : 0)
+        : Math.min(100, Math.round((upstream.applied_lsn / upstream.primary_head_lsn) * 100));
       peerBox.classList.remove('hidden');
       peerBox.innerHTML = `
-        <div class="peer-box-title">上游主服务器</div>
+        <div class="peer-box-title"><span>上游主服务器</span><span class="num">${pct}%</span></div>
         <div class="peer-item">
           <div class="peer-row">
             <span class="peer-name">${esc(upstream.primary_name)}</span>
             ${replStateBadge(upstream.state)}
           </div>
-          <div class="faint num" style="font-size:11.5px;">LSN ${upstream.applied_lsn} / ${upstream.primary_head_lsn}${upstream.blob_pending ? ` · 待同步附件 ${upstream.blob_pending}` : ''}</div>
+          <div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>
+          <div class="faint num" style="font-size:11.5px;">LSN ${upstream.applied_lsn} / ${upstream.primary_head_lsn}${upstream.blob_pending ? ` · 待同步 ${upstream.blob_pending}` : ''}</div>
           ${pLink ? `<a class="peer-jump" href="${esc(pLink)}" target="_blank" rel="noopener noreferrer">打开主服务器 Portal ↗</a>` : ''}
         </div>`;
     } else {
@@ -621,13 +1478,25 @@ function renderSidebar(ov) {
     }
   } else {
     badge.className = 'role-badge role-primary';
-    badge.textContent = '主服务器';
+    badge.innerHTML = '<span class="pulse-dot live"></span><span>主服务器 · Primary</span>';
+    topRole.innerHTML = '<span class="pulse-dot live" style="color:var(--brand);"></span><span>主服务器 · Primary</span>';
     globalBanner.classList.add('hidden');
+
     const onlineCount = replicas.filter(r => r.online).length;
-    document.getElementById('nav-repl-badge').textContent = replicas.length ? `${onlineCount}/${replicas.length}` : '';
+    document.getElementById('nav-repl-badge').textContent = replicas.length ? `${onlineCount}/${replicas.length}` : '0';
+
+    const firstLinked = replicas.find(r => safePortalLink(r.portal_url));
+    if (firstLinked) {
+      topPeer.classList.remove('hidden');
+      topPeer.href = safePortalLink(firstLinked.portal_url);
+      topPeer.innerHTML = `<span>${esc(firstLinked.name)} Portal</span>${ICON_EXT}`;
+    } else {
+      topPeer.classList.add('hidden');
+    }
+
     if (replicas.length > 0) {
       peerBox.classList.remove('hidden');
-      peerBox.innerHTML = `<div class="peer-box-title">备份服务器 (${onlineCount}/${replicas.length} 在线)</div>` +
+      peerBox.innerHTML = `<div class="peer-box-title"><span>备份节点</span><span class="num">${onlineCount}/${replicas.length} 在线</span></div>` +
         replicas.slice(0, 3).map(r => {
           const link = safePortalLink(r.portal_url);
           return `<div class="peer-item">
@@ -635,7 +1504,7 @@ function renderSidebar(ov) {
               <span class="peer-name">${esc(r.name)}</span>
               <span class="pill ${r.online ? 'pill-ok' : 'pill-muted'}"><span class="dot"></span>${r.online ? '在线' : '离线'}</span>
             </div>
-            ${link ? `<a class="peer-jump" href="${esc(link)}" target="_blank" rel="noopener noreferrer">打开备份 Portal ↗</a>` : '<span class="faint" style="font-size:11.5px;">未设置 Portal 地址</span>'}
+            ${link ? `<a class="peer-jump" href="${esc(link)}" target="_blank" rel="noopener noreferrer">打开备份 Portal ↗</a>` : '<span class="faint" style="font-size:11.5px;">未上报 Portal 地址</span>'}
           </div>`;
         }).join('');
     } else {
@@ -650,69 +1519,163 @@ async function loadOverview(silent = false) {
     state.overview = ov;
     renderSidebar(ov);
     const { node, stats, settings, replicas, upstream } = ov;
-    document.getElementById('ov-subtitle').textContent =
-      `节点 ID: ${node.node_id} · 存储后端: ${node.storage_backend === 's3' ? 'S3 对象存储' : '本地文件系统'} · 已运行 ${fmtUptime(node.uptime_secs)}`;
+
+    document.getElementById('ov-subtitle').innerHTML = `
+      <span class="meta-chip copyable mono" data-action="copy-text" data-copy="${esc(node.node_id)}" title="点击复制完整节点 ID">ID ${esc(node.node_id.slice(0, 12))}</span>
+      <span class="meta-chip">${node.storage_backend === 's3' ? 'S3 对象存储' : '本地文件系统'}</span>
+      <span class="meta-chip num">已稳定运行 ${fmtUptime(node.uptime_secs)}</span>`;
+
+    const dbBytes = stats.db_bytes + stats.wal_bytes + stats.shm_bytes;
+    const totalBytes = Math.max(1, stats.total_storage_bytes);
+    const dbPct = Math.round((dbBytes / totalBytes) * 100);
+    const blobPct = Math.max(0, 100 - dbPct);
 
     document.getElementById('ov-kpis').innerHTML = `
-      <div class="card">
-        <div class="kpi-label">用户总数</div>
+      <div class="kpi-card">
+        <div class="kpi-head">
+          <span class="kpi-label">注册用户</span>
+          <span class="kpi-icon green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>
+          </span>
+        </div>
         <div class="kpi-val num">${stats.user_count}</div>
-        <div class="kpi-sub">活跃设备 ${stats.active_device_count} / 总计 ${stats.device_count}</div>
+        <div class="kpi-sub">活跃设备 <strong class="num">${stats.active_device_count}</strong> / 总计 <span class="num">${stats.device_count}</span></div>
       </div>
-      <div class="card">
-        <div class="kpi-label">文档库与实体</div>
+
+      <div class="kpi-card">
+        <div class="kpi-head">
+          <span class="kpi-label">文档库与实体</span>
+          <span class="kpi-icon blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          </span>
+        </div>
         <div class="kpi-val num">${stats.vault_count}</div>
-        <div class="kpi-sub">活跃实体 ${stats.entity_count} · 变更日志 ${stats.op_log_count}</div>
+        <div class="kpi-sub">活跃实体 <strong class="num">${stats.entity_count}</strong> · 变更日志 <span class="num">${stats.op_log_count}</span></div>
       </div>
-      <div class="card">
-        <div class="kpi-label">实时连接</div>
-        <div class="kpi-val num">${stats.online_connections}</div>
-        <div class="kpi-sub">当前在线设备 ${stats.online_devices}</div>
+
+      <div class="kpi-card">
+        <div class="kpi-head">
+          <span class="kpi-label">实时长连接</span>
+          <span class="kpi-icon violet">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+          </span>
+        </div>
+        <div class="kpi-val num">
+          <span>${stats.online_connections}</span>
+          ${stats.online_connections > 0 ? '<span class="pill pill-ok" style="font-size:11px;"><span class="pulse-dot live"></span>在线</span>' : ''}
+        </div>
+        <div class="kpi-sub">当前在线客户端设备 <strong class="num">${stats.online_devices}</strong> 台</div>
       </div>
-      <div class="card">
-        <div class="kpi-label">总存储占用</div>
+
+      <div class="kpi-card">
+        <div class="kpi-head">
+          <span class="kpi-label">总存储占用</span>
+          <span class="kpi-icon amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+          </span>
+        </div>
         <div class="kpi-val num">${fmtBytes(stats.total_storage_bytes)}</div>
-        <div class="kpi-sub">DB ${fmtBytes(stats.db_bytes + stats.wal_bytes)} · Blob ${fmtBytes(stats.unique_blob_bytes)} (${stats.unique_blob_count}个)</div>
+        <div class="bar" style="margin-top:8px;height:5px;">
+          <div class="bar-seg-db" style="width:${dbPct}%"></div>
+          <div class="bar-seg-blob" style="width:${blobPct}%"></div>
+        </div>
+        <div class="kpi-sub">DB ${fmtBytes(dbBytes)} · Blob ${fmtBytes(stats.unique_blob_bytes)} (${stats.unique_blob_count})</div>
       </div>`;
 
     if (node.role === 'backup') {
       const pLink = safePortalLink(upstream?.primary_portal_url || upstream?.primary_url);
+      const streaming = upstream?.state === 'streaming';
+      const pct = !upstream || upstream.primary_head_lsn === 0
+        ? (upstream?.bootstrapped ? 100 : 0)
+        : Math.min(100, Math.round((upstream.applied_lsn / upstream.primary_head_lsn) * 100));
+
       document.getElementById('ov-cluster-body').innerHTML = upstream ? `
-        <div class="row-between" style="margin-bottom:10px;">
-          <div>
-            <div style="font-weight:600;">${esc(upstream.primary_name)}</div>
-            <div class="mono faint">${esc(upstream.primary_url)}</div>
+        <div class="topo-box">
+          <div class="topo-node">
+            <div class="topo-node-badge primary">${ICON_SERVER}</div>
+            <div class="topo-node-text">
+              <div class="topo-node-name">${esc(upstream.primary_name)}</div>
+              <div class="topo-node-sub">主服务器</div>
+            </div>
           </div>
+          <div class="topo-link">
+            <div class="topo-line ${streaming ? '' : 'idle'}"></div>
+            <div class="topo-caption num">${pct}% · 延迟 ${upstream.lag_lsn}</div>
+          </div>
+          <div class="topo-node">
+            <div class="topo-node-badge backup">${ICON_SHIELD}</div>
+            <div class="topo-node-text">
+              <div class="topo-node-name">${esc(node.node_name)}</div>
+              <div class="topo-node-sub">本机 · 备份</div>
+            </div>
+          </div>
+        </div>
+        <div class="row-between" style="margin-bottom:10px;">
+          <span class="mono faint" style="word-break:break-all;">${esc(upstream.primary_url)}</span>
           ${replStateBadge(upstream.state)}
         </div>
-        <div class="muted num" style="font-size:12.5px;margin-bottom:12px;">
-          同步位点 LSN ${upstream.applied_lsn} / ${upstream.primary_head_lsn}（延迟 ${upstream.lag_lsn}） · 待拉取附件 ${upstream.blob_pending} · 上次同步 ${fmtAgo(upstream.last_sync_at)}
+        <div class="muted num" style="font-size:12.5px;margin-bottom:14px;">
+          位点 LSN <strong>${upstream.applied_lsn}</strong> / ${upstream.primary_head_lsn} · 待拉取附件 <strong>${upstream.blob_pending}</strong> · 上次同步 ${fmtAgo(upstream.last_sync_at)}
         </div>
-        ${upstream.last_error ? `<div class="banner banner-danger" style="margin-bottom:10px;">${esc(upstream.last_error)}</div>` : ''}
-        ${pLink ? `<a class="btn btn-primary btn-sm" href="${esc(pLink)}" target="_blank" rel="noopener noreferrer">前往主服务器 Portal ↗</a>` : ''}
-      ` : '<div class="muted">未找到上游配置</div>';
+        ${upstream.last_error ? `<div class="banner banner-danger" style="margin-bottom:12px;">${esc(upstream.last_error)}</div>` : ''}
+        ${pLink ? `<a class="btn btn-primary btn-sm" href="${esc(pLink)}" target="_blank" rel="noopener noreferrer">前往主服务器 Portal ${ICON_EXT}</a>` : ''}
+      ` : '<div class="empty-state"><div class="empty-title">未找到上游主服务器配置</div></div>';
     } else {
+      const onlineReplicas = replicas.filter(r => r.online);
       document.getElementById('ov-cluster-body').innerHTML = replicas.length ? `
-        <div class="muted num" style="font-size:12.5px;margin-bottom:10px;">当前 Binlog LSN: <strong>${node.head_lsn}</strong>（已保留自 ${node.min_retained_lsn}）</div>
-        <div style="display:flex;flex-direction:column;gap:8px;">
+        <div class="topo-box">
+          <div class="topo-node">
+            <div class="topo-node-badge primary">${ICON_SERVER}</div>
+            <div class="topo-node-text">
+              <div class="topo-node-name">${esc(node.node_name)}</div>
+              <div class="topo-node-sub num">LSN ${node.head_lsn}</div>
+            </div>
+          </div>
+          <div class="topo-link">
+            <div class="topo-line ${onlineReplicas.length ? '' : 'idle'}"></div>
+            <div class="topo-caption num">${onlineReplicas.length}/${replicas.length} 实时同步</div>
+          </div>
+          <div class="topo-node">
+            <div class="topo-node-badge backup">${ICON_SHIELD}</div>
+            <div class="topo-node-text">
+              <div class="topo-node-name">${replicas.length === 1 ? esc(replicas[0].name) : `${replicas.length} 台备份节点`}</div>
+              <div class="topo-node-sub">热备灾备节点</div>
+            </div>
+          </div>
+        </div>
+        <div class="muted num" style="font-size:12px;margin-bottom:10px;">
+          Binlog 水位 LSN <strong>${node.head_lsn}</strong>（已保留自 ${node.min_retained_lsn}）
+        </div>
+        <div style="display:flex;flex-direction:column;gap:9px;">
           ${replicas.map(r => {
             const link = safePortalLink(r.portal_url);
-            return `<div class="card-subtle" style="padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-              <div>
+            const pct = node.head_lsn === 0 ? 100 : Math.min(100, Math.round((r.applied_lsn / node.head_lsn) * 100));
+            return `<div class="card-subtle" style="padding:11px 13px;">
+              <div class="row-between" style="margin-bottom:6px;">
                 <div class="row" style="gap:7px;">
                   <strong>${esc(r.name)}</strong>
                   <span class="pill ${r.online ? 'pill-ok' : 'pill-muted'}"><span class="dot"></span>${r.online ? '在线' : '离线'}</span>
                 </div>
-                <div class="faint num" style="font-size:12px;margin-top:2px;">LSN ${r.applied_lsn}/${node.head_lsn} · 延迟 ${r.lag_lsn} · 附件队列 ${r.blob_pending} · ${fmtAgo(r.last_seen_at)}</div>
-              </div>
-              <div class="row">
                 ${link ? `<a class="btn btn-sm" href="${esc(link)}" target="_blank" rel="noopener noreferrer">Portal ↗</a>` : ''}
               </div>
+              <div class="bar" style="height:5px;margin-bottom:6px;"><div class="bar-fill" style="width:${pct}%"></div></div>
+              <div class="faint num" style="font-size:11.5px;">LSN ${r.applied_lsn}/${node.head_lsn} · 延迟 ${r.lag_lsn} · 附件队列 ${r.blob_pending} · ${fmtAgo(r.last_seen_at)}</div>
             </div>`;
           }).join('')}
         </div>
-      ` : `<div class="muted" style="font-size:13px;">当前为主服务器模式（LSN ${node.head_lsn}），尚无备份服务器接入。<br>你可以在另一台部署的服务器上进入「主从备份」输入本机地址与管理员密码进行自动备份。</div>`;
+      ` : `
+        <div class="empty-state">
+          <div class="empty-icon">${ICON_SHIELD}</div>
+          <div class="empty-title">当前独立运行为主服务器</div>
+          <div class="empty-desc">当前 Binlog 位点 LSN <strong class="num">${node.head_lsn}</strong>，尚无备份节点接入。在另一台机器（如 NAS / 备用 VPS）部署后，进入「主从备份」填写本机地址与密码即可实现实时热备。</div>
+        </div>`;
     }
+
+    document.getElementById('ov-telemetry').innerHTML = `
+      <div class="tele-item"><span class="tele-label">单附件上限</span><span class="tele-val num">${settings.max_blob_mb} MB</span></div>
+      <div class="tele-item"><span class="tele-label">墓碑保留周期</span><span class="tele-val num">${settings.tombstone_days} 天</span></div>
+      <div class="tele-item"><span class="tele-label">Binlog 保留周期</span><span class="tele-val num">${settings.binlog_retention_days} 天</span></div>
+      <div class="tele-item"><span class="tele-label">复制纪元 (Epoch)</span><span class="tele-val mono">${esc(node.repl_epoch.slice(0, 12))}</span></div>`;
 
     if (!silent) {
       document.getElementById('set-node-name').value = node.node_name;
@@ -739,29 +1702,34 @@ async function loadUsers() {
     const maxBytes = Math.max(1, ...res.users.map(u => u.total_storage_bytes));
     const tbody = document.getElementById('users-tbody');
     if (!res.users.length) {
-      tbody.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:28px;">暂无匹配用户</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:34px;">暂无匹配用户</td></tr>';
       return;
     }
     tbody.innerHTML = res.users.map(u => {
       const pct = Math.min(100, Math.round((u.total_storage_bytes / maxBytes) * 100));
       return `<tr>
         <td>
-          <div style="font-weight:600;">${esc(u.email)}</div>
-          <div class="faint" style="font-size:12px;">${esc(u.display_name)} · <span class="mono">${esc(u.id.slice(0,8))}</span></div>
+          <div class="user-cell">
+            <div class="avatar" style="${avatarStyle(u.email)}">${esc(avatarInitials(u.email, u.display_name))}</div>
+            <div style="min-width:0;">
+              <div style="font-weight:650;">${esc(u.email)}</div>
+              <div class="faint" style="font-size:12px;">${esc(u.display_name)} · <span class="mono">${esc(u.id.slice(0, 8))}</span></div>
+            </div>
+          </div>
         </td>
-        <td class="num">${u.vault_count}</td>
+        <td class="num"><strong>${u.vault_count}</strong></td>
         <td class="num">
-          ${u.online_device_count > 0 ? `<span class="pill pill-ok"><span class="dot"></span>${u.online_device_count}</span> ` : ''}
-          <span class="muted">${u.active_device_count}/${u.device_count}</span>
+          ${u.online_device_count > 0 ? `<span class="pill pill-ok"><span class="pulse-dot live"></span>${u.online_device_count}</span> ` : ''}
+          <span class="muted">${u.active_device_count} / ${u.device_count}</span>
         </td>
         <td class="num">${u.entity_count}</td>
-        <td class="num" style="min-width:150px;">
+        <td class="num" style="min-width:165px;">
           <div><strong>${fmtBytes(u.total_storage_bytes)}</strong> <span class="faint" style="font-size:11.5px;">(${u.blob_count} 附件)</span></div>
-          <div class="bar" style="margin-top:4px;"><div class="bar-fill" style="width:${pct}%"></div></div>
+          <div class="bar" style="margin-top:5px;height:5px;"><div class="bar-fill" style="width:${pct}%"></div></div>
         </td>
         <td class="muted">${fmtAgo(u.last_seen_at)}</td>
         <td>
-          <div class="row" style="gap:6px;">
+          <div class="row" style="gap:6px;justify-content:flex-end;">
             <button class="btn btn-sm" data-action="user-detail" data-user-id="${esc(u.id)}">详情</button>
             <button class="btn btn-sm btn-danger" ${isBackup ? 'disabled title="备份节点只读"' : ''} data-action="confirm-delete-user" data-user-id="${esc(u.id)}">删除</button>
           </div>
@@ -779,44 +1747,47 @@ async function showUserDetail(userId) {
     const isBackup = state.overview?.node?.role === 'backup';
     openModal(`
       <div class="modal-head">
-        <div>
-          <h3>${esc(d.user.email)}</h3>
-          <div class="faint mono">${esc(d.user.id)} · 注册于 ${fmtTime(d.user.created_at)}</div>
+        <div class="user-cell">
+          <div class="avatar" style="${avatarStyle(d.user.email)};width:38px;height:38px;font-size:14px;">${esc(avatarInitials(d.user.email, d.user.display_name))}</div>
+          <div>
+            <h3>${esc(d.user.email)}</h3>
+            <div class="faint mono">${esc(d.user.id)} · 注册于 ${fmtTime(d.user.created_at)}</div>
+          </div>
         </div>
         <button class="btn btn-sm" data-action="close-modal">关闭</button>
       </div>
-      <div class="card-subtle" style="margin-bottom:14px;display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;">
-        <div>总存储：<strong class="num">${fmtBytes(d.user.total_storage_bytes)}</strong></div>
-        <div>实体数据：<strong class="num">${fmtBytes(d.user.entity_bytes)}</strong></div>
-        <div>附件 Blob：<strong class="num">${fmtBytes(d.user.blob_bytes)}</strong> (${d.user.blob_count}个)</div>
+      <div class="grid-3" style="margin-bottom:18px;">
+        <div class="card-subtle" style="padding:11px 13px;"><div class="kpi-label">总存储</div><div class="num" style="font-size:16px;font-weight:700;margin-top:2px;">${fmtBytes(d.user.total_storage_bytes)}</div></div>
+        <div class="card-subtle" style="padding:11px 13px;"><div class="kpi-label">实体数据</div><div class="num" style="font-size:16px;font-weight:700;margin-top:2px;">${fmtBytes(d.user.entity_bytes)}</div></div>
+        <div class="card-subtle" style="padding:11px 13px;"><div class="kpi-label">附件 Blob (${d.user.blob_count})</div><div class="num" style="font-size:16px;font-weight:700;margin-top:2px;">${fmtBytes(d.user.blob_bytes)}</div></div>
       </div>
-      <h4 style="margin:0 0 8px;font-size:13.5px;">文档库 (${d.vaults.length})</h4>
-      <div class="table-wrap" style="margin-bottom:16px;">
+      <h4 style="margin:0 0 8px;font-size:13.5px;font-weight:650;">文档库 (${d.vaults.length})</h4>
+      <div class="table-wrap" style="margin-bottom:18px;">
         <table>
-          <thead><tr><th>名称</th><th>E2EE</th><th>Seq</th><th>实体</th><th>存储</th><th>操作</th></tr></thead>
+          <thead><tr><th>名称</th><th>安全</th><th>Seq</th><th>实体</th><th>存储</th><th style="text-align:right;">操作</th></tr></thead>
           <tbody>
             ${d.vaults.length ? d.vaults.map(v => `<tr>
-              <td><strong>${esc(v.name)}</strong><div class="mono faint">${esc(v.id.slice(0,8))}</div></td>
-              <td>${v.e2ee_enabled ? '<span class="pill pill-ok">已加密</span>' : '<span class="pill pill-muted">明文</span>'}</td>
+              <td><strong>${esc(v.name)}</strong><div class="mono faint">${esc(v.id.slice(0, 8))}</div></td>
+              <td>${v.e2ee_enabled ? '<span class="pill pill-ok">E2EE 加密</span>' : '<span class="pill pill-muted">标准</span>'}</td>
               <td class="num">${v.head_seq}</td>
               <td class="num">${v.entity_count}</td>
               <td class="num">${fmtBytes(v.total_storage_bytes)}</td>
-              <td><button class="btn btn-sm btn-danger" ${isBackup ? 'disabled' : ''} data-action="delete-vault" data-vault-id="${esc(v.id)}" data-user-id="${esc(d.user.id)}">删除</button></td>
+              <td style="text-align:right;"><button class="btn btn-sm btn-danger" ${isBackup ? 'disabled' : ''} data-action="delete-vault" data-vault-id="${esc(v.id)}" data-user-id="${esc(d.user.id)}">删除</button></td>
             </tr>`).join('') : '<tr><td colspan="6" class="muted" style="text-align:center;">无文档库</td></tr>'}
           </tbody>
         </table>
       </div>
-      <h4 style="margin:0 0 8px;font-size:13.5px;">设备 (${d.devices.length})</h4>
+      <h4 style="margin:0 0 8px;font-size:13.5px;font-weight:650;">授权设备 (${d.devices.length})</h4>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>设备名</th><th>平台</th><th>状态</th><th>最近活跃</th><th>操作</th></tr></thead>
+          <thead><tr><th>设备名</th><th>平台</th><th>状态</th><th>最近活跃</th><th style="text-align:right;">操作</th></tr></thead>
           <tbody>
             ${d.devices.length ? d.devices.map(dev => `<tr>
-              <td>${esc(dev.name)}<div class="mono faint">${esc(dev.id.slice(0,12))}</div></td>
-              <td>${esc(dev.platform)}</td>
-              <td>${dev.revoked ? '<span class="pill pill-muted">已注销</span>' : dev.online ? '<span class="pill pill-ok"><span class="dot"></span>在线</span>' : '<span class="pill pill-muted">离线</span>'}</td>
+              <td><strong>${esc(dev.name)}</strong><div class="mono faint">${esc(dev.id.slice(0, 12))}</div></td>
+              <td><span class="meta-chip">${esc(dev.platform)}</span></td>
+              <td>${dev.revoked ? '<span class="pill pill-muted">已注销</span>' : dev.online ? '<span class="pill pill-ok"><span class="pulse-dot live"></span>在线</span>' : '<span class="pill pill-muted">离线</span>'}</td>
               <td class="muted">${fmtAgo(dev.last_seen_at)}</td>
-              <td><button class="btn btn-sm btn-danger" ${isBackup || dev.revoked ? 'disabled' : ''} data-action="revoke-device" data-user-id="${esc(d.user.id)}" data-device-id="${esc(dev.id)}">注销</button></td>
+              <td style="text-align:right;"><button class="btn btn-sm btn-danger" ${isBackup || dev.revoked ? 'disabled' : ''} data-action="revoke-device" data-user-id="${esc(d.user.id)}" data-device-id="${esc(dev.id)}">注销</button></td>
             </tr>`).join('') : '<tr><td colspan="5" class="muted" style="text-align:center;">无设备记录</td></tr>'}
           </tbody>
         </table>
@@ -833,7 +1804,7 @@ function confirmDeleteUser(userId) {
   openModal(`
     <div class="modal-head"><h3>确认删除用户</h3><button class="btn btn-sm" data-action="close-modal">取消</button></div>
     <div class="banner banner-danger">此操作不可恢复，将永久删除该用户及名下全部文档库、同步历史与设备会话，并同步到所有备份服务器。</div>
-    <p style="margin:0 0 14px;font-size:13.5px;">
+    <p style="margin:0 0 16px;font-size:13.5px;line-height:1.65;">
       目标用户：<strong>${esc(u.email)}</strong><br>
       名下文档库：<strong class="num">${u.vault_count}</strong> 个 · 占用存储：<strong class="num">${fmtBytes(u.total_storage_bytes)}</strong>
     </p>
@@ -883,50 +1854,81 @@ async function loadStorage() {
   try {
     const st = await api('/api/admin/storage');
     state.storage = st;
-    document.getElementById('st-subtitle').textContent =
-      `后端：${st.storage_backend === 's3' ? 'S3 兼容对象存储' : '本地目录'} · 数据目录：${st.data_dir}`;
+    document.getElementById('st-subtitle').innerHTML = `
+      <span class="meta-chip">${st.storage_backend === 's3' ? 'S3 兼容对象存储' : '本地文件系统'}</span>
+      <span class="meta-chip mono">${esc(st.data_dir)}</span>`;
 
     const dbTotal = st.db_bytes + st.wal_bytes + st.shm_bytes;
     document.getElementById('st-kpis').innerHTML = `
-      <div class="card"><div class="kpi-label">实际总占用</div><div class="kpi-val num">${fmtBytes(st.total_storage_bytes)}</div><div class="kpi-sub">SQLite + 去重附件</div></div>
-      <div class="card"><div class="kpi-label">SQLite 数据库</div><div class="kpi-val num">${fmtBytes(dbTotal)}</div><div class="kpi-sub">DB ${fmtBytes(st.db_bytes)} · WAL ${fmtBytes(st.wal_bytes)}</div></div>
-      <div class="card"><div class="kpi-label">去重附件 Blob</div><div class="kpi-val num">${fmtBytes(st.unique_blob_bytes)}</div><div class="kpi-sub">${st.unique_blob_count} 个唯一对象（逻辑 ${fmtBytes(st.logical_blob_bytes)}）</div></div>
-      <div class="card"><div class="kpi-label">复制 Binlog</div><div class="kpi-val num">${fmtBytes(st.binlog_bytes)}</div><div class="kpi-sub">${st.binlog_count} 条保留日志</div></div>`;
+      <div class="kpi-card">
+        <div class="kpi-head"><span class="kpi-label">实际物理总占用</span><span class="kpi-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/></svg></span></div>
+        <div class="kpi-val num">${fmtBytes(st.total_storage_bytes)}</div>
+        <div class="kpi-sub">SQLite + 去重附件对象</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-head"><span class="kpi-label">SQLite 数据库</span><span class="kpi-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg></span></div>
+        <div class="kpi-val num">${fmtBytes(dbTotal)}</div>
+        <div class="kpi-sub">DB ${fmtBytes(st.db_bytes)} · WAL ${fmtBytes(st.wal_bytes)}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-head"><span class="kpi-label">去重附件 Blob</span><span class="kpi-icon violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></span></div>
+        <div class="kpi-val num">${fmtBytes(st.unique_blob_bytes)}</div>
+        <div class="kpi-sub">${st.unique_blob_count} 个唯一对象（逻辑 ${fmtBytes(st.logical_blob_bytes)}）</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-head"><span class="kpi-label">主从复制 Binlog</span><span class="kpi-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span></div>
+        <div class="kpi-val num">${fmtBytes(st.binlog_bytes)}</div>
+        <div class="kpi-sub">${st.binlog_count} 条保留日志记录</div>
+      </div>`;
 
+    const savedPct = st.logical_blob_bytes > 0
+      ? Math.round((st.dedup_saved_bytes / st.logical_blob_bytes) * 100)
+      : 0;
     document.getElementById('st-dedup-note').textContent =
-      st.dedup_saved_bytes > 0 ? `内容寻址去重已节省 ${fmtBytes(st.dedup_saved_bytes)}` : '内容寻址去重已启用';
+      st.dedup_saved_bytes > 0
+        ? `内容寻址去重已节省 ${fmtBytes(st.dedup_saved_bytes)} (${savedPct}%)`
+        : '内容寻址去重已启用';
 
     const denom = Math.max(1, st.total_storage_bytes);
     const pDb = Math.round((st.db_bytes / denom) * 100);
     const pWal = Math.round(((st.wal_bytes + st.shm_bytes) / denom) * 100);
     const pBlob = Math.max(0, 100 - pDb - pWal);
     document.getElementById('st-bar').innerHTML = `
-      <div class="bar-fill" style="width:${pDb}%"></div>
-      <div class="bar-fill-3" style="width:${pWal}%"></div>
-      <div class="bar-fill-2" style="width:${pBlob}%"></div>`;
+      ${pDb > 0 ? `<div class="bar-seg-db" style="width:${pDb}%" title="sync.db: ${fmtBytes(st.db_bytes)}"></div>` : ''}
+      ${pWal > 0 ? `<div class="bar-seg-wal" style="width:${pWal}%" title="WAL/SHM: ${fmtBytes(st.wal_bytes + st.shm_bytes)}"></div>` : ''}
+      ${pBlob > 0 ? `<div class="bar-seg-blob" style="width:${pBlob}%" title="Blob: ${fmtBytes(st.unique_blob_bytes)}"></div>` : ''}`;
+
     document.getElementById('st-legend').innerHTML = `
-      <span><strong style="color:var(--accent);">●</strong> sync.db ${fmtBytes(st.db_bytes)}</span>
-      <span><strong style="color:#f59e0b;">●</strong> WAL/SHM ${fmtBytes(st.wal_bytes + st.shm_bytes)}</span>
-      <span><strong style="color:#10b981;">●</strong> 唯一 Blob ${fmtBytes(st.unique_blob_bytes)}</span>
-      <span class="faint">实体载荷 ${fmtBytes(st.entity_bytes)} · OpLog ${fmtBytes(st.op_log_bytes)}</span>`;
+      <div class="legend-tile"><div class="legend-label"><span class="legend-dot" style="background:#2563eb;"></span>sync.db (${pDb}%)</div><div class="legend-val num">${fmtBytes(st.db_bytes)}</div></div>
+      <div class="legend-tile"><div class="legend-label"><span class="legend-dot" style="background:#f59e0b;"></span>WAL / SHM (${pWal}%)</div><div class="legend-val num">${fmtBytes(st.wal_bytes + st.shm_bytes)}</div></div>
+      <div class="legend-tile"><div class="legend-label"><span class="legend-dot" style="background:#2f7d4f;"></span>唯一 Blob (${pBlob}%)</div><div class="legend-val num">${fmtBytes(st.unique_blob_bytes)}</div></div>
+      <div class="legend-tile"><div class="legend-label">实体载荷 / OpLog</div><div class="legend-val num" style="font-size:13px;">${fmtBytes(st.entity_bytes)} / ${fmtBytes(st.op_log_bytes)}</div></div>`;
 
+    const maxUser = Math.max(1, ...st.top_users.map(u => u.total_storage_bytes));
     document.getElementById('st-top-users').innerHTML = st.top_users.length
-      ? st.top_users.map(u => `<tr>
-          <td><strong>${esc(u.email)}</strong></td>
-          <td class="num">${u.vault_count}</td>
-          <td class="num">${fmtBytes(u.blob_bytes)}</td>
-          <td class="num"><strong>${fmtBytes(u.total_storage_bytes)}</strong></td>
-        </tr>`).join('')
-      : '<tr><td colspan="4" class="muted" style="text-align:center;">暂无数据</td></tr>';
+      ? st.top_users.map(u => {
+          const pct = Math.min(100, Math.round((u.total_storage_bytes / maxUser) * 100));
+          return `<tr>
+            <td><strong>${esc(u.email)}</strong><div class="bar" style="margin-top:4px;height:4px;max-width:140px;"><div class="bar-fill" style="width:${pct}%"></div></div></td>
+            <td class="num">${u.vault_count}</td>
+            <td class="num">${fmtBytes(u.blob_bytes)}</td>
+            <td class="num"><strong>${fmtBytes(u.total_storage_bytes)}</strong></td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="4" class="muted" style="text-align:center;padding:24px;">暂无数据</td></tr>';
 
+    const maxVault = Math.max(1, ...st.top_vaults.map(v => v.total_storage_bytes));
     document.getElementById('st-top-vaults').innerHTML = st.top_vaults.length
-      ? st.top_vaults.map(v => `<tr>
-          <td><strong>${esc(v.name)}</strong></td>
-          <td class="muted">${esc(v.owner_email)}</td>
-          <td>${v.e2ee_enabled ? 'E2EE' : '明文'}</td>
-          <td class="num"><strong>${fmtBytes(v.total_storage_bytes)}</strong></td>
-        </tr>`).join('')
-      : '<tr><td colspan="4" class="muted" style="text-align:center;">暂无数据</td></tr>';
+      ? st.top_vaults.map(v => {
+          const pct = Math.min(100, Math.round((v.total_storage_bytes / maxVault) * 100));
+          return `<tr>
+            <td><strong>${esc(v.name)}</strong><div class="bar" style="margin-top:4px;height:4px;max-width:130px;"><div class="bar-fill" style="width:${pct}%"></div></div></td>
+            <td class="muted">${esc(v.owner_email)}</td>
+            <td>${v.e2ee_enabled ? '<span class="pill pill-ok">E2EE</span>' : '<span class="pill pill-muted">标准</span>'}</td>
+            <td class="num"><strong>${fmtBytes(v.total_storage_bytes)}</strong></td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="4" class="muted" style="text-align:center;padding:24px;">暂无数据</td></tr>';
   } catch (e) {
     toast(e.message, true);
   }
@@ -944,8 +1946,11 @@ async function loadReplication(silent = false) {
       el.innerHTML = `
         <div class="card" style="margin-bottom:18px;">
           <div class="card-title">
-            <span>当前角色：<span class="pill pill-ok">主服务器 (Primary)</span></span>
-            <span class="mono faint">Epoch ${esc(node.repl_epoch.slice(0,8))} · LSN ${node.head_lsn} (min ${node.min_retained_lsn})</span>
+            <span class="card-title-left">
+              <span>当前角色</span>
+              <span class="pill pill-ok"><span class="pulse-dot live"></span>主服务器 (Primary)</span>
+            </span>
+            <span class="meta-chip mono">Epoch ${esc(node.repl_epoch.slice(0, 8))} · LSN ${node.head_lsn} (min ${node.min_retained_lsn})</span>
           </div>
           <div class="row-between" style="font-size:13px;">
             <div class="muted">本机对外 Portal 地址：<strong>${esc(node.portal_url || '未设置（将使用接入时的 Host 推断）')}</strong></div>
@@ -956,7 +1961,7 @@ async function loadReplication(silent = false) {
         <div class="card" style="margin-bottom:18px;">
           <div class="card-title">
             <span>已接入的备份服务器 (${replicas.length})</span>
-            <span class="faint" style="font-size:12px;font-weight:400;">由备份节点主动发起外连 WebSocket 实时同步</span>
+            <span class="faint" style="font-size:12px;font-weight:400;">由备份节点主动外连 WebSocket 实时拉取 Binlog 与附件</span>
           </div>
           ${replicas.length ? `
           <div class="table-wrap">
@@ -969,7 +1974,7 @@ async function loadReplication(silent = false) {
                   <th>待拉取附件</th>
                   <th>备份存储</th>
                   <th>最近心跳</th>
-                  <th>操作</th>
+                  <th style="text-align:right;">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -978,25 +1983,25 @@ async function loadReplication(silent = false) {
                   const pct = node.head_lsn === 0 ? 100 : Math.min(100, Math.round((rep.applied_lsn / node.head_lsn) * 100));
                   return `<tr>
                     <td>
-                      <div style="font-weight:600;">${esc(rep.name)}</div>
-                      <div class="mono faint">${esc(rep.replica_id.slice(0,8))}${rep.remote_addr ? ' · ' + esc(rep.remote_addr) : ''}${rep.server_version ? ' · v' + esc(rep.server_version) : ''}</div>
+                      <div style="font-weight:650;">${esc(rep.name)}</div>
+                      <div class="mono faint">${esc(rep.replica_id.slice(0, 8))}${rep.remote_addr ? ' · ' + esc(rep.remote_addr) : ''}${rep.server_version ? ' · v' + esc(rep.server_version) : ''}</div>
                     </td>
                     <td>
                       ${rep.online
-                        ? '<span class="pill pill-ok"><span class="dot"></span>在线同步中</span>'
+                        ? '<span class="pill pill-ok"><span class="pulse-dot live"></span>在线同步中</span>'
                         : '<span class="pill pill-muted"><span class="dot"></span>离线</span>'}
                     </td>
-                    <td class="num" style="min-width:155px;">
-                      <div>${rep.applied_lsn} / ${node.head_lsn} <span class="faint">(延迟 ${rep.lag_lsn})</span></div>
-                      <div class="bar" style="margin-top:4px;"><div class="bar-fill" style="width:${pct}%"></div></div>
+                    <td class="num" style="min-width:165px;">
+                      <div><strong>${rep.applied_lsn}</strong> / ${node.head_lsn} <span class="faint">(${pct}% · 延迟 ${rep.lag_lsn})</span></div>
+                      <div class="bar" style="margin-top:5px;height:5px;"><div class="bar-fill" style="width:${pct}%"></div></div>
                     </td>
                     <td class="num">${rep.blob_pending > 0 ? `<span class="pill pill-warn">${rep.blob_pending}</span>` : '<span class="muted">0</span>'}</td>
                     <td class="num">${fmtBytes(rep.storage_bytes)}</td>
                     <td class="muted">${fmtAgo(rep.last_seen_at)}</td>
                     <td>
-                      <div class="row" style="gap:6px;">
+                      <div class="row" style="gap:6px;justify-content:flex-end;">
                         ${link
-                          ? `<a class="btn btn-sm" href="${esc(link)}" target="_blank" rel="noopener noreferrer">打开 Portal ↗</a>`
+                          ? `<a class="btn btn-sm" href="${esc(link)}" target="_blank" rel="noopener noreferrer">Portal ↗</a>`
                           : '<button class="btn btn-sm" disabled title="备份服务器未上报 Portal 地址">无地址</button>'}
                         <button class="btn btn-sm btn-danger" data-action="confirm-evict-replica" data-replica-id="${esc(rep.replica_id)}">剔除</button>
                       </div>
@@ -1005,31 +2010,38 @@ async function loadReplication(silent = false) {
                 }).join('')}
               </tbody>
             </table>
-          </div>` : '<div class="muted" style="padding:12px 0;">暂无备份服务器接入。在目标备份服务器打开 Portal → 主从备份，输入本机地址与管理员密码即可自动配对并开始同步。</div>'}
+          </div>` : `
+          <div class="empty-state">
+            <div class="empty-icon">${ICON_SHIELD}</div>
+            <div class="empty-title">尚无备份服务器接入</div>
+            <div class="empty-desc">在目标备份服务器打开 Portal → 主从备份，输入本机地址与管理员密码即可自动完成一次配对并开启全量 + 实时增量热备。</div>
+          </div>`}
         </div>
 
         <div class="card-subtle">
-          <div class="card-title"><span>将当前服务器配置为备份服务器</span></div>
+          <div class="card-title"><span>将当前服务器切换为备份服务器</span></div>
           <p class="muted" style="margin:0 0 14px;font-size:13px;">
             输入主服务器的访问地址与主服务器管理员密码后，本机将切换为只读备份节点，主动连接主服务器拉取全量快照并实时增量同步（本机管理员密码保持独立不被覆盖）。
           </p>
           ${hasLocalData ? `<div class="banner banner-warn">注意：当前服务器已有 <strong>${state.overview.stats.user_count}</strong> 个用户与 <strong>${state.overview.stats.vault_count}</strong> 个文档库，切换为备份服务器后将被主服务器数据覆盖！</div>` : ''}
-          <form id="cfg-backup-form" style="max-width:520px;">
-            <div class="field">
-              <label>主服务器地址</label>
-              <input id="bk-primary-url" class="input" required placeholder="https://sync.example.com 或 http://10.0.0.10:8787">
-            </div>
-            <div class="field">
-              <label>主服务器管理员密码</label>
-              <input id="bk-primary-pw" type="password" class="input" required placeholder="用于一次性配对签发独立复制密钥（本机不会保存此密码）">
-            </div>
-            <div class="field">
-              <label>本机节点名称</label>
-              <input id="bk-node-name" class="input" value="${esc(node.node_name)}">
-            </div>
-            <div class="field">
-              <label>本机 Portal 访问地址（上报给主服务器用于快捷跳转）</label>
-              <input id="bk-portal-url" class="input" value="${esc(node.portal_url || window.location.origin)}">
+          <form id="cfg-backup-form">
+            <div class="grid-2" style="margin-bottom:4px;">
+              <div class="field">
+                <label>主服务器地址</label>
+                <input id="bk-primary-url" class="input" required placeholder="https://sync.example.com 或 http://10.0.0.10:8787">
+              </div>
+              <div class="field">
+                <label>主服务器管理员密码</label>
+                <input id="bk-primary-pw" type="password" class="input" required placeholder="一次性配对签发独立复制密钥（不落盘）">
+              </div>
+              <div class="field">
+                <label>本机节点名称</label>
+                <input id="bk-node-name" class="input" value="${esc(node.node_name)}">
+              </div>
+              <div class="field">
+                <label>本机 Portal 访问地址（上报给主服务器）</label>
+                <input id="bk-portal-url" class="input" value="${esc(node.portal_url || window.location.origin)}">
+              </div>
             </div>
             <button type="submit" class="btn btn-primary">配对并开始自动备份</button>
           </form>
@@ -1045,33 +2057,37 @@ async function loadReplication(silent = false) {
       el.innerHTML = `
         <div class="card" style="margin-bottom:18px;">
           <div class="card-title">
-            <span class="row">当前角色：<span class="pill pill-warn">备份服务器 · 只读</span> ${upstream ? replStateBadge(upstream.state) : ''}</span>
+            <span class="card-title-left">
+              <span>当前角色</span>
+              <span class="pill pill-warn">备份服务器 · 只读</span>
+              ${upstream ? replStateBadge(upstream.state) : ''}
+            </span>
             <div class="row">
-              ${pLink ? `<a class="btn btn-primary btn-sm" href="${esc(pLink)}" target="_blank" rel="noopener noreferrer">前往主服务器 Portal ↗</a>` : ''}
+              ${pLink ? `<a class="btn btn-primary btn-sm" href="${esc(pLink)}" target="_blank" rel="noopener noreferrer">前往主服务器 Portal ${ICON_EXT}</a>` : ''}
             </div>
           </div>
           ${upstream ? `
             ${upstream.state === 'evicted' ? `<div class="banner banner-danger">本机已被主服务器剔除，已停止自动重连。你可以重新输入主服务器管理员密码重新配对，或点击「提升为主服务器」独立运行。</div>` : ''}
             ${upstream.last_error && upstream.state !== 'evicted' ? `<div class="banner banner-warn">最近同步提示：${esc(upstream.last_error)}</div>` : ''}
-            <div class="grid-4" style="margin-bottom:14px;">
+            <div class="grid-4" style="margin-bottom:16px;">
               <div class="card-subtle">
-                <div class="kpi-label">主服务器</div>
-                <div style="font-weight:700;margin-top:4px;">${esc(upstream.primary_name)}</div>
-                <div class="mono faint" style="margin-top:3px;word-break:break-all;">${esc(upstream.primary_url)}</div>
+                <div class="kpi-label">上游主服务器</div>
+                <div style="font-weight:700;margin-top:5px;font-size:15px;">${esc(upstream.primary_name)}</div>
+                <div class="mono faint" style="margin-top:4px;word-break:break-all;">${esc(upstream.primary_url)}</div>
               </div>
               <div class="card-subtle">
-                <div class="kpi-label">LSN 同步进度</div>
-                <div class="kpi-val num" style="font-size:20px;">${upstream.applied_lsn} / ${upstream.primary_head_lsn}</div>
-                <div class="bar" style="margin-top:6px;"><div class="bar-fill" style="width:${pct}%"></div></div>
+                <div class="kpi-label">LSN 同步进度 (${pct}%)</div>
+                <div class="kpi-val num" style="font-size:21px;margin-top:4px;">${upstream.applied_lsn} / ${upstream.primary_head_lsn}</div>
+                <div class="bar" style="margin-top:7px;"><div class="bar-fill" style="width:${pct}%"></div></div>
               </div>
               <div class="card-subtle">
                 <div class="kpi-label">待下载附件</div>
-                <div class="kpi-val num" style="font-size:20px;">${upstream.blob_pending}</div>
-                <div class="kpi-sub">本机存储 ${fmtBytes(r.local_storage_bytes)}</div>
+                <div class="kpi-val num" style="font-size:21px;margin-top:4px;">${upstream.blob_pending}</div>
+                <div class="kpi-sub">本机已占用 ${fmtBytes(r.local_storage_bytes)}</div>
               </div>
               <div class="card-subtle">
                 <div class="kpi-label">最近同步时间</div>
-                <div style="font-weight:600;margin-top:6px;">${fmtAgo(upstream.last_sync_at)}</div>
+                <div style="font-weight:700;margin-top:6px;font-size:15px;">${fmtAgo(upstream.last_sync_at)}</div>
                 <div class="kpi-sub">${fmtTime(upstream.last_sync_at)}</div>
               </div>
             </div>
@@ -1170,8 +2186,8 @@ function confirmEvictReplica(replicaId) {
   if (!rep) return;
   openModal(`
     <div class="modal-head"><h3>确认剔除备份服务器</h3><button class="btn btn-sm" data-action="close-modal">取消</button></div>
-    <p style="margin:0 0 14px;font-size:13.5px;">
-      确定剔除备份服务器 <strong>${esc(rep.name)}</strong>（<span class="mono">${esc(rep.replica_id.slice(0,8))}</span>）？<br>
+    <p style="margin:0 0 16px;font-size:13.5px;line-height:1.6;">
+      确定剔除备份服务器 <strong>${esc(rep.name)}</strong>（<span class="mono">${esc(rep.replica_id.slice(0, 8))}</span>）？<br>
       <span class="muted">将立即断开其同步长连接并吊销凭据；备份节点已同步的本地数据不会被删除。</span>
     </p>
     <div class="row" style="justify-content:flex-end;">
@@ -1207,7 +2223,7 @@ function confirmPromote() {
   openModal(`
     <div class="modal-head"><h3>提升为主服务器（解除备份）</h3><button class="btn btn-sm" data-action="close-modal">取消</button></div>
     <div class="banner banner-warn">解除与原主服务器的同步关系，保留本机已同步的全部用户、文档库与附件，并恢复客户端读写服务。</div>
-    <p class="muted" style="margin:0 0 14px;font-size:13px;">适用于主服务器故障时的灾备切换，或将本机改为独立运行的同步服务器。</p>
+    <p class="muted" style="margin:0 0 16px;font-size:13px;">适用于主服务器故障时的灾备切换，或将本机改为独立运行的同步服务器。</p>
     <div class="row" style="justify-content:flex-end;">
       <button class="btn" data-action="close-modal">取消</button>
       <button class="btn btn-danger" data-action="do-promote">确认提升为主服务器</button>
@@ -1266,6 +2282,11 @@ function openChangePasswordModal() {
 }
 
 // Event bindings
+document.getElementById('btn-theme-toggle').addEventListener('click', () => {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  applyTheme(isDark ? 'light' : 'dark');
+});
+
 document.getElementById('auth-form').onsubmit = async (ev) => {
   ev.preventDefault();
   const errEl = document.getElementById('auth-error');
@@ -1295,25 +2316,25 @@ document.getElementById('auth-form').onsubmit = async (ev) => {
 };
 
 document.querySelectorAll('.nav button').forEach(btn => {
-  btn.onclick = () => switchTab(btn.dataset.tab);
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
 });
 
-document.getElementById('btn-logout').onclick = async () => {
+document.getElementById('btn-logout').addEventListener('click', async () => {
   await api('/api/admin/auth/logout', { method: 'POST' }).catch(() => {});
   state.isSetupMode = false;
   showAuthView();
-};
-document.getElementById('btn-change-pw').onclick = openChangePasswordModal;
-document.getElementById('btn-run-gc').onclick = triggerGc;
-document.getElementById('btn-st-gc').onclick = triggerGc;
-document.getElementById('btn-refresh-all').onclick = () => refreshAll();
-document.getElementById('btn-repl-refresh').onclick = () => loadReplication();
-document.getElementById('btn-fill-origin').onclick = () => {
+});
+document.getElementById('btn-change-pw').addEventListener('click', openChangePasswordModal);
+document.getElementById('btn-run-gc').addEventListener('click', triggerGc);
+document.getElementById('btn-st-gc').addEventListener('click', triggerGc);
+document.getElementById('btn-refresh-all').addEventListener('click', () => refreshAll());
+document.getElementById('btn-repl-refresh').addEventListener('click', () => loadReplication());
+document.getElementById('btn-fill-origin').addEventListener('click', () => {
   document.getElementById('set-portal-url').value = window.location.origin;
-};
-document.getElementById('btn-search-users').onclick = () => loadUsers();
-document.getElementById('user-sort').onchange = () => loadUsers();
-document.getElementById('user-search').onkeydown = (e) => { if (e.key === 'Enter') loadUsers(); };
+});
+document.getElementById('btn-search-users').addEventListener('click', () => loadUsers());
+document.getElementById('user-sort').addEventListener('change', () => loadUsers());
+document.getElementById('user-search').addEventListener('keydown', (e) => { if (e.key === 'Enter') loadUsers(); });
 
 document.getElementById('node-settings-form').onsubmit = async (ev) => {
   ev.preventDefault();
@@ -1328,7 +2349,7 @@ document.getElementById('node-settings-form').onsubmit = async (ev) => {
   }
   try {
     await api('/api/admin/node', { method: 'PUT', body });
-    toast('设置已保存');
+    toast('节点设置已保存');
     await loadOverview();
   } catch (e) {
     toast(e.message, true);
@@ -1347,6 +2368,7 @@ document.addEventListener('click', (ev) => {
   switch (action) {
     case 'close-modal': closeModal(); break;
     case 'switch-tab': switchTab(el.dataset.tab); break;
+    case 'copy-text': copyText(el.dataset.copy, '已复制节点 ID'); break;
     case 'user-detail': showUserDetail(el.dataset.userId); break;
     case 'confirm-delete-user': confirmDeleteUser(el.dataset.userId); break;
     case 'do-delete-user': doDeleteUser(el.dataset.userId); break;
