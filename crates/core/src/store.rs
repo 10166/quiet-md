@@ -329,7 +329,7 @@ struct Parsed { title: String, icon: Option<String>, body: std::sync::Arc<str>, 
 /// are this machine's mtimes, so it lives in the cache folder, not in the
 /// (possibly synced) library. Bump `PARSED_CACHE` when what `list` takes from
 /// a file changes; a release discards it anyway.
-const PARSED_CACHE: u32 = 1;
+const PARSED_CACHE: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct ParsedCache { version: String, docs: HashMap<PathBuf, CachedDoc> }
@@ -445,6 +445,10 @@ struct Local {
     quick_note_size: Option<[f32; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     window_size: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    window_origin: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    window_display: Option<String>,
 }
 
 /// `library.json`: where the library is when it isn't the default.
@@ -2110,6 +2114,8 @@ impl Store {
         if self.flat { return reread(&self.internal().join("settings.json")).unwrap_or_default(); }
         let mut s: Settings = reread(&self.internal().join("settings.json")).unwrap_or_default();
         let local = self.read_local();
+        s.window_origin = local.window_origin;
+        s.window_display = local.window_display;
         s.window_size = local.window_size;
         s.quick_note_size = local.quick_note_size;
         s
@@ -2118,9 +2124,11 @@ impl Store {
     pub fn save_settings(&self, s: &Settings) -> Result<()> {
         if self.flat { return write_atomic(&self.internal().join("settings.json"), &serde_json::to_vec_pretty(s)?); }
         let mut local = self.read_local();
+        local.window_origin = s.window_origin;
+        local.window_display.clone_from(&s.window_display);
         (local.window_size, local.quick_note_size) = (s.window_size, s.quick_note_size);
         self.save_local(&local)?;
-        let shared = Settings { window_size: None, quick_note_size: None, ..s.clone() };
+        let shared = Settings { window_origin: None, window_display: None, window_size: None, quick_note_size: None, ..s.clone() };
         crate::vfs::create_dir_all(self.internal())?;
         write_atomic(&self.internal().join("settings.json"), &serde_json::to_vec_pretty(&shared)?)
     }

@@ -740,6 +740,7 @@ impl Workspace {
                 this.search.update(cx, |s, cx| s.set_text(q, cx));
                 this.search_sel = this.default_search_sel(cx);
             }
+            EditorEvent::OpenRelative(url) => this.open_relative(url, window, cx),
             EditorEvent::OpenDoc(id) => this.open(id, window, cx),
             EditorEvent::OpenDocAt(id, ordinal) => this.open_at(id, *ordinal, window, cx),
             EditorEvent::HideRefs => this.ask_refs(false, cx),
@@ -1137,6 +1138,14 @@ impl Workspace {
         }
     }
 
+    /// The current window can already be in a GPUI input callback. update
+    /// skips windows on the stack, whereas reading their root would panic.
+    fn other_workspaces(cx: &mut Context<Self>) -> Vec<Entity<Self>> {
+        let me = cx.entity_id();
+        cx.windows().into_iter().filter_map(|h| h.update(cx, |root, _, _| root.downcast::<Self>().ok()).ok().flatten())
+            .filter(|peer| peer.entity_id() != me).collect()
+    }
+
     /// `on_stack`: the window being updated, if any (it can't be read now; it is this one).
     fn refresh_markdown(&mut self, on_stack: Option<gpui::WindowId>, cx: &mut Context<Self>) {
         if self.preview.is_some() || self.store.file_task_busy() || matches!(self.confirm, Some(Confirm::SaveFailed)) { return }
@@ -1175,9 +1184,8 @@ impl Workspace {
             cx.notify();
         };
         install(self, cx);
-        for handle in cx.windows().into_iter().filter_map(|h| h.downcast::<Workspace>()) {
-            let Ok(peer) = handle.entity(cx) else { continue };
-            if peer.entity_id() != cx.entity_id() && peer.read(cx).current.as_deref() == Some(id) {
+        for peer in Self::other_workspaces(cx) {
+            if peer.read(cx).current.as_deref() == Some(id) {
                 peer.update(cx, install);
             }
         }
@@ -1213,9 +1221,7 @@ impl Workspace {
                 // A mirrored edit was saved by this window. A sibling must not
                 // later write it a second time over a newer external edit.
                 if meta.markdown {
-                    for handle in cx.windows().into_iter().filter_map(|h| h.downcast::<Workspace>()) {
-                        let Ok(peer) = handle.entity(cx) else { continue };
-                        if peer.entity_id() == cx.entity_id() { continue }
+                    for peer in Self::other_workspaces(cx) {
                         let w = peer.read(cx);
                         if w.unsaved && w.current.as_ref() == Some(&id) && w.preview.is_none()
                             && w.editor.as_ref().is_some_and(|e| e.read(cx).core.doc == ed.read(cx).core.doc) {

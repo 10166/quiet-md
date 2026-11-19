@@ -2390,7 +2390,10 @@ pub(crate) fn image_block_from_file(p: &Path) -> Result<Block, &'static str> {
 /// image data (#252).
 pub(crate) fn local_image_path(line: &str) -> Option<PathBuf> {
     let s = line.trim();
-    let s = s.strip_prefix("file://").unwrap_or(s);
+    let decoded = s.strip_prefix("file://").map(crate::markdown::percent_decode);
+    let s = decoded.as_deref().unwrap_or(s);
+    #[cfg(windows)]
+    let s = if decoded.is_some() && s.starts_with('/') && s.as_bytes().get(2) == Some(&b':') { &s[1..] } else { s };
     let p = Path::new(s);
     is_local_image_file(p).then(|| p.to_path_buf())
 }
