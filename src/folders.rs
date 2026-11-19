@@ -12,7 +12,12 @@ impl Workspace {
         let (m, p) = (markdown, parent.clone());
         if !self.save_before(cx, move |w, window, cx| w.create_doc(m, p.clone(), window, cx)) { return; }
         let file_before = self.store.track_file_changes();
-        let made = if markdown {
+        let mounted = parent.as_deref().is_some_and(|p| self.store.is_mounted(p));
+        let made = if mounted {
+            // In a folder under 本机文件: written there at once.
+            let doc = crate::model::Document::default();
+            if markdown { self.store.create_markdown_in(&doc, "", parent.as_deref()) } else { self.store.create_from_in(&doc, parent.as_deref()) }
+        } else if markdown {
             self.store.create_markdown(&crate::model::Document::default(), "").and_then(|id| {
                 if let Some(p) = &parent { self.store.set_parent(&id, Some(p))?; }
                 Ok(id)
@@ -165,8 +170,11 @@ impl Workspace {
                 .on_click(cx.listener(move |w, _, window, cx| match &target { Some(t) => w.open(t, window, cx), None => w.show_view(View::Home, cx) }))
         };
         let path = self.ancestors(&id);
-        let mut crumbs = div().min_w_0().flex().items_center().text_size(px(17.)).line_height(px(24.))
-            .child(link("home".into(), tr("我的文档", "My documents").into(), None));
+        // A folder under 本机文件 starts from there, which has no page of its own.
+        let first = if self.entries.iter().any(|e| e.id == id && e.meta.mounted()) {
+            div().flex_none().px(px(4.)).whitespace_nowrap().text_color(Theme::text_caption()).child(tr("本机文件", "Files on this computer")).into_any_element()
+        } else { link("home".into(), tr("我的文档", "My documents").into(), None).into_any_element() };
+        let mut crumbs = div().min_w_0().flex().items_center().text_size(px(17.)).line_height(px(24.)).child(first);
         for (i, e) in path.iter().enumerate() {
             if path.len() > 2 && i > 0 && i < path.len() - 1 {
                 if i == 1 {
