@@ -443,7 +443,7 @@ impl Workspace {
             cx.observe_window_activation(window, |this, window, cx| {
                 if window.is_window_active() {
                     if let Some(id) = &this.current { crate::quick_note::used(id, cx); }
-                    if !this.store.file_task_busy() { this.entries = this.store.list(); this.sort(); this.refresh_markdown(cx); }
+                    if !this.store.file_task_busy() { this.entries = this.store.list(); this.sort(); this.refresh_markdown(Some(window.window_handle().window_id()), cx); }
                     crate::update::check_if_stale(cx); cx.notify();
                 }
                 else if !this.store.file_task_busy() { this.cancel_home_drag(cx); this.end_folder_drag(true, cx); this.cancel_shortcut_recording(cx); this.flush(cx); }
@@ -505,7 +505,7 @@ impl Workspace {
                     Some((path, meta.modified().ok()?, meta.len()))
                 }).await;
                 if file != last_file {
-                    let _ = this.update(cx, |w, cx| w.refresh_markdown(cx));
+                    let _ = this.update(cx, |w, cx| w.refresh_markdown(None, cx));
                     last_file = file;
                 }
                 if now == last { continue }
@@ -617,11 +617,13 @@ impl Workspace {
         ws.load_home();
         // An empty library opens on 主页's empty state; only a quick note
         // window starts a document of its own. The main window returns to the
-        // document read last (#234), or the home page when that is set.
+        // document read last (#234), or the home page when that is set; the
+        // site's live demo always starts on 主页, so visitors see the whole
+        // notebook first.
         match document {
             Some(id) => ws.open(&id, window, cx),
             None if quick => ws.new_doc(window, cx),
-            None if !crate::settings::prefs().start_home => {
+            None if !crate::settings::prefs().start_home && !cfg!(target_family = "wasm") => {
                 // Nothing read yet (a fresh library, whose guides all start at
                 // `opened == 0`): the first document, as before — `max_by_key`
                 // keeps the last of equal maxima, which would open the last
@@ -738,6 +740,7 @@ impl Workspace {
                 this.search.update(cx, |s, cx| s.set_text(q, cx));
                 this.search_sel = this.default_search_sel(cx);
             }
+            EditorEvent::OpenRelative(url) => this.open_relative(url, window, cx),
             EditorEvent::OpenDoc(id) => this.open(id, window, cx),
             EditorEvent::OpenDocAt(id, ordinal) => this.open_at(id, *ordinal, window, cx),
             EditorEvent::HideRefs => this.ask_refs(false, cx),
@@ -1135,7 +1138,16 @@ impl Workspace {
         }
     }
 
-    fn refresh_markdown(&mut self, cx: &mut Context<Self>) {
+    /// The current window can already be in a GPUI input callback. update
+    /// skips windows on the stack, whereas reading their root would panic.
+    fn other_workspaces(cx: &mut Context<Self>) -> Vec<Entity<Self>> {
+        let me = cx.entity_id();
+        cx.windows().into_iter().filter_map(|h| h.update(cx, |root, _, _| root.downcast::<Self>().ok()).ok().flatten())
+            .filter(|peer| peer.entity_id() != me).collect()
+    }
+
+    /// `on_stack`: the window being updated, if any (it can't be read now; it is this one).
+    fn refresh_markdown(&mut self, on_stack: Option<gpui::WindowId>, cx: &mut Context<Self>) {
         if self.preview.is_some() || self.store.file_task_busy() || matches!(self.confirm, Some(Confirm::SaveFailed)) { return }
         let Some(id) = self.current.clone() else { return };
         if !self.store.is_markdown(&id) { return }
@@ -1144,7 +1156,7 @@ impl Workspace {
             return
         }
         // A newly opened sibling can be clean while its source view still has a pending edit.
-        if cx.windows().into_iter().filter_map(|h| h.downcast::<Workspace>()?.entity(cx).ok())
+        if cx.windows().into_iter().filter(|h| Some(h.window_id()) != on_stack).filter_map(|h| h.downcast::<Workspace>()?.entity(cx).ok())
             .filter(|p| p.entity_id() != cx.entity_id())
             .any(|p| { let w = p.read(cx); w.current.as_ref() == Some(&id) && w.unsaved }) { return }
         if let Ok(Some(doc)) = self.store.with(|s| s.refresh_markdown(&id)) {
@@ -1172,9 +1184,8 @@ impl Workspace {
             cx.notify();
         };
         install(self, cx);
-        for handle in cx.windows().into_iter().filter_map(|h| h.downcast::<Workspace>()) {
-            let Ok(peer) = handle.entity(cx) else { continue };
-            if peer.entity_id() != cx.entity_id() && peer.read(cx).current.as_deref() == Some(id) {
+        for peer in Self::other_workspaces(cx) {
+            if peer.read(cx).current.as_deref() == Some(id) {
                 peer.update(cx, install);
             }
         }
@@ -1210,9 +1221,7 @@ impl Workspace {
                 // A mirrored edit was saved by this window. A sibling must not
                 // later write it a second time over a newer external edit.
                 if meta.markdown {
-                    for handle in cx.windows().into_iter().filter_map(|h| h.downcast::<Workspace>()) {
-                        let Ok(peer) = handle.entity(cx) else { continue };
-                        if peer.entity_id() == cx.entity_id() { continue }
+                    for peer in Self::other_workspaces(cx) {
                         let w = peer.read(cx);
                         if w.unsaved && w.current.as_ref() == Some(&id) && w.preview.is_none()
                             && w.editor.as_ref().is_some_and(|e| e.read(cx).core.doc == ed.read(cx).core.doc) {
