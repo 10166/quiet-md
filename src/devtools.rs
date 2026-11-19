@@ -19,6 +19,8 @@
 //!   they have no cursor, traffic lights or rounded corners; the pointer track
 //!   goes to `<file>.cursor` for compositing those in afterwards.
 
+mod priority;
+
 use gpui::*;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -293,6 +295,11 @@ pub fn start(window: &mut Window, cx: &mut App) {
             if cmd == "mods" {
                 let flag = |w: &str| match w { "shift" => 1u64 << 17, "ctrl" => 1 << 18, "alt" => 1 << 19, "cmd" => 1 << 20, _ => 0 };
                 MODS.store(rest.split_whitespace().map(flag).fold(0, |a, b| a | b), std::sync::atomic::Ordering::Relaxed);
+                continue;
+            }
+            if cmd == "check-priority" {
+                let ws = handle.downcast::<crate::app::Workspace>().unwrap();
+                ws.update(cx, |ws, window, cx| priority::step(rest, ws, window, cx)).unwrap();
                 continue;
             }
             if cmd == "check-save-safety" {

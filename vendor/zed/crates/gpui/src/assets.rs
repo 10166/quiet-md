@@ -96,6 +96,12 @@ impl RenderImage {
         self
     }
 
+    /// quiet.md: the frames back, so a caller that redraws an image every
+    /// frame can reuse its buffer once the atlas let it go (`Window::drop_image`).
+    pub fn into_frames(self) -> SmallVec<[Frame; 1]> {
+        self.data
+    }
+
     /// Convert this image into a byte slice.
     pub fn as_bytes(&self, frame_index: usize) -> Option<&[u8]> {
         self.data

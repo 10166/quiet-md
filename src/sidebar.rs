@@ -191,15 +191,24 @@ impl Workspace {
         if !self.folded[1] {
             list = list.child(self.render_folder_rows(window, cx));
         }
-        // 本机文件: Markdown files edited where they are, outside the library.
-        let local = self.local_entries();
+        // 本机文件: Markdown files and folders edited where they are, outside the
+        // library. Files or folders from the Finder let go here open the same way.
+        let local = self.local_rows();
         if !local.is_empty() {
-            list = list.child(div().h(px(GROUP_GAP - SECTION_TOP))).child(self.section(2, crate::settings::tr("本机文件", "Files on this computer"), cx));
+            let mut section = div().id("local-section").flex().flex_col().rounded(px(ROW_R))
+                .drag_over::<ExternalPaths>(|s, _, _, _| s.bg(Theme::sidebar_hover()))
+                .on_drop(cx.listener(|w, paths: &ExternalPaths, window, cx| {
+                    cx.stop_propagation();
+                    w.sidebar_drop = None;
+                    w.open_paths(paths.paths(), window, cx);
+                }))
+                .child(self.section(2, crate::settings::tr("本机文件", "Files on this computer"), cx));
             if !self.folded[2] {
-                for e in local {
-                    list = list.child(self.doc_row(e, "local", 0, false, cx));
+                for (e, depth) in local {
+                    section = section.child(self.doc_row(e, "local", depth, false, cx));
                 }
             }
+            list = list.child(div().h(px(GROUP_GAP - SECTION_TOP))).child(section);
         }
 
         // The footer holds one row: 设置 (存储管理 and 回收站 live in 设置).
@@ -493,7 +502,7 @@ impl Workspace {
     fn row_base(&self, e: &Entry, key: &str, cx: &mut Context<Self>) -> Stateful<Div> {
         let id = e.id.clone();
         let id2 = e.id.clone();
-        let in_lib = key == "doc";
+        let (in_lib, pinned) = (key == "doc", key == "pinned");
         div()
             .id(SharedString::from(format!("{key}-{}", e.id)))
             .group("doc-row")
@@ -502,7 +511,7 @@ impl Workspace {
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
+                cx.listener(move |w, ev: &MouseDownEvent, window, cx| {
                     if w.rename.as_ref().is_some_and(|r| r.id == id) {
                         return;
                     }
@@ -514,13 +523,25 @@ impl Workspace {
                         return;
                     }
                     if in_lib { w.arm_folder_drag(&id, ev.position, cx); }
+                    // A 置顶 row opens on press, as it did before 本机文件 rows moved to click (#272).
+                    else if pinned { w.open(&id, window, cx); }
                 }),
             )
             // A 本机文件 row opens on click, and can be carried up into the tree to import it.
             .when(key == "local", |d| {
-                let (open, drag) = (e.id.clone(), crate::sidebar_drop::LocalRowDrag { id: e.id.clone(), title: crate::settings::display_title(&e.title) });
+                let (open, drag) = (e.id.clone(), crate::sidebar_drop::LocalRowDrag { id: e.id.clone(), title: crate::settings::display_title(&e.title), folder: e.meta.folder.is_some() });
                 d.on_click(cx.listener(move |w, _, window, cx| w.open(&open, window, cx)))
                     .on_drag(drag, |d, _, _, cx| cx.new(|_| d.clone()))
+            })
+            // A folder under 本机文件 takes what is let go on it: moved there on disk.
+            .when(key == "local" && e.meta.mounted() && e.meta.folder.is_some(), |d| {
+                let target = e.id.clone();
+                d.drag_over::<crate::sidebar_drop::LocalRowDrag>(|s, _, _, _| s.bg(Theme::sidebar_selected()))
+                    .on_drop(cx.listener(move |w, dragged: &crate::sidebar_drop::LocalRowDrag, _, cx| {
+                        cx.stop_propagation();
+                        w.sidebar_drop = None;
+                        w.move_mounted(&dragged.id, &target, cx);
+                    }))
             })
             .on_mouse_down(
                 MouseButton::Right,
@@ -563,6 +584,9 @@ impl Workspace {
                 MouseButton::Left,
                 cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                     cx.stop_propagation();
+                    // The row menu's outside-click handler has already closed it on this press, so
+                    // a press on its own button closes it rather than reopening it (see `open`).
+                    if open { w.row_menu = None; cx.notify(); return; }
                     // Hang the menu from the button; a negative x marks "from the button".
                     let b = lookup.borrow().get(&slot2).copied();
                     let pos = b.map_or(ev.position, |b| point(-b.left() - px(1.), b.top()));
@@ -700,13 +724,23 @@ impl Workspace {
                 let toggle = folder && key == "doc" && !drop_target && self.folder_drag.has_children(&e.id);
                 let chevron = if toggle { self.folder_drag.reveal(&e.id) } else { 0. };
                 let open = self.expanded.contains(&e.id);
+                // Under 本机文件 a folder folds from its icon too: a click on it, shown by a chevron on hover.
+                let local_toggle = folder && key == "local" && self.mounted_has_children(&e.id);
+                let fold = e.id.clone();
                 div().size(px(20.)).flex_none().flex().items_center().justify_center().relative()
+                    .when(local_toggle, |d| d.rounded(px(5.)).hover(|s| s.bg(Theme::sidebar_hover()))
+                        .on_mouse_down(MouseButton::Left, cx.listener(move |w, _, _, cx| { cx.stop_propagation(); w.toggle_mounted(&fold, cx); })))
                     .when(toggle, |d| d.rounded(px(5.)).hover(|s| s.bg(Theme::sidebar_hover()))
                         .on_mouse_down(MouseButton::Left, cx.listener(|w, ev: &MouseDownEvent, _, _| {
                             w.folder_drag.icon_press = true;
                             w.folder_drag.icon_alt = ev.modifiers.alt;
                         })))
                     .map(|d| match &e.icon {
+                    _ if local_toggle => d
+                        .child(div().absolute().inset_0().flex().items_center().justify_center().group_hover("doc-row", |s| s.opacity(0.))
+                            .child(icon(if open { "folder-open" } else { "folder" }, ROW_ICON, Theme::icon())))
+                        .child(div().absolute().inset_0().flex().items_center().justify_center().opacity(0.).group_hover("doc-row", |s| s.opacity(1.))
+                            .child(icon("disclosure", ROW_ICON, Theme::icon()).with_transformation(Transformation::rotate(radians(if open { std::f32::consts::FRAC_PI_2 } else { 0. }))))),
                     _ if folder => {
                         let s = if key == "doc" { self.folder_drag.pop(&e.id) } else { 1. };
                         d.child(div().absolute().inset_0().flex().items_center().justify_center().opacity(1. - chevron)
@@ -734,6 +768,7 @@ impl Workspace {
 
     pub(crate) fn render_row_menu(&self, window: &Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(m) = self.row_menu.clone() else { return vec![] };
+        if !m.batch && self.entries.iter().any(|e| e.id == m.id && e.meta.mounted()) { return self.mounted_row_menu(m, cx); }
         if !m.batch && self.entries.iter().any(|e| e.id == m.id && e.meta.folder.is_some()) { return self.folder_row_menu(m, cx); }
         if !m.batch && self.entries.iter().any(|e| e.id == m.id && e.meta.local()) { return self.local_row_menu(m, cx); }
         let Some((pinned, starred)) = self.entries.iter().find(|e| e.id == m.id).map(|e| (e.meta.pinned, e.meta.starred > 0)) else { return vec![] };
@@ -754,7 +789,7 @@ impl Workspace {
             let menu = popover()
                 .id("batch-menu")
                 .occlude()
-                .w(px(ROW_MENU_W))
+                .min_w(px(ROW_MENU_W))
                 .px(px(5.))
                 .py(px(crate::ui::MENU_PAD_Y))
                 .on_mouse_down_out(cx.listener(|w, _, _, cx| {
@@ -784,12 +819,17 @@ impl Workspace {
         let pdf = m.id.clone();
         let new_window = m.id.clone();
         let sub_bounds = self.row_sub_bounds.clone();
+        // The menu follows its longest translation too (#225); its rendered
+        // width (from the previous frame — a submenu only opens after one)
+        // places the 下载 submenu beside it.
+        let menu_w_record = self.row_menu_w.clone();
         // The row menu leaves out the cloud entries 在新标签页打开, 分享,
         // 复制链接, 添加快捷方式到, 转移所有权, 设置密级.
         let menu = popover()
             .id("row-menu")
             .occlude()
-            .w(px(ROW_MENU_W))
+            .min_w(px(ROW_MENU_W))
+            .child(canvas(move |b, _, _| menu_w_record.set(Some(f32::from(b.size.width))), |_, _, _, _| {}).absolute().inset_0())
             .px(px(5.))
             .py(px(crate::ui::MENU_PAD_Y))
             .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
@@ -885,18 +925,19 @@ impl Workspace {
             record.set(None);
             // Level the submenu's first item with 下载.
             let top = row_sub_top(menu_top);
+            let menu_w = self.row_menu_w.get().unwrap_or(ROW_MENU_W);
             let left = match corner {
-                Anchor::TopRight | Anchor::BottomRight => origin.x - px(ROW_MENU_W),
+                Anchor::TopRight | Anchor::BottomRight => origin.x - px(menu_w),
                 _ => origin.x,
             };
-            let x = left + px(ROW_MENU_W + 4.);
+            let x = left + px(menu_w + 4.);
             out.push(
                 deferred(
                     anchored().anchor(Anchor::TopLeft).position(point(x, px(top))).snap_to_window_with_margin(px(8.)).child(
                         popover()
                             .id("rm-download-menu")
                             .occlude()
-                            .w(px(130.))
+                            .min_w(px(130.))
                             .px(px(5.))
                             .py(px(crate::ui::MENU_PAD_Y))
                             .child(canvas(move |b, _, _| record.set(Some(b)), |_, _, _, _| {}).absolute().inset_0())

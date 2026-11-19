@@ -24,7 +24,7 @@ use web_time::Instant;
 const SAVE_DELAY: Duration = Duration::from_millis(500);
 const SAVE_MAX_DELAY: Duration = Duration::from_secs(2);
 
-actions!(workspace, [NewDoc, OpenFile, ImportDoc, ImportFolder, ToggleSidebar, FocusSearch, FindInDoc, ReplaceInDoc, OpenSettings, OpenAbout, CheckForUpdates, GoHome, CloseWindow, Quit,
+actions!(workspace, [NewDoc, OpenFile, OpenFolder, ImportDoc, ImportFolder, ToggleSidebar, FocusSearch, FindInDoc, ReplaceInDoc, OpenSettings, OpenAbout, CheckForUpdates, GoHome, CloseWindow, Quit,
     ReplayOnboarding, HideApp, HideOthers, ShowAll, Minimize, Zoom, ToggleFullScreen]);
 
 /// The menu bar, in the interface language.
@@ -55,6 +55,7 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::action(tr("新建文档", "New Document"), NewDoc),
                 MenuItem::action(tr("新建笔记窗口", "New Note Window"), crate::quick_note::QuickNew),
                 MenuItem::action(tr("打开 Markdown 文件…", "Open Markdown File…"), OpenFile),
+                MenuItem::action(tr("打开文件夹…", "Open Folder…"), OpenFolder),
                 MenuItem::action(tr("导入为文档…", "Import as Document…"), ImportDoc),
                 MenuItem::action(tr("导入文件夹…", "Import Folder…"), ImportFolder),
                 MenuItem::separator(),
@@ -106,6 +107,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-alt-shift-o", ReplayOnboarding, None),
         KeyBinding::new("cmd-shift-i", ImportDoc, None),
         KeyBinding::new("cmd-o", OpenFile, None),
+        KeyBinding::new("cmd-shift-o", OpenFolder, None),
         KeyBinding::new("cmd-alt-home", GoHome, None),
         KeyBinding::new("cmd-w", CloseWindow, None),
         KeyBinding::new("cmd-]", ToggleSidebar, None),
@@ -318,6 +320,11 @@ pub struct Workspace {
     pub doc_sub: Option<DocSub>,
     /// Last-frame bounds of the open submenu (clicks there keep the menu open).
     pub doc_sub_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// Rendered width of the open 「…」 menu, for placing its submenus (#225).
+    pub doc_menu_w: Rc<Cell<Option<f32>>>,
+    /// The same for the sidebar row menu, whose 下载 submenu sits beside it
+    /// (#225).
+    pub row_menu_w: Rc<Cell<Option<f32>>>,
     pub doc_info: Option<DocInfo>,
     /// 版本历史 drawer, open for `HistoryView::id`.
     pub history: Option<crate::history::HistoryView>,
@@ -362,7 +369,7 @@ pub struct Workspace {
     /// The 快捷键 drawer, and the help button's menu (open while hovered).
     pub shortcuts: bool,
     pub(crate) focus: FocusHandle,
-    save_task: Option<Task<()>>,
+    pub(crate) save_task: Option<Task<()>>,
     /// When the oldest edit not yet on disk was made: a save waits for a
     /// pause in typing, but never longer than `SAVE_MAX_DELAY` after it.
     dirty_since: Option<Instant>,
@@ -436,7 +443,7 @@ impl Workspace {
             cx.observe_window_activation(window, |this, window, cx| {
                 if window.is_window_active() {
                     if let Some(id) = &this.current { crate::quick_note::used(id, cx); }
-                    if !this.store.file_task_busy() { this.entries = this.store.list(); this.sort(); }
+                    if !this.store.file_task_busy() { this.entries = this.store.list(); this.sort(); this.refresh_markdown(Some(window.window_handle().window_id()), cx); }
                     crate::update::check_if_stale(cx); cx.notify();
                 }
                 else if !this.store.file_task_busy() { this.cancel_home_drag(cx); this.end_folder_drag(true, cx); this.cancel_shortcut_recording(cx); this.flush(cx); }
@@ -479,14 +486,28 @@ impl Workspace {
         // A file written into the library from outside (a model writing a
         // note, say) joins it without going away and back: the library's
         // shape is compared every couple of seconds and the list re-read only
-        // when it changed.
+        // when it changed. The folders opened under 本机文件 are watched the same way.
         cx.spawn(async move |this, cx| {
             let bg = cx.background_executor().clone();
-            let shape = || bg.spawn(async { crate::store::Store::shape_at(&crate::store::Store::root_dir()) });
-            let mut last = shape().await;
+            let shape = |dirs: Vec<std::path::PathBuf>| bg.spawn(async move { (crate::store::Store::shape_at(&crate::store::Store::root_dir()), crate::store::Store::shape_of(&dirs)) });
+            let dirs = |cx: &mut AsyncApp| this.update(cx, |w, _| w.store.mount_dirs()).unwrap_or_default();
+            let mut last = shape(dirs(cx)).await;
+            let mut last_file = None;
             loop {
                 bg.timer(Duration::from_secs(2)).await;
-                let now = shape().await;
+                let now = shape(dirs(cx)).await;
+                let Ok(path) = this.update(cx, |w, _| w.current.as_ref()
+                    .filter(|id| !w.store.file_task_busy() && w.store.is_markdown(id))
+                    .and_then(|id| w.store.file_path(id))) else { break };
+                let file = bg.spawn(async move {
+                    let path = path?;
+                    let meta = fdl_core::vfs::metadata(&path).ok()?;
+                    Some((path, meta.modified().ok()?, meta.len()))
+                }).await;
+                if file != last_file {
+                    let _ = this.update(cx, |w, cx| w.refresh_markdown(None, cx));
+                    last_file = file;
+                }
                 if now == last { continue }
                 let reloaded = this.update(cx, |w, cx| {
                     // Not mid-rename: the row under the field would be rebuilt.
@@ -555,6 +576,8 @@ impl Workspace {
             doc_menu: false,
             doc_sub: None,
             doc_sub_bounds: Rc::new(Cell::new(None)),
+            doc_menu_w: Rc::new(Cell::new(None)),
+            row_menu_w: Rc::new(Cell::new(None)),
             doc_info: None,
             history: None,
             preview: None,
@@ -593,10 +616,24 @@ impl Workspace {
         ws.sort();
         ws.load_home();
         // An empty library opens on 主页's empty state; only a quick note
-        // window starts a document of its own.
-        match document.or_else(|| (!quick).then(|| ws.entries.first().map(|e| e.id.clone())).flatten()) {
+        // window starts a document of its own. The main window returns to the
+        // document read last (#234), or the home page when that is set; the
+        // site's live demo always starts on 主页, so visitors see the whole
+        // notebook first.
+        match document {
             Some(id) => ws.open(&id, window, cx),
             None if quick => ws.new_doc(window, cx),
+            None if !crate::settings::prefs().start_home && !cfg!(target_family = "wasm") => {
+                // Nothing read yet (a fresh library, whose guides all start at
+                // `opened == 0`): the first document, as before — `max_by_key`
+                // keeps the last of equal maxima, which would open the last
+                // guide instead.
+                let id = ws.entries.iter().filter(|e| e.meta.opened > 0).max_by_key(|e| e.meta.opened).or_else(|| ws.entries.first()).map(|e| e.id.clone());
+                match id {
+                    Some(id) => ws.open(&id, window, cx),
+                    None => ws.view = View::Home,
+                }
+            }
             None => ws.view = View::Home,
         }
         // Kept in the top bar (not just a toast): the user should notice.
@@ -697,13 +734,14 @@ impl Workspace {
                 cx.notify();
             }
             EditorEvent::Save => {
-                this.flush(cx);
+                if !this.flush(cx) { this.confirm = Some(Confirm::SaveFailed); cx.notify(); }
             }
             EditorEvent::Search(q) => {
                 this.open_search(window, cx);
                 this.search.update(cx, |s, cx| s.set_text(q, cx));
                 this.search_sel = this.default_search_sel(cx);
             }
+            EditorEvent::OpenRelative(url) => this.open_relative(url, window, cx),
             EditorEvent::OpenDoc(id) => this.open(id, window, cx),
             EditorEvent::OpenDocAt(id, ordinal) => this.open_at(id, *ordinal, window, cx),
             EditorEvent::HideRefs => this.ask_refs(false, cx),
@@ -1101,6 +1139,59 @@ impl Workspace {
         }
     }
 
+    /// The current window can already be in a GPUI input callback. update
+    /// skips windows on the stack, whereas reading their root would panic.
+    fn other_workspaces(cx: &mut Context<Self>) -> Vec<Entity<Self>> {
+        let me = cx.entity_id();
+        cx.windows().into_iter().filter_map(|h| h.update(cx, |root, _, _| root.downcast::<Self>().ok()).ok().flatten())
+            .filter(|peer| peer.entity_id() != me).collect()
+    }
+
+    /// `on_stack`: the window being updated, if any (it can't be read now; it is this one).
+    fn refresh_markdown(&mut self, on_stack: Option<gpui::WindowId>, cx: &mut Context<Self>) {
+        if self.preview.is_some() || self.store.file_task_busy() || matches!(self.confirm, Some(Confirm::SaveFailed)) { return }
+        let Some(id) = self.current.clone() else { return };
+        if !self.store.is_markdown(&id) { return }
+        if self.unsaved {
+            self.flush(cx);
+            return
+        }
+        // A newly opened sibling can be clean while its source view still has a pending edit.
+        if cx.windows().into_iter().filter(|h| Some(h.window_id()) != on_stack).filter_map(|h| h.downcast::<Workspace>()?.entity(cx).ok())
+            .filter(|p| p.entity_id() != cx.entity_id())
+            .any(|p| { let w = p.read(cx); w.current.as_ref() == Some(&id) && w.unsaved }) { return }
+        if let Ok(Some(doc)) = self.store.with(|s| s.refresh_markdown(&id)) {
+            self.adopt_markdown(&id, doc, cx);
+        }
+    }
+
+    /// All live views share the store's save baseline, so install the accepted
+    /// revision in each of them before a sibling's pending autosave can run.
+    fn adopt_markdown(&mut self, id: &str, doc: crate::model::Document, cx: &mut Context<Self>) {
+        let core = crate::editor::core::Core::new(doc);
+        let install = |w: &mut Self, cx: &mut Context<Self>| {
+            if let Some(p) = &mut w.preview { p.core = core.clone(); }
+            else if let Some(ed) = &w.editor { ed.update(cx, |e, cx| e.receive_markdown(&core, cx)); }
+            w.save_task = None;
+            w.unsaved = false;
+            w.dirty_since = None;
+            w.status = SaveStatus::Saved;
+            if let Some(entry) = w.entries.iter_mut().find(|e| e.id == id) {
+                entry.title = core.doc.title.text.clone();
+                entry.body = core.doc.plain_text().into();
+                entry.reminders = core.doc.reminders();
+                entry.links = core.doc.doc_links();
+            }
+            cx.notify();
+        };
+        install(self, cx);
+        for peer in Self::other_workspaces(cx) {
+            if peer.read(cx).current.as_deref() == Some(id) {
+                peer.update(cx, install);
+            }
+        }
+    }
+
     /// Write the open document to disk if it has unsaved changes. False when
     /// that failed: the changes stay pending (a later save retries them) and
     /// the top bar shows the error.
@@ -1120,7 +1211,7 @@ impl Workspace {
         };
         let doc = &ed.read(cx).core.doc;
         let (title, icon, body, reminders, links) = (doc.title.text.clone(), doc.icon.clone(), doc.plain_text(), doc.reminders(), doc.doc_links());
-        match self.store.save(&id, doc) {
+        match self.store.with(|s| s.save_editor(&id, doc)) {
             Ok(meta) => {
                 if let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
                     e.title = title;
@@ -1129,6 +1220,23 @@ impl Workspace {
                     e.reminders = reminders;
                     e.links = links;
                     e.meta = meta.clone();
+                }
+                // A mirrored edit was saved by this window. A sibling must not
+                // later write it a second time over a newer external edit.
+                if meta.markdown {
+                    for peer in Self::other_workspaces(cx) {
+                        let w = peer.read(cx);
+                        if w.unsaved && w.current.as_ref() == Some(&id) && w.preview.is_none()
+                            && w.editor.as_ref().is_some_and(|e| e.read(cx).core.doc == ed.read(cx).core.doc) {
+                            peer.update(cx, |w, cx| {
+                                w.unsaved = false;
+                                w.dirty_since = None;
+                                w.save_task = None;
+                                w.status = SaveStatus::Saved;
+                                cx.notify();
+                            });
+                        }
+                    }
                 }
                 self.sync_links(cx);
                 // a renamed 数据表's file moved with its title
@@ -1194,10 +1302,13 @@ impl Workspace {
             let Some(id) = self.current.clone() else { return };
             match self.store.load_for_edit(&id, false) {
                 Ok(doc) => {
-                    if let Some(ed) = &self.editor {
-                        ed.update(cx, |e, cx| e.receive_document(&crate::editor::core::Core::new(doc), cx));
+                    if self.store.is_markdown(&id) { self.adopt_markdown(&id, doc, cx); }
+                    else {
+                        if let Some(ed) = &self.editor {
+                            ed.update(cx, |e, cx| e.receive_document(&crate::editor::core::Core::new(doc), cx));
+                        }
+                        self.sync_document(window, cx);
                     }
-                    self.sync_document(window, cx);
                     self.save_task = None;
                     self.unsaved = false;
                     self.status = SaveStatus::Idle;
@@ -1362,12 +1473,15 @@ impl Workspace {
             .unwrap_or_default();
         let mut crumbs: Vec<AnyElement> = vec![];
         let sep = || div().mx(px(3.)).flex_none().child(icon("chevron-right", 12., Theme::icon())).into_any_element();
-        // Every path starts at the library, as a folder page's does.
+        // Every path starts at the library, as a folder page's does; a file
+        // under 本机文件 starts there, which has no page of its own.
+        let local = self.current.as_ref().and_then(|id| self.entries.iter().find(|e| &e.id == id)).is_some_and(|e| e.meta.local());
+        let start = if local { crate::settings::tr("本机文件", "Files on this computer") } else { crate::settings::tr("我的文档", "My documents") };
         if self.current.is_some() {
-            crumbs.push(div().id("crumb-library").no_drag().flex_none().px(px(4.)).rounded(px(4.)).cursor_pointer()
-                .whitespace_nowrap().text_color(Theme::text_caption()).hover(|s| s.text_color(Theme::primary_500()))
-                .child(ui_text(crate::settings::tr("我的文档", "My documents").to_string()))
-                .on_click(cx.listener(|w, _, _, cx| w.show_view(View::Home, cx)))
+            crumbs.push(div().id("crumb-library").no_drag().flex_none().px(px(4.)).rounded(px(4.))
+                .whitespace_nowrap().text_color(Theme::text_caption())
+                .when(!local, |d| d.cursor_pointer().hover(|s| s.text_color(Theme::primary_500())).on_click(cx.listener(|w, _, _, cx| w.show_view(View::Home, cx))))
+                .child(ui_text(start.to_string()))
                 .into_any_element());
             crumbs.push(sep());
         }
@@ -1445,7 +1559,7 @@ impl Workspace {
         let left = if self.sidebar_open { 18. } else { theme::TRAFFIC_LIGHTS_W + 4. + 28. + 4. + 28. + 25. };
         let room = pane_w - left - crate::ui::header_right_inset() - 3. * HEADER_ACTIONS_H - 8. - 16.;
         if room < 360. && !crumbs.is_empty() {
-            let path: Vec<&str> = std::iter::once(crate::settings::tr("我的文档", "My documents")).chain(chain.iter().map(|c| c.1.as_str())).collect();
+            let path: Vec<&str> = std::iter::once(start).chain(chain.iter().map(|c| c.1.as_str())).collect();
             crumbs = vec![
                 div().id("crumb-more").no_drag().flex_none().size(px(20.)).flex().items_center().justify_center().rounded(px(4.))
                     .text_color(Theme::text_caption()).tip(&path.join(" / "), None).child("…").into_any_element(),
@@ -1453,6 +1567,7 @@ impl Workspace {
             ];
         }
         let record_more = self.more_btn_bounds.clone();
+        let doc_open = self.doc_menu;
         div()
             .id("top-bar").relative()
             .h(px(HEADER_H))
@@ -1526,7 +1641,7 @@ impl Workspace {
 
                     )
                     .when_some(save_error, |d, error| d.child(
-                        div().min_w_0().max_w(px(220.)).text_size(px(12.)).line_height(px(18.))
+                        div().id("save-status-error").when(self.unsaved, |d| d.cursor_pointer().on_click(cx.listener(|w, _, _, cx| { w.confirm = Some(Confirm::SaveFailed); cx.notify(); }))).min_w_0().max_w(px(220.)).text_size(px(12.)).line_height(px(18.))
                             .text_color(theme::c(craft::R400)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(error),
                     )),
             )
@@ -1545,8 +1660,11 @@ impl Workspace {
                                 .when(self.doc_menu, |d| d.bg(Theme::fill_hover()))
                                 .when(!self.doc_menu, |d| d.tip(crate::settings::tr("更多", "More"), None))
                                 .child(canvas(move |b, _, _| record_more.set(Some(b)), |_, _, _, _| {}).absolute().inset_0())
-                                .on_click(cx.listener(|w, _, _, cx| {
-                                    w.doc_menu = !w.doc_menu;
+                                // Toggle on mouse-down from the render-time state: the menu's outside-press
+                                // handler has already cleared `doc_menu` by the time a click would fire.
+                                .on_mouse_down(MouseButton::Left, cx.listener(move |w, _, _, cx| {
+                                    cx.stop_propagation();
+                                    w.doc_menu = !doc_open;
                                     w.doc_sub = None;
                                     cx.notify();
                                 })),
@@ -1698,6 +1816,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &NewDoc, window, cx| w.new_doc(window, cx)))
             .on_action(cx.listener(|w, _: &ImportDoc, window, cx| w.open_import(window, cx)))
             .on_action(cx.listener(|w, _: &OpenFile, window, cx| w.open_file_dialog(window, cx)))
+            .on_action(cx.listener(|w, _: &OpenFolder, window, cx| w.open_folder_dialog(window, cx)))
             .on_action(cx.listener(|w, _: &ImportFolder, window, cx| w.open_import_folder(window, cx)))
             .on_action(cx.listener(|w, _: &ToggleSidebar, _, cx| {
                 w.sidebar_open = !w.sidebar_open;
