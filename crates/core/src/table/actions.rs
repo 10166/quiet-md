@@ -71,14 +71,22 @@ impl Doc {
     }
 
     /// Move `ids` (kept in their order) so they sit before the record now at row `to`.
-    pub fn move_records(&mut self, tid: TableId, ids: &[RecId], to: usize) -> bool {
+    /// Nothing happens (false) when they are there already.
+    pub fn move_records(&mut self, tid: TableId, ids: &[RecId], to: usize) -> bool { self.move_records_in(tid, ids, to, false) }
+
+    /// `move_records`, joined to the previous undo step.
+    pub fn move_records_joined(&mut self, tid: TableId, ids: &[RecId], to: usize) -> bool { self.move_records_in(tid, ids, to, true) }
+
+    fn move_records_in(&mut self, tid: TableId, ids: &[RecId], to: usize, joined: bool) -> bool {
         let Some(t) = self.base.table(tid) else { return false };
         let before: Option<RecId> = t.records.iter().skip(to).map(|r| r.id).find(|id| !ids.contains(id));
         let moved: Vec<RecId> = t.records.iter().map(|r| r.id).filter(|id| ids.contains(id)).collect();
         let mut order: Vec<RecId> = t.records.iter().map(|r| r.id).filter(|id| !ids.contains(id)).collect();
         let at = before.and_then(|b| order.iter().position(|id| *id == b)).unwrap_or(order.len());
         order.splice(at..at, moved);
-        self.run_in(tid, vec![Op::SetOrder(order)])
+        if order.iter().copied().eq(t.records.iter().map(|r| r.id)) { return false }
+        let ops = vec![BaseOp::Table(tid, Op::SetOrder(order))];
+        if joined { self.run_joined(ops) } else { self.run(ops) }
     }
 
     /// Set cells, as typed. A 双向关联's other side follows; computed fields are skipped.
@@ -209,11 +217,17 @@ impl Doc {
     }
 
     /// Delete a field (not the primary one); a 双向关联's mirror goes with it.
-    pub fn remove_field(&mut self, tid: TableId, fid: FieldId) -> bool {
-        let Some(f) = self.base.table(tid).and_then(|t| t.field(fid)) else { return false };
-        let mut ops = vec![BaseOp::Table(tid, Op::RemoveField(fid))];
-        if f.ty == FieldType::Link && let (Some(other), Some(back)) = (f.opts.link_table, f.opts.back) { ops.push(BaseOp::Table(other, Op::RemoveField(back))); }
-        self.run(ops)
+    pub fn remove_field(&mut self, tid: TableId, fid: FieldId) -> bool { self.remove_fields(tid, &[fid]) }
+
+    /// Remove several fields as one undo step; a 双向关联's other side goes with it.
+    pub fn remove_fields(&mut self, tid: TableId, ids: &[FieldId]) -> bool {
+        let Some(t) = self.base.table(tid) else { return false };
+        let mut ops = vec![];
+        for f in ids.iter().filter_map(|id| t.field(*id)) {
+            ops.push(BaseOp::Table(tid, Op::RemoveField(f.id)));
+            if f.ty == FieldType::Link && let (Some(other), Some(back)) = (f.opts.link_table, f.opts.back) && !(other == tid && ids.contains(&back)) { ops.push(BaseOp::Table(other, Op::RemoveField(back))); }
+        }
+        !ops.is_empty() && self.run(ops)
     }
 
     /// Replace a view's settings (筛选, 排序, 列宽…).
@@ -228,12 +242,11 @@ impl Doc {
 
     pub fn add_view(&mut self, tid: TableId, kind: ViewKind, name: &str) -> Option<ViewId> {
         let t = self.base.table(tid)?;
-        let name = t.free_view_name(if name.is_empty() { kind.short() } else { name });
+        let name = t.free_view_name(if name.is_empty() { kind.label() } else { name });
         let at = t.views.len();
         let mut opts = ViewOpts { frozen: 1, ..Default::default() };
         match kind {
             ViewKind::Kanban => opts.stack = t.fields.iter().find(|f| f.ty == FieldType::SingleSelect).map(|f| f.id),
-            ViewKind::Gallery => opts.cover = t.fields.iter().find(|f| f.ty == FieldType::Attachment).map(|f| f.id),
             ViewKind::Calendar | ViewKind::Gantt => {
                 let mut dates = t.fields.iter().filter(|f| f.ty == FieldType::Date).map(|f| f.id);
                 opts.date = dates.next();
@@ -264,7 +277,7 @@ impl Doc {
     }
 
     pub fn add_table(&mut self, name: &str) -> TableId {
-        let t = self.base.blank_table(if name.is_empty() { "数据表" } else { name }, field::now());
+        let t = self.base.blank_table(if name.is_empty() { "未命名数据表" } else { name }, field::now());
         let (id, at) = (t.id, self.base.tables.len());
         self.run(vec![BaseOp::InsertTable { at, table: Box::new(t) }]);
         id

@@ -19,7 +19,7 @@ pub(crate) fn key_down(v: &mut TableView, ev: &KeyDownEvent, window: &mut Window
         "escape" if v.popup.is_some() || v.dropdown.is_some() => v.close_popup(window, cx),
         "escape" if v.find.is_some() => v.close_find(window, cx),
         "escape" if v.expanded.is_some() => { v.expanded = None; cx.notify(); }
-        "escape" if v.sel.is_some() || !v.rows_sel.is_empty() || v.col_sel.is_some() => { v.clear_selection(); cx.notify(); }
+        "escape" if v.sel.is_some() || !v.rows_sel.is_empty() || !v.col_sel.is_empty() => { v.clear_selection(); cx.notify(); }
         _ if !grid => used = false,
         "c" if cmd => copy(v, false, cx),
         "x" if cmd => { copy(v, false, cx); v.clear_cells(cx); }
@@ -55,7 +55,7 @@ fn select_all(v: &mut TableView, cx: &mut Context<TableView>) {
     let (Some(c0), Some(c1)) = (cols.ids.first(), cols.ids.last()) else { return };
     v.sel = Some(Sel { anchor: (t.records[*first].id, *c0), head: (t.records[*last].id, *c1) });
     v.rows_sel.clear();
-    v.col_sel = None;
+    v.col_sel.clear();
     cx.notify();
 }
 
@@ -86,8 +86,10 @@ pub(crate) fn copy(v: &mut TableView, markdown: bool, cx: &mut Context<TableView
             let show = |r: RecId, f: FieldId| t.record(r).zip(t.field(f)).map(|(r, f)| field::display_in(base, f, r.get(f.id))).unwrap_or_default();
             let grid: Vec<Vec<String>> = if !v.rows_sel.is_empty() {
                 v.result.records.iter().map(|i| t.records[*i].id).filter(|r| v.rows_sel.contains(r)).map(|r| cols.ids.iter().map(|f| show(r, *f)).collect()).collect()
-            } else if let Some(f) = v.col_sel {
-                v.result.records.iter().map(|i| vec![show(t.records[*i].id, f)]).collect()
+            } else if !v.col_sel.is_empty() {
+                // the selected columns in the view's order
+                let picked: Vec<FieldId> = cols.ids.iter().copied().filter(|f| v.col_sel.contains(f)).collect();
+                v.result.records.iter().map(|i| picked.iter().map(|f| show(t.records[*i].id, *f)).collect()).collect()
             } else {
                 v.sel_cells(t, &cols).into_iter().map(|row| row.into_iter().map(|(r, f)| show(r, f)).collect()).collect()
             };
@@ -121,27 +123,6 @@ pub(crate) fn paste(v: &mut TableView, cx: &mut Context<TableView>) {
     };
     let tid = v.table;
     v.edit(cx, |d| d.paste(tid, &plan.0, &plan.1, &plan.2));
-}
-
-pub(crate) fn import_csv(_v: &mut TableView, window: &mut Window, cx: &mut Context<TableView>) {
-    let picked = crate::devtools::take_pick();
-    let prompt = picked.is_none().then(|| cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: Some(crate::settings::text("导入").into()), extensions: Some(vec!["csv".into(), "tsv".into(), "txt".into()]) }));
-    cx.spawn_in(window, async move |this, cx| {
-        let paths = match prompt { Some(p) => p.await.ok().and_then(Result::ok).flatten(), None => picked };
-        let Some(path) = paths.and_then(|p| p.into_iter().next()) else { return };
-        let Ok(bytes) = std::fs::read(&path) else { return };
-        let text = String::from_utf8_lossy(&bytes).into_owned();
-        let name = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-        let _ = this.update_in(cx, |v, window, cx| {
-            let id = v.edit(cx, |d| {
-                let table = csv::import(&mut d.base, &name, &text);
-                let (id, at) = (table.id, d.base.tables.len());
-                d.run(vec![BaseOp::InsertTable { at, table: Box::new(table) }]);
-                id
-            });
-            v.show_table(id, window, cx);
-        });
-    }).detach();
 }
 
 pub(crate) fn export_csv(v: &mut TableView, window: &mut Window, cx: &mut Context<TableView>) {

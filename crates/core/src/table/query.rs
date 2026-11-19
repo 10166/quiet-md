@@ -1238,6 +1238,8 @@ mod tests {
     fn blank_table_runs() {
         let b = Base::blank(0);
         let t = &b.tables[0];
+        // a new table is five plain 文本 columns
+        assert_eq!(t.fields.iter().map(|f| (f.name.as_str(), f.ty)).collect::<Vec<_>>(), (1..=5).map(|i| (["文本 1", "文本 2", "文本 3", "文本 4", "文本 5"][i - 1], FieldType::Text)).collect::<Vec<_>>());
         let r = run(&b, t, &t.views[0]);
         assert_eq!(r.records, [0, 1, 2, 3, 4]);
         assert_eq!(r.rows.len(), 5);

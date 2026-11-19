@@ -46,6 +46,7 @@ python3 tools/harness/compare.py tools/harness/examples/menus.txt <旧版二进�
 | `type <文字>` | 输入文字（行尾空格有效） |
 | `move x y` / `click x y` / `dclick x y` / `rclick x y` / `drag x1 y1 x2 y2` | 鼠标操作（窗口坐标） |
 | `down x y` / `dragto x y` / `dragby dx dy` / `up x y` | 分步拖动：按下、拖到某点、从上一个拖动点挪一步、松开；`bench 30 dragby 4 0` 测拖拽每一步的耗时 |
+| `mods shift cmd` / `mods none` | 之后的鼠标操作按住这些修饰键（shift、cmd、alt、ctrl），`none` 松开 |
 | `mdown x y` / `mdragto x y` / `mup x y` | 中键（按下滚轮）：按下、拖到某点、松开 |
 | `wheel x y dy [dx]` | 一次滚轮事件；可选的 `dx` 是横向分量（模拟触控板），正数露出右边的内容 |
 | `shot <名字>` / `burst <名字> n` | 截图；连拍 n 张，间隔约 8ms |

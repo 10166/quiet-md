@@ -296,7 +296,9 @@ fn type_box(f: &FieldForm, cx: &Context<TableView>) -> Div {
         let mut list = div().id("tb-ff-types").max_h(px(300.)).overflow_y_scroll().py(px(4.)).rounded(px(6.)).border_1().border_color(line()).flex().flex_col();
         for g in [FieldGroup::General, FieldGroup::Business, FieldGroup::Advanced] {
             list = list.child(div().flex_none().h(px(28.)).px(px(12.)).flex().items_center().text_size(px(12.)).text_color(Theme::text_caption()).child(label(g.label())));
-            for (i, ty) in FieldType::ALL.iter().copied().enumerate().filter(|(_, ty)| ty.group() == g) {
+            // a file is one table: 关联 and 查找引用 (which reach into another) are not offered, only kept where a file has them
+            let other_table = |ty: FieldType| matches!(ty, FieldType::Link | FieldType::Lookup) && ty != f.ty;
+            for (i, ty) in FieldType::ALL.iter().copied().enumerate().filter(|(_, ty)| ty.group() == g && !other_table(*ty)) {
                 let ok = !f.primary || title_ok(ty);
                 list = list.child(div().id(("tb-ff-ty", i)).flex_none().h(px(32.)).mx(px(4.)).px(px(8.)).flex().items_center().gap(px(8.)).rounded(px(4.))
                     .child(icon(field_glyph(ty), 15., if ok { Theme::icon() } else { Theme::text_disabled() }))

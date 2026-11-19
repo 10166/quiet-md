@@ -131,7 +131,7 @@ pub fn import(base: &mut Base, name: &str, text: &str) -> Table {
         t.next_rec += 1;
         t.next_auto += 1;
     }
-    t.views.push(View { id: base.new_id(), name: "表格".into(), kind: ViewKind::Grid, opts: ViewOpts { frozen: 1, ..Default::default() } });
+    t.views.push(View { id: base.new_id(), name: "表格视图".into(), kind: ViewKind::Grid, opts: ViewOpts { frozen: 1, ..Default::default() } });
     t
 }
 
@@ -223,9 +223,9 @@ mod tests {
                 ["想读", "在读", "读完"][i % 3], 100 + i * 10, i + 1, if i == 2 { " 09:30" } else { "" }, i % 2 == 0, i * 10));
         }
         text.push_str(",,,,,,,,,,\n");
-        let t = import(&mut base, "数据表", &text);
+        let t = import(&mut base, "未命名数据表", &text);
         // the name is free in the base, ids are fresh
-        assert_eq!(t.name, "数据表 2");
+        assert_eq!(t.name, "未命名数据表 2");
         assert!(t.id > before && t.fields.iter().all(|f| f.id > before) && base.next_id >= t.views[0].id);
         let names: Vec<&str> = t.fields.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, ["书名", "状态", "页数", "开始", "读完", "链接", "状态 2", "字段8", "内部", "id 2", "占比"]);
@@ -253,7 +253,7 @@ mod tests {
         let t = import(&mut base, "_x", "a\tb\nx,y\t2\n");
         assert_eq!((t.name.as_str(), t.fields.len(), t.records[0].get(t.fields[0].id)), ("x", 2, &Value::Text("x,y".into())));
         let t = import(&mut base, "", "a;b\n1;2\n");
-        assert_eq!((t.name.as_str(), t.fields.len()), ("数据表 2", 2));
+        assert_eq!((t.name.as_str(), t.fields.len()), ("数据表", 2));
         let t = import(&mut base, "空", "");
         assert_eq!((t.fields.len(), t.fields[0].name.as_str(), t.fields[0].ty, t.records.len(), t.views.len()), (1, "字段1", Text, 0, 1));
         // a first column of few distinct values is still text

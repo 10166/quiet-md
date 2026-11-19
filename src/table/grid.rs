@@ -129,7 +129,7 @@ impl TableView {
         };
         self.sel = Some(Sel { anchor: if extend { self.sel.map_or(next, |s| s.anchor) } else { next }, head: next });
         self.rows_sel.clear();
-        self.col_sel = None;
+        self.col_sel.clear();
         self.reveal(next, cx);
     }
 
@@ -221,7 +221,7 @@ impl TableView {
             let Some(t) = st.doc.base.table(self.table) else { return };
             let Some(v) = t.view(self.view) else { return };
             let cols = self.cols(t, v);
-            if let Some(f) = self.col_sel { t.records.iter().map(|r| (r.id, f, Value::Empty)).collect() }
+            if !self.col_sel.is_empty() { t.records.iter().flat_map(|r| self.col_sel.iter().map(move |f| (r.id, *f, Value::Empty))).collect() }
             else { self.sel_cells(t, &cols).into_iter().flatten().map(|(r, f)| (r, f, Value::Empty)).collect() }
         };
         let tid = self.table;
@@ -242,7 +242,7 @@ impl TableView {
         if let (Some(id), Some(f)) = (ids.first(), first) {
             self.sel = Some(Sel { anchor: (*id, f), head: (*id, f) });
             self.rows_sel.clear();
-            self.col_sel = None;
+            self.col_sel.clear();
             self.sync_now(cx);
             self.reveal((*id, f), cx);
         }
@@ -355,7 +355,7 @@ fn mouse_up_inner(v: &mut TableView, cx: &mut Context<TableView>) {
         }
         Drag::ColMove { field, .. } => {
             // a click, not a drag: select the column
-            v.col_sel = Some(field);
+            v.col_sel = vec![field];
             v.sel = None;
             v.rows_sel.clear();
         }
@@ -394,7 +394,7 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
     let hdr_cell = |ci: usize| {
         let f = fields[ci];
         let fid = f.id;
-        let (w, on) = (cols.w[ci], v.col_sel == Some(fid));
+        let (w, on) = (cols.w[ci], v.col_sel.contains(&fid));
         let sorted = view.opts.sorts.iter().find(|s| s.field == fid).map(|s| s.desc);
         div().id(("tb-hdr", fid)).group("tb-hdr").relative().flex_none().w(px(w)).h_full().flex().items_center().gap(px(4.)).px(px(CELL_PAD_X))
             .border_r_1().border_color(line()).bg(hdr_bg)
@@ -408,7 +408,7 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
                 .on_mouse_down(MouseButton::Left, cx.listener(move |v, ev: &MouseDownEvent, window, cx| {
                     cx.stop_propagation();
                     v.commit_edit(true, window, cx);
-                    v.col_sel = Some(fid);
+                    if !v.col_sel.contains(&fid) { v.col_sel = vec![fid]; }
                     v.sel = None;
                     v.open_popup(point(ev.position.x - px(w - 24.).min(px(200.)), ev.position.y + px(14.)), Popup::FieldMenu(fid), cx);
                 })))
@@ -416,19 +416,34 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
                 v.commit_edit(true, window, cx);
                 window.focus(&v.focus, cx);
                 if ev.click_count >= 2 { menus::edit_field(v, fid, ev.position, window, cx); return; }
+                // ⇧: every column from the last picked one to this; ⌘: this one in or out
+                if ev.modifiers.shift || ev.modifiers.platform {
+                    v.sel = None;
+                    v.rows_sel.clear();
+                    if ev.modifiers.platform { if let Some(i) = v.col_sel.iter().position(|f| *f == fid) { v.col_sel.remove(i); } else { v.col_sel.push(fid); } }
+                    else if let Some(from) = v.col_sel.last().copied() {
+                        let order = { let st = v.state.read(cx); st.doc.base.table(v.table).and_then(|t| t.view(v.view).map(|view| t.visible_fields(view).iter().map(|f| f.id).collect::<Vec<_>>())).unwrap_or_default() };
+                        if let (Some(a), Some(b)) = (order.iter().position(|f| *f == from), order.iter().position(|f| *f == fid)) {
+                            for f in &order[a.min(b)..=a.max(b)] { if !v.col_sel.contains(f) { v.col_sel.push(*f); } }
+                        }
+                    } else { v.col_sel = vec![fid]; }
+                    cx.notify();
+                    return;
+                }
                 let x = f32::from(ev.position.x);
                 v.drag = Some(Drag::ColMove { field: fid, x0: x, x, to: None });
                 cx.notify();
             }))
             .on_mouse_down(MouseButton::Right, cx.listener(move |v, ev: &MouseDownEvent, window, cx| {
                 v.commit_edit(true, window, cx);
-                v.col_sel = Some(fid);
+                if !v.col_sel.contains(&fid) { v.col_sel = vec![fid]; }
                 v.sel = None;
                 v.open_popup(ev.position, Popup::FieldMenu(fid), cx);
             }))
             // the right edge drags the width
             .child(div().id(("tb-grip", fid)).absolute().top_0().bottom_0().right(px(-4.)).w(px(8.)).flex().justify_center().cursor(CursorStyle::ResizeLeftRight)
-                .child(div().w(px(2.)).h_full().hover(|s| s.bg(Theme::primary())))
+                // the line it lights is the whole column's (`col_edges`), not a stub in the header
+                .on_hover(cx.listener(move |v, on: &bool, _, cx| { let g = on.then_some(fid); if v.grip_hover != g && (*on || v.grip_hover == Some(fid)) { v.grip_hover = g; cx.notify(); } }))
                 .on_mouse_down(MouseButton::Left, cx.listener(move |v, ev: &MouseDownEvent, _, cx| {
                     cx.stop_propagation();
                     v.drag = Some(Drag::ColWidth { field: fid, x0: f32::from(ev.position.x), w0: w, w });
@@ -498,7 +513,7 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
                                 v.rows_sel.extend(ids);
                             } else if !v.rows_sel.remove(&rid) { v.rows_sel.insert(rid); }
                             v.sel = None;
-                            v.col_sel = None;
+                            v.col_sel.clear();
                             cx.notify();
                         })))
 ;
@@ -507,7 +522,6 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
                     let id: CellId = (rid, f.id);
                     let in_sel = sel.is_some_and(|(r0, r1, c0, c1)| pos >= r0 && pos <= r1 && ci >= c0 && ci <= c1);
                     let multi = sel.is_some_and(|(r0, r1, c0, c1)| r0 != r1 || c0 != c1);
-                    let is_head = head == Some(id);
                     let editing = v.editing == Some(id);
                     let corner = sel.is_some_and(|(_, r1, _, c1)| pos == r1 && ci == c1) && !editing && v.drag.as_ref().is_none_or(|d| matches!(d, Drag::Fill(_)));
                     let filling = in_fill && sel.is_some_and(|(_, _, c0, c1)| ci >= c0 && ci <= c1);
@@ -515,7 +529,7 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
                     let content: AnyElement = if editing { div().w_full().child(v.input.clone()).into_any_element() } else { cell::content(v, base, t, f, r, row_h, cx) };
                     div().id(("tb-cell", (rid as usize) << 12 | (f.id as usize & 0xfff))).relative().flex_none().w(px(cols.w[ci])).h_full().flex().items_start().px(px(CELL_PAD_X)).overflow_hidden()
                         .border_b_1().border_r_1().border_color(line())
-                        .when(v.col_sel == Some(f.id), |d| d.bg(sel_bg()))
+                        .when(v.col_sel.contains(&f.id), |d| d.bg(sel_bg()))
                         .when(found, |d| d.bg(if hit_now == Some(id) { found_current() } else { found_bg() }))
                         .when((in_sel && multi) || filling, |d| d.bg(range_bg()))
                         .when(editing, |d| d.bg(Theme::bg_body()))
@@ -525,7 +539,6 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
                             .child(div().id(("tb-open", rid as usize)).h(px(22.)).px(px(6.)).flex().items_center().gap(px(4.)).rounded(px(6.)).border_1().border_color(line()).bg(Theme::bg_body()).cursor_pointer()
                                 .hover(|s| s.bg(c(ud::N100))).child(icon("expand", 12., Theme::icon())).child(div().text_size(px(12.)).text_color(Theme::text()).child(crate::settings::label("查看")))
                                 .on_mouse_down(MouseButton::Left, cx.listener(move |v, _, window, cx| { cx.stop_propagation(); v.commit_edit(true, window, cx); record::open(v, rid, window, cx); })))))
-                        .when(is_head, |d| d.child(div().absolute().top(px(-1.)).left(px(-1.)).right(px(-1.)).bottom(px(-1.)).border_2().border_color(Theme::primary())))
                         .when(corner, |d| d.child(div().id(("tb-fill", rid as usize)).absolute().right(px(-1.)).bottom(px(-1.)).size(px(7.)).bg(Theme::primary()).border_1().border_color(Theme::bg_body())
                             .cursor(CursorStyle::Crosshair)
                             .on_mouse_down(MouseButton::Left, cx.listener(move |v, _, _, cx| { cx.stop_propagation(); v.drag = Some(Drag::Fill(rid)); cx.notify(); }))))
@@ -535,7 +548,7 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
                             window.focus(&v.focus, cx);
                             let was = v.sel.is_some_and(|s| s.anchor == id && s.head == id);
                             v.rows_sel.clear();
-                            v.col_sel = None;
+                            v.col_sel.clear();
                             if ev.modifiers.shift && let Some(s) = v.sel.as_mut() { s.head = id; }
                             else { v.sel = Some(Sel { anchor: id, head: id }); }
                             // a second click on the active cell opens its editor, as a double click does
@@ -551,7 +564,7 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
                                     .is_some_and(|(((r0, r1, c0, c1), p), c)| p >= r0 && p <= r1 && c >= c0 && c <= c1) };
                                 if !inside { v.sel = Some(Sel { anchor: id, head: id }); }
                             }
-                            v.col_sel = None;
+                            v.col_sel.clear();
                             v.open_popup(ev.position, Popup::CellMenu(rid), cx);
                         }))
                 };
@@ -600,7 +613,7 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
     let stat_cell = |ci: usize| {
         let f = fields[ci];
         let fid = f.id;
-        let text = view.opts.stats.get(&fid).map(|s| format!("{} {}", s.label(), query::stat(base, t, f, &v.result.records, *s)));
+        let text = view.opts.stats.get(&fid).map(|s| format!("{} {}", crate::settings::label(s.label()), query::stat(base, t, f, &v.result.records, *s)));
         div().id(("tb-stat", fid)).group("tb-stat").flex_none().w(px(cols.w[ci])).h_full().flex().items_center().justify_end().px(px(CELL_PAD_X)).cursor_pointer()
             .hover(|s| s.bg(Theme::fill_hover())).text_size(px(12.)).text_color(Theme::text_caption()).overflow_hidden().whitespace_nowrap()
             .map(|d| match text {
@@ -634,9 +647,11 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
     let max_y = (v.content_h(row_h) + v.slack() - vs.height).max(0.);
     div().id("tb-grid").relative().flex_1().min_h_0().flex().flex_col()
         // in a page, a frame around the header and the rows only
-        .child(div().flex_1().min_h_0().flex().flex_col().when(inline, |d| d.border_1().border_color(line()))
+        .child(div().relative().flex_1().min_h_0().flex().flex_col().when(inline, |d| d.border_1().border_color(line()))
             .child(header)
             .child(body.when(empty, |d| d.child(div().absolute().left_0().right_0().top(px(48.)).flex().justify_center().text_color(Theme::text_placeholder()).child(crate::settings::label("没有符合筛选条件的记录")))))
+            .children(cursor_ring(v, &cols, row_h))
+            .children(col_edge(v, &cols))
             .children(scrollbars(v, max_x, max_y, vs, cols.frozen_w, inline)))
         .child(footer)
         .on_scroll(cx.listener(move |v, ev: &ScrollEvent, _, cx| {
@@ -696,4 +711,32 @@ fn group_row(v: &TableView, t: &Table, g: &query::Group, top: f32, frozen_w: f32
         .child(div().w(px(frozen_w.min(0.))))
         .on_click(cx.listener(move |v, _, _, cx| v.toggle_fold(&key, cx)))
         .into_any_element()
+}
+
+/// The current cell's line: 2px, square, just outside the cell over the four grid lines around it,
+/// so every side is as wide. Drawn over the header and the rows, not in the cell (the rows clip it).
+fn cursor_ring(v: &TableView, cols: &Cols, row_h: f32) -> Option<AnyElement> {
+    let (rid, fid) = v.sel?.head;
+    let ci = cols.index(fid)?;
+    let r = v.order.get(&rid).and_then(|p| v.row_of.get(*p)).copied().filter(|r| *r != usize::MAX)?;
+    let scrolled = ci >= cols.frozen;
+    // a scrolled column passes under the frozen ones, a row under the header: the ring is cut there too
+    let (cx0, cy0) = (if scrolled { cols.frozen_w - 2. } else { 0. }, HEADER_H - 2.);
+    let x = cols.x[ci] - if scrolled { v.scroll.x } else { 0. };
+    let y = HEADER_H + v.tops[r] - v.scroll.y;
+    Some(div().absolute().left(px(cx0)).top(px(cy0)).right_0().bottom_0().overflow_hidden()
+        .child(div().absolute().left(px(x - 2. - cx0)).top(px(y - 2. - cy0)).w(px(cols.w[ci] + 3.)).h(px(row_h + 3.)).border_2().border_color(Theme::primary()))
+        .into_any_element())
+}
+
+/// The column edge being dragged (or under the pointer, ready to drag): lit from the header to the last row,
+/// not past it (the add-record line and the blank under it have no columns).
+fn col_edge(v: &TableView, cols: &Cols) -> Option<AnyElement> {
+    let fid = match v.drag { Some(Drag::ColWidth { field, .. }) => field, _ => v.grip_hover? };
+    let ci = cols.index(fid)?;
+    let scrolled = ci >= cols.frozen;
+    let edge = cols.x[ci] + cols.w[ci] - if scrolled { v.scroll.x } else { 0. };
+    if scrolled && edge < cols.frozen_w { return None }
+    let end = HEADER_H + v.tops.last().copied().unwrap_or(0.) - v.scroll.y;
+    Some(div().absolute().top_0().h(px(end.max(HEADER_H))).left(px(edge - 1.5)).w(px(2.)).bg(Theme::primary()).into_any_element())
 }

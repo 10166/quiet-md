@@ -4,7 +4,7 @@ use crate::table::field::date_ms;
 /// 2026-11-17 10:30, a Tuesday.
 const NOW: i64 = 1_794_911_400_000;
 
-/// 飞书's blank table (文本 / 单选 / 日期 / 附件) with more columns, a filled
+/// A blank table made 文本 / 单选 / 日期 / 附件 (飞书's blank table), with more columns, a filled
 /// first record, and a second table to link to.
 fn base() -> Base {
     let mut b = Base::blank(0);
@@ -15,6 +15,8 @@ fn base() -> Base {
     let other_id = other.id;
     b.tables.push(other);
     let t = &mut b.tables[0];
+    t.fields.truncate(4);
+    for (f, (name, ty)) in t.fields.iter_mut().zip([("文本", FieldType::Text), ("单选", FieldType::SingleSelect), ("日期", FieldType::Date), ("附件", FieldType::Attachment)]) { f.name = name.into(); f.ty = ty; }
     let opt = |id: u32, name: &str| SelectOption { id, name: name.into(), color: 0 };
     t.fields[1].opts.options = vec![opt(301, "待办"), opt(302, "完成")];
     let mut add = |id: FieldId, name: &str, ty: FieldType, opts: FieldOpts| t.fields.push(Field { id, name: name.into(), ty, opts, desc: String::new() });

@@ -50,7 +50,11 @@ fn step(d: &mut Doc, r: &mut Rng) {
             }
             d.add_field(tid, Some(r.below(fids.len() + 1)), r.pick(&["", "名称", "数量", "id", "_x", "文本"]).unwrap(), ty, o);
         }
-        10 => { if let Some(f) = r.pick(&fids) { d.remove_field(tid, *f); } }
+        10 => if r.below(2) == 0 { if let Some(f) = r.pick(&fids) { d.remove_field(tid, *f); } } else {
+            // several at once (表头多选后删除): one undo step
+            let ids: Vec<FieldId> = (0..r.below(3) + 1).filter_map(|_| r.pick(&fids).copied()).collect();
+            d.remove_fields(tid, &ids);
+        },
         11 => { if let Some(f) = r.pick(&fids) { d.duplicate_field(tid, *f); } }
         12 | 13 => {
             let Some(mut f) = r.pick(&fids).and_then(|f| t.field(*f)).cloned() else { return };

@@ -1649,11 +1649,11 @@ impl Render for Workspace {
         let export_md = self.render_export_md(cx);
         // Only the note stands out: a white plane flush with the window's top,
         // right and bottom edges. The sidebar sits sunken on the window
-        // surface beside it; the change of value is the only line between
-        // them (no gutter, radius, border or shadow).
+        // surface beside it; a faint shade along the plane's left edge parts
+        // the two (no gutter, radius or border).
         // A document sits on its theme's page colour.
         let page = if self.view == View::Doc { crate::editor_theme::Theme::bg_body() } else { Theme::bg_body() };
-        let note = div().id("note").relative().flex_1().min_w_0().h_full().flex().bg(page).child(main)
+        let note = div().id("note").relative().flex_1().min_w_0().h_full().flex().bg(page).shadow(theme::shadow_note()).child(main)
             // Files from the Finder dropped on 主页 or a folder's page are imported there.
             .when(matches!(self.view, View::Home | View::Folder), |d| d
                 .on_drag_move(cx.listener(|w, ev: &DragMoveEvent<ExternalPaths>, _, cx| w.file_drag_move(ev, cx)))

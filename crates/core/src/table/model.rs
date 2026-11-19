@@ -298,15 +298,16 @@ impl RowHeight {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ViewKind { #[default] Grid, Kanban, Gallery, Calendar, Gantt, Form }
+/// A file's old 画册 view reads back as 表格 (an unknown kind is the default).
+pub enum ViewKind { #[default] Grid, Kanban, Calendar, Gantt, Form }
 
 impl ViewKind {
-    pub const ALL: &'static [ViewKind] = &[ViewKind::Grid, ViewKind::Kanban, ViewKind::Gallery, ViewKind::Calendar, ViewKind::Gantt, ViewKind::Form];
+    pub const ALL: &'static [ViewKind] = &[ViewKind::Grid, ViewKind::Kanban, ViewKind::Calendar, ViewKind::Gantt, ViewKind::Form];
     pub fn label(self) -> &'static str {
-        match self { ViewKind::Grid => "表格视图", ViewKind::Kanban => "看板视图", ViewKind::Gallery => "画册视图", ViewKind::Calendar => "日历视图", ViewKind::Gantt => "甘特视图", ViewKind::Form => "表单视图" }
+        match self { ViewKind::Grid => "表格视图", ViewKind::Kanban => "看板视图", ViewKind::Calendar => "日历视图", ViewKind::Gantt => "甘特视图", ViewKind::Form => "表单视图" }
     }
     pub fn short(self) -> &'static str {
-        match self { ViewKind::Grid => "表格", ViewKind::Kanban => "看板", ViewKind::Gallery => "画册", ViewKind::Calendar => "日历", ViewKind::Gantt => "甘特图", ViewKind::Form => "表单" }
+        match self { ViewKind::Grid => "表格", ViewKind::Kanban => "看板", ViewKind::Calendar => "日历", ViewKind::Gantt => "甘特图", ViewKind::Form => "表单" }
     }
 }
 
@@ -424,7 +425,7 @@ pub struct ViewOpts {
     pub colors: Vec<ColorRule>,
     /// 看板: the 单选 / 人员 field its columns come from.
     pub stack: Option<FieldId>,
-    /// 画册 / 看板: the 附件 field whose first image is the card's cover.
+    /// 看板: the 附件 field whose first image is the card's cover.
     pub cover: Option<FieldId>,
     /// 日历 / 甘特: start and end 日期 fields.
     pub date: Option<FieldId>,
@@ -529,26 +530,26 @@ impl Base {
         free_name(want, |n| super::sqlite_name_ok(n) && !self.tables.iter().any(|t| Some(t.id) != except && t.name.eq_ignore_ascii_case(n)))
     }
 
-    /// 飞书's blank table: 文本 (the title), 单选, 日期, 附件, five empty rows, one 表格 view.
+    /// A blank table: five 文本 columns (文本 1 … 文本 5, the first is the title), five empty rows, one 表格 view.
     pub fn blank_table(&mut self, name: &str, now: i64) -> Table {
         let name = self.free_table_name(name, None);
         let mut t = Table { id: self.new_id(), name, next_rec: 1, next_auto: 1, ..Default::default() };
-        for (n, ty) in [("文本", FieldType::Text), ("单选", FieldType::SingleSelect), ("日期", FieldType::Date), ("附件", FieldType::Attachment)] {
-            t.fields.push(Field { id: self.new_id(), name: n.into(), ty, opts: FieldOpts::default(), desc: String::new() });
+        for i in 1..=5 {
+            t.fields.push(Field { id: self.new_id(), name: format!("文本 {i}"), ty: FieldType::Text, opts: FieldOpts::default(), desc: String::new() });
         }
         for _ in 0..5 {
             t.records.push(Record { id: t.next_rec, created: now, modified: now, auto: t.next_auto, ..Default::default() });
             t.next_rec += 1;
             t.next_auto += 1;
         }
-        t.views.push(View { id: self.new_id(), name: "表格".into(), kind: ViewKind::Grid, opts: ViewOpts { frozen: 1, ..Default::default() } });
+        t.views.push(View { id: self.new_id(), name: "表格视图".into(), kind: ViewKind::Grid, opts: ViewOpts { frozen: 1, ..Default::default() } });
         t
     }
 
     /// A new file's content: one blank table.
     pub fn blank(now: i64) -> Base {
         let mut b = Base::default();
-        let t = b.blank_table("数据表", now);
+        let t = b.blank_table("未命名数据表", now);
         b.tables.push(t);
         b
     }

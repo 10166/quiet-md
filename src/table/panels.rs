@@ -333,7 +333,7 @@ fn field_list(t: &Table, view: &View, panel: &Panel, cx: &Context<TableView>) ->
             .child(div().id(("tb-pl-show", fid)).flex_none().h(px(24.)).px(px(4.)).flex().items_center().cursor_pointer().child(switch(!hidden))
                 .on_click(cx.listener(move |v, _, _, cx| {
                     v.edit_view(cx, |view| if !view.opts.hidden.remove(&fid) { view.opts.hidden.insert(fid); });
-                    if v.col_sel == Some(fid) { v.col_sel = None; }
+                    v.col_sel.retain(|f| *f != fid);
                 })))
             .on_drag(FieldDrag { id: fid, at, name: f.name.clone(), glyph: field_glyph(f.ty) }, |d, _, _, cx| cx.new(|_| d.clone()))
             // the line it would land on: under a row below where it came from, over one above
@@ -344,7 +344,7 @@ fn field_list(t: &Table, view: &View, panel: &Panel, cx: &Context<TableView>) ->
     let every = |id: &'static str, text: &str, hide: bool| text_btn(id, "", text).on_click(cx.listener(move |v, _, _, cx| {
         let ids: Vec<FieldId> = if hide { peek(v, cx, |t, _| t.fields.iter().skip(1).map(|f| f.id).collect()).unwrap_or_default() } else { vec![] };
         v.edit_view(cx, |view| view.opts.hidden = ids.into_iter().collect());
-        if hide { v.col_sel = None; }
+        if hide { v.col_sel.clear(); }
     }));
     shell("tb-panel-fields", 280., cx).py(px(6.))
         .children(panel.search.as_ref().map(|(e, _)| div().flex_none().h(px(36.)).px(px(12.)).mb(px(4.)).flex().items_center().gap(px(6.)).border_b_1().border_color(Theme::line_divider())

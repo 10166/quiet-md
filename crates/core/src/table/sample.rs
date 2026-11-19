@@ -40,7 +40,7 @@ const TASKS: &[(&str, usize)] = &[
 
 /// A project tracker around `now` (wall-clock milliseconds): 「项目任务」,
 /// 40 records over every field type but 附件, in four views (表格, grouped
-/// by 状态 with a filter and a sort, 看板, 画册), linked both ways to
+/// by 状态 with a filter and a sort, 看板), linked both ways to
 /// 「项目」, which counts and sums its tasks. The same `now` gives the same base.
 pub fn demo(now: i64) -> Base {
     use FieldType::*;
@@ -137,7 +137,6 @@ pub fn demo(now: i64) -> Base {
             ..Default::default()
         }),
         view(&mut b, "看板", ViewKind::Kanban, ViewOpts { frozen: 1, stack: Some(status.id), hidden: [url.id, created.id, no.id, spent.id, lead.id].into_iter().collect(), ..Default::default() }),
-        view(&mut b, "画册", ViewKind::Gallery, ViewOpts { frozen: 1, hidden: [url.id, created.id, hours.id, spent.id].into_iter().collect(), ..Default::default() }),
     ];
     let project_views = vec![view(&mut b, "表格", ViewKind::Grid, ViewOpts { frozen: 1, ..Default::default() })];
     b.tables.push(Table {
@@ -218,7 +217,7 @@ mod tests {
         assert_eq!(b, demo(NOW));
         let (t, p) = (&b.tables[0], &b.tables[1]);
         assert_eq!((t.name.as_str(), t.records.len(), t.fields.len(), p.name.as_str(), p.records.len()), ("项目任务", 40, 18, "项目", 6));
-        assert_eq!(t.views.iter().map(|v| v.kind).collect::<Vec<_>>(), [ViewKind::Grid, ViewKind::Grid, ViewKind::Kanban, ViewKind::Gallery]);
+        assert_eq!(t.views.iter().map(|v| v.kind).collect::<Vec<_>>(), [ViewKind::Grid, ViewKind::Grid, ViewKind::Kanban]);
         // every type the picker has but 附件
         for ty in FieldType::ALL.iter().filter(|ty| !matches!(ty, FieldType::Attachment | FieldType::Phone | FieldType::Email | FieldType::Location | FieldType::Barcode | FieldType::ModifiedTime)) {
             assert!(t.fields.iter().chain(&p.fields).any(|f| f.ty == *ty), "{ty:?}");

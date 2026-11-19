@@ -478,7 +478,7 @@ fn read_table(conn: &Connection, sql: &str, mut t: Table, described: bool, next:
     }
     if t.views.is_empty() {
         *next += 1;
-        t.views.push(View { id: *next, name: "表格".into(), kind: ViewKind::Grid, opts: ViewOpts { frozen: 1, ..Default::default() } });
+        t.views.push(View { id: *next, name: "表格视图".into(), kind: ViewKind::Grid, opts: ViewOpts { frozen: 1, ..Default::default() } });
     }
     Some(t)
 }
@@ -661,7 +661,6 @@ mod tests {
             grid(&mut b, "全部", ViewKind::Grid, ViewOpts { frozen: 1, ..Default::default() }),
             grid(&mut b, "在读", ViewKind::Grid, busy),
             grid(&mut b, "看板", ViewKind::Kanban, ViewOpts { stack: Some(state.id), cover: Some(cover.id), ..Default::default() }),
-            grid(&mut b, "画册", ViewKind::Gallery, ViewOpts { cover: Some(cover.id), ..Default::default() }),
             grid(&mut b, "日历", ViewKind::Calendar, ViewOpts { date: Some(start.id), ..Default::default() }),
             grid(&mut b, "甘特", ViewKind::Gantt, ViewOpts { date: Some(start.id), end: Some(start.id), ..Default::default() }),
             grid(&mut b, "表单", ViewKind::Form, ViewOpts::default()),
@@ -1052,9 +1051,10 @@ mod tests {
         sync(&mut doc, &path);
         // names only a hand-built base could have are mended on the way out
         let mut odd = Base::blank(T0);
+        odd.tables[0].name = "数据表".into();
         let again = odd.tables[0].clone();
         odd.tables.push(Table { id: 90, name: "数据表".into(), fields: again.fields.iter().map(|f| Field { id: 300 + f.id, ..f.clone() }).collect(), views: vec![], ..again.clone() });
-        odd.tables.push(Table { id: 91, name: "_tables".into(), fields: again.fields.iter().enumerate().map(|(i, f)| Field { id: 100 + i as u32, name: ["id", "ID", "_meta", ""][i].into(), ..f.clone() }).collect(), views: vec![], ..again });
+        odd.tables.push(Table { id: 91, name: "_tables".into(), fields: again.fields.iter().take(4).enumerate().map(|(i, f)| Field { id: 100 + i as u32, name: ["id", "ID", "_meta", ""][i].into(), ..f.clone() }).collect(), views: vec![], ..again });
         odd.next_id = 200;
         let path = dir.file("odd.sqlite");
         create(&path, &odd).unwrap();

@@ -1,6 +1,6 @@
 //! 数据表 (多维表格) view, after 飞书's: tabs for the file's tables and the
 //! table's views, a toolbar (字段配置 / 筛选 / 分组 / 排序 / 行高 / 填色), and
-//! the view itself (`grid`, `kanban`, `gallery`), with 记录详情 beside it.
+//! the view itself (`grid`, `kanban`), with 记录详情 beside it.
 //! The engine is `fdl_core::table` (re-exported here); this module is the
 //! GPUI side.
 //!
@@ -17,7 +17,6 @@ pub mod style;
 mod cell;
 mod editors;
 mod fields;
-mod gallery;
 mod grid;
 mod kanban;
 mod keys;
@@ -182,7 +181,6 @@ pub(crate) enum Popup {
     /// The view list under a table-in-a-page's view name.
     Views,
     AddView,
-    TableMenu(TableId),
     Stat(FieldId),
     More,
 }
@@ -234,7 +232,8 @@ pub struct TableView {
     result_key: (u64, TableId, ViewId, i64),
     pub(crate) sel: Option<Sel>,
     pub(crate) rows_sel: HashSet<RecId>,
-    pub(crate) col_sel: Option<FieldId>,
+    /// Selected columns (header clicks; ⇧ extends, ⌘ adds or takes away), in the order picked.
+    pub(crate) col_sel: Vec<FieldId>,
     pub(crate) editing: Option<CellId>,
     pub(crate) input: Entity<TextField>,
     /// A second field for popups: option search, renames.
@@ -254,8 +253,12 @@ pub struct TableView {
     /// 表内搜索: the text, its matches, the current one.
     pub(crate) find: Option<Find>,
     pub(crate) find_input: Entity<TextField>,
-    /// Kanban / gallery scroll.
+    /// Kanban scroll.
     pub(crate) board_scroll: ScrollHandle,
+    /// Where a dragged kanban card would land: its column's option, and the card it goes before (None: the end).
+    pub(crate) kb_drop: Option<(Option<OptId>, Option<RecId>)>,
+    /// The column whose right edge is under the pointer (its width can be dragged there).
+    pub(crate) grip_hover: Option<FieldId>,
     _refresh: Task<()>,
     _subs: Vec<Subscription>,
 }
@@ -297,6 +300,8 @@ impl TableView {
             }),
         ];
         subs.push(cx.on_focus_out(&input.focus_handle(cx), window, |v, _, window, cx| if v.editing.is_some() { v.commit_edit(true, window, cx); }));
+        // a click away from the rename box keeps the name, as Finder does
+        subs.push(cx.on_focus_out(&aux.focus_handle(cx), window, |v, _, _, cx| v.finish_rename(true, cx)));
         // another program may write the file: look again every couple of seconds while shown
         let refresh = cx.spawn(async move |this, cx| loop {
             cx.background_executor().timer(Duration::from_secs(2)).await;
@@ -309,10 +314,10 @@ impl TableView {
         TableView {
             state, focus: cx.focus_handle(), table, view, full, standalone, height: shown.height,
             result: Default::default(), tops: Default::default(), order: Default::default(), row_of: Default::default(), result_key: (u64::MAX, 0, 0, 0),
-            sel: None, rows_sel: HashSet::new(), col_sel: None, editing: None, input, aux, scroll: point(0., 0.),
+            sel: None, rows_sel: HashSet::new(), col_sel: vec![], editing: None, input, aux, scroll: point(0., 0.),
             body: Rc::new(Cell::new(Bounds::default())), drag: None, popup: None, dropdown: None, rename: None,
             views_new: false, expanded: None, record: Default::default(), find: None, find_input,
-            board_scroll: ScrollHandle::new(), _refresh: refresh, _subs: subs,
+            board_scroll: ScrollHandle::new(), kb_drop: None, grip_hover: None, _refresh: refresh, _subs: subs,
         }
     }
 
@@ -372,7 +377,7 @@ impl TableView {
             let alive = |c: &CellId| t.record(c.0).is_some() && t.field(c.1).is_some();
             if self.sel.is_some_and(|s| !alive(&s.anchor) || !alive(&s.head)) { self.sel = None; }
             self.rows_sel.retain(|r| t.record(*r).is_some());
-            if self.col_sel.is_some_and(|f| t.field(f).is_none()) { self.col_sel = None; }
+            self.col_sel.retain(|f| t.field(*f).is_some());
             if self.expanded.is_some_and(|r| t.record(r).is_none()) { self.expanded = None; }
         }
         if before != (self.table, self.view) { cx.emit(TableEvent::Shown); }
@@ -390,21 +395,10 @@ impl TableView {
         cx.notify();
     }
 
-    pub(crate) fn show_table(&mut self, table: TableId, window: &mut Window, cx: &mut Context<Self>) {
-        self.commit_edit(true, window, cx);
-        self.table = table;
-        self.view = self.state.read(cx).doc.base.table(table).and_then(|t| t.views.first()).map_or(0, |v| v.id);
-        self.clear_selection();
-        self.expanded = None;
-        self.scroll = point(0., 0.);
-        cx.emit(TableEvent::Shown);
-        cx.notify();
-    }
-
     pub(crate) fn clear_selection(&mut self) {
         self.sel = None;
         self.rows_sel.clear();
-        self.col_sel = None;
+        self.col_sel.clear();
         self.editing = None;
     }
 
@@ -478,24 +472,30 @@ impl TableView {
     }
 
     fn aux_event(&mut self, ev: TextFieldEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(r) = &self.rename {
+        if self.rename.is_some() {
             match ev {
-                TextFieldEvent::Submit => {
-                    let name = self.aux.read(cx).text.clone();
-                    match *r {
-                        Rename::View(v) => { let t = self.table; self.edit(cx, |d| d.rename_view(t, v, &name)); cx.emit(TableEvent::Shown); }
-                        Rename::Table(t) => { self.edit(cx, |d| d.rename_table(t, &name)); cx.emit(TableEvent::Shown); }
-                    }
-                    self.rename = None;
-                    window.focus(&self.focus, cx);
-                }
-                TextFieldEvent::Cancel => { self.rename = None; window.focus(&self.focus, cx); }
+                TextFieldEvent::Submit => { self.finish_rename(true, cx); window.focus(&self.focus, cx); }
+                TextFieldEvent::Cancel => { self.finish_rename(false, cx); window.focus(&self.focus, cx); }
                 _ => {}
             }
             cx.notify();
             return;
         }
         editors::aux_event(self, ev, window, cx);
+    }
+
+    /// End renaming: keep the name typed (unless it is blank) or drop it.
+    pub(crate) fn finish_rename(&mut self, save: bool, cx: &mut Context<Self>) {
+        let Some(r) = self.rename.take() else { return };
+        let name = self.aux.read(cx).text.trim().to_string();
+        if save && !name.is_empty() {
+            match r {
+                Rename::View(v) => { let t = self.table; self.edit(cx, |d| d.rename_view(t, v, &name)); }
+                Rename::Table(t) => { self.edit(cx, |d| d.rename_table(t, &name)); }
+            }
+            cx.emit(TableEvent::Shown);
+        }
+        cx.notify();
     }
 
     pub(crate) fn begin_rename(&mut self, r: Rename, window: &mut Window, cx: &mut Context<Self>) {
@@ -508,8 +508,9 @@ impl TableView {
         };
         let Some(name) = name else { return };
         self.popup = None;
-        // 飞书's rename box: 16px text, all of it selected
-        self.aux.update(cx, |t, cx| { t.size = 16.; t.line_height = 22.; t.set_placeholder("", cx); t.set_text(&name, cx); t.select_all_text(cx); });
+        // the name at the size it shows in, all of it selected
+        let (size, lh) = if matches!(r, Rename::Table(_)) { (14., 20.) } else { (TEXT, 18.) };
+        self.aux.update(cx, |t, cx| { t.size = size; t.line_height = lh; t.set_placeholder("", cx); t.set_text(&name, cx); t.select_all_text(cx); });
         window.focus(&self.aux.focus_handle(cx), cx);
         self.rename = Some(r);
         cx.notify();
@@ -542,8 +543,7 @@ impl Render for TableView {
         let main = match v.kind {
             ViewKind::Grid => grid::render(self, base, t, v, window, cx),
             ViewKind::Kanban => kanban::render(self, base, t, v, window, cx),
-            ViewKind::Gallery => gallery::render(self, base, t, v, window, cx),
-            _ => gallery::unsupported(v.kind),
+            _ => unsupported(v.kind),
         };
         let side = self.expanded.and_then(|r| t.record(r)).map(|r| record::render(self, base, t, v, r, window, cx));
         let body = div().flex_1().min_h_0().flex()
@@ -553,7 +553,7 @@ impl Render for TableView {
         // name; its tools only while the pointer is over the table), no frame
         // around the block, and as tall as its rows. Full pane: the whole chrome.
         let root = if self.full {
-            root.child(menus::tabs(self, base, t, v, cx)).child(menus::toolbar(self, base, t, v, cx)).child(body)
+            root.child(menus::bar(self, t, v, cx)).child(body)
         } else {
             let grid = v.kind == ViewKind::Grid;
             let h = if grid {
@@ -562,7 +562,7 @@ impl Render for TableView {
             } else { INLINE_HEAD_H + INLINE_BOARD_H };
             self.height = h;
             root.group("tb-block").h(px(h))
-                .child(menus::inline_header(self, base, t, v, cx))
+                .child(menus::inline_header(self, t, v, cx))
                 .child(body.when(!grid, |d| d.border_t_1().border_color(line())))
         };
         root
@@ -570,4 +570,9 @@ impl Render for TableView {
             .children(menus::dropdown(self, cx))
             .into_any_element()
     }
+}
+
+/// A view kind that has no layout yet.
+fn unsupported(kind: ViewKind) -> AnyElement {
+    div().flex_1().flex().items_center().justify_center().text_color(Theme::text_placeholder()).child(format!("{}{}", crate::settings::label(kind.label()), crate::settings::label("暂未支持"))).into_any_element()
 }
