@@ -443,7 +443,7 @@ impl Workspace {
             cx.observe_window_activation(window, |this, window, cx| {
                 if window.is_window_active() {
                     if let Some(id) = &this.current { crate::quick_note::used(id, cx); }
-                    if !this.store.file_task_busy() { this.entries = this.store.list(); this.sort(); this.refresh_markdown(cx); }
+                    if !this.store.file_task_busy() { this.entries = this.store.list(); this.sort(); this.refresh_markdown(Some(window.window_handle().window_id()), cx); }
                     crate::update::check_if_stale(cx); cx.notify();
                 }
                 else if !this.store.file_task_busy() { this.cancel_home_drag(cx); this.end_folder_drag(true, cx); this.cancel_shortcut_recording(cx); this.flush(cx); }
@@ -505,7 +505,7 @@ impl Workspace {
                     Some((path, meta.modified().ok()?, meta.len()))
                 }).await;
                 if file != last_file {
-                    let _ = this.update(cx, |w, cx| w.refresh_markdown(cx));
+                    let _ = this.update(cx, |w, cx| w.refresh_markdown(None, cx));
                     last_file = file;
                 }
                 if now == last { continue }
@@ -617,11 +617,13 @@ impl Workspace {
         ws.load_home();
         // An empty library opens on 主页's empty state; only a quick note
         // window starts a document of its own. The main window returns to the
-        // document read last (#234), or the home page when that is set.
+        // document read last (#234), or the home page when that is set; the
+        // site's live demo always starts on 主页, so visitors see the whole
+        // notebook first.
         match document {
             Some(id) => ws.open(&id, window, cx),
             None if quick => ws.new_doc(window, cx),
-            None if !crate::settings::prefs().start_home => {
+            None if !crate::settings::prefs().start_home && !cfg!(target_family = "wasm") => {
                 // Nothing read yet (a fresh library, whose guides all start at
                 // `opened == 0`): the first document, as before — `max_by_key`
                 // keeps the last of equal maxima, which would open the last
@@ -1135,7 +1137,8 @@ impl Workspace {
         }
     }
 
-    fn refresh_markdown(&mut self, cx: &mut Context<Self>) {
+    /// `on_stack`: the window being updated, if any (it can't be read now; it is this one).
+    fn refresh_markdown(&mut self, on_stack: Option<gpui::WindowId>, cx: &mut Context<Self>) {
         if self.preview.is_some() || self.store.file_task_busy() || matches!(self.confirm, Some(Confirm::SaveFailed)) { return }
         let Some(id) = self.current.clone() else { return };
         if !self.store.is_markdown(&id) { return }
@@ -1144,7 +1147,7 @@ impl Workspace {
             return
         }
         // A newly opened sibling can be clean while its source view still has a pending edit.
-        if cx.windows().into_iter().filter_map(|h| h.downcast::<Workspace>()?.entity(cx).ok())
+        if cx.windows().into_iter().filter(|h| Some(h.window_id()) != on_stack).filter_map(|h| h.downcast::<Workspace>()?.entity(cx).ok())
             .filter(|p| p.entity_id() != cx.entity_id())
             .any(|p| { let w = p.read(cx); w.current.as_ref() == Some(&id) && w.unsaved }) { return }
         if let Ok(Some(doc)) = self.store.with(|s| s.refresh_markdown(&id)) {

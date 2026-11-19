@@ -552,8 +552,14 @@ impl ImageCache for DocImages {
                             s.ready = Some(Instant::now());
                             cx.update(|cx| { for view in s.waiters.drain(..) { cx.notify(view); } });
                         }
-                        // Skipped off screen: asked for again when drawn.
-                        None => { map.remove(&r); }
+                        // Skipped as off screen: asked for again when drawn. A view
+                        // reused from the last frame may still show it (the frame
+                        // that looked newer just didn't paint it), so its views
+                        // draw again and ask once more if it is there.
+                        None => {
+                            let waiters = map.remove(&r).map(|s| s.waiters).unwrap_or_default();
+                            cx.update(|cx| { for view in waiters { cx.notify(view); } });
+                        }
                     }
                 }
                 drop(map);

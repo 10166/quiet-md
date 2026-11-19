@@ -83,6 +83,7 @@ $V refresh                    # 用当前快照重写所有补丁的 diff（只�
 | 0033 glyph-outline | 37、38 | `gpui/platform.rs`、`text_system.rs`、`gpui_apple/text_system.rs`、`gpui_windows/direct_write.rs`（加 `Win32_Graphics_Direct2D_Common`）、`gpui_wgpu/cosmic_text_system.rs`、`gpui_web/text_system.rs` | `WindowTextSystem::glyph_outline` 和 `GlyphOutlineCmd`：字形轮廓（字体单位、y 向上）。macOS 用 font-kit（合成斜体同样错切），Windows 用 DirectWrite `GetGlyphRunOutline`，Linux 和网页用 swash；网页的画布回退字体没有。画板的 CPU 渲染（vello）和旋转文字用它。macOS 加载没有 `m` 字形的 Xiaolai |
 | 0034 image-into-frames | 新 | `gpui/assets.rs` | `RenderImage::into_frames`：取回图片的帧。画板的 vello 帧每次画面变化新建一张图片，上一张 `drop_image` 后把它的缓冲取回，下一帧 vello 直接画进去（`src/board/render_vello.rs`），省掉每帧新分配和拷贝 12 MB |
 | 0035 macos-file-image-clipboard | 新 | `gpui_macos/pasteboard.rs` | 复制单个文件时保留剪贴板附带的位图，供编辑器粘贴微信等应用的图片。 |
+| 0036 web-focus-reentry | 新 | `gpui_web/events.rs`、`gpui_web/window.rs` | 浏览器的 focus / blur 可能在 GPUI 处理另一个事件的中途同步触发（按下指针时聚焦输入法镜像、官网页面把焦点移进 iframe），这时刷新窗口的激活状态会重入窗口更新，panic「attempted to read a window that is already on the stack」，之后应用不再绘制、不再响应输入（官网实时笔记本第一次点击就卡死）。改为下一轮再刷新激活状态。 |
 
 ## 没有再带的旧补丁
 
