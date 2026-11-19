@@ -453,7 +453,8 @@ impl Workspace {
 
     /// One level of the tree as 主页 shows it (a folder's page uses it too).
     pub(crate) fn level_entries(&self, parent: Option<&str>) -> Vec<Entry> {
-        self.sorted_entries(self.entries.iter().filter(|e| e.meta.parent.as_deref() == parent).cloned().collect())
+        // Folders under 本机文件 aren't the library's: not on its top level.
+        self.sorted_entries(self.entries.iter().filter(|e| e.meta.parent.as_deref() == parent && !(parent.is_none() && e.meta.mounted())).cloned().collect())
     }
 
     pub(crate) fn prepare_manual_order(&mut self, cx: &mut Context<Self>) -> bool {
