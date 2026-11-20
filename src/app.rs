@@ -160,6 +160,7 @@ pub fn quit(cx: &mut App) {
         .map(|w| w.update(cx, |ws, _, cx| ws.save_before(cx, |_, _, cx| cx.defer(quit))).unwrap_or(false))
         .fold(true, |ready, saved| ready & saved);
     if ready {
+        crate::local_api::shutdown(cx);
         crate::sync::flush_before_quit(cx);
         cx.quit();
     }
@@ -177,11 +178,13 @@ pub fn switch_library(root: std::path::PathBuf, cx: &mut App) {
         .map(|w| { let again = root.clone(); w.update(cx, |ws, _, cx| ws.save_before(cx, move |_, _, cx| cx.defer(move |cx| switch_library(again, cx)))).unwrap_or(false) })
         .fold(true, |ready, saved| ready & saved);
     if !ready { return }
+    crate::local_api::shutdown(cx);
     crate::sync::flush_before_quit(cx);
     let prefs = crate::store::Store::internal_dir().join("preferences.json");
     let set = crate::guides::initialize(&root).and_then(|_| crate::store::Store::set_root_dir(root.clone()));
     if let Err(e) = set {
         crate::sync::reinit_for_library(cx);
+        crate::local_api::init(cx);
         let msg = format!("{}{e}", crate::settings::tr("无法在这里创建文档库：", "Couldn't create the library here: "));
         if let Some(ws) = cx.windows().into_iter().find_map(|w| w.downcast::<Workspace>()) { let _ = ws.update(cx, |w, _, cx| w.show_toast(&msg, cx)); }
         return;
@@ -388,6 +391,7 @@ pub struct Workspace {
     pub(crate) pending_remote_board: Option<crate::sync::PendingRemoteBoard>,
     pub(crate) conflict_banner: Option<crate::sync::ConflictBanner>,
     pub(crate) sync_ui: crate::sync_ui::SyncUiState,
+    pub(crate) ai_ui: crate::ai_ui::AiUiState,
     _subs: Vec<Subscription>,
 }
 
@@ -620,6 +624,7 @@ impl Workspace {
             pending_remote_board: None,
             conflict_banner: None,
             sync_ui: crate::sync_ui::SyncUiState::new(window, cx),
+            ai_ui: crate::ai_ui::AiUiState::new(window, cx),
             save_task: None,
             dirty_since: None,
             unsaved: false,

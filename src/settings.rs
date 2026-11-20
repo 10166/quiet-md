@@ -293,7 +293,7 @@ pub(crate) fn watch_themes(cx: &mut Context<Workspace>) {
 // ---- the view
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Page { #[default] General, Appearance, Shortcuts, Library, Sync, About }
+pub enum Page { #[default] General, Appearance, Shortcuts, Library, Sync, Ai, About }
 
 impl Page {
     fn title(self) -> &'static str {
@@ -303,6 +303,7 @@ impl Page {
             Page::Shortcuts => tr("快捷键", "Shortcuts"),
             Page::Library => tr("文档库", "Documents"),
             Page::Sync => tr("云同步", "Cloud Sync"),
+            Page::Ai => tr("AI", "AI"),
             Page::About => tr("关于", "About"),
         }
     }
@@ -313,13 +314,14 @@ impl Page {
             Page::Shortcuts => "keyboard",
             Page::Library => "storage",
             Page::Sync => "cloud",
+            Page::Ai => "ai",
             Page::About => "info",
         }
     }
 }
 
 /// The sidebar list, one evenly spaced run; `None` is 回收站 (its own view, shown with this sidebar).
-const NAV: [Option<Page>; 7] = [Some(Page::General), Some(Page::Appearance), Some(Page::Shortcuts), Some(Page::Library), Some(Page::Sync), None, Some(Page::About)];
+const NAV: [Option<Page>; 8] = [Some(Page::General), Some(Page::Appearance), Some(Page::Shortcuts), Some(Page::Library), Some(Page::Sync), Some(Page::Ai), None, Some(Page::About)];
 
 // ---- controls (switch on the accent, 30pt buttons, grouped rows)
 
@@ -761,6 +763,7 @@ impl Workspace {
         self.shortcut_error = None;
         if self.view != View::Settings { self.show_view(View::Settings, cx); }
         if page == Page::Sync { self.sync_ui_enter(cx); }
+        if page == Page::Ai { self.ai_ui_enter(cx); }
         cx.notify();
     }
 
@@ -828,6 +831,7 @@ impl Workspace {
             Page::Shortcuts => self.shortcut_settings(cx),
             Page::Library => self.library_page(cx),
             Page::Sync => self.sync_page(cx),
+            Page::Ai => self.ai_page(cx),
             Page::About => self.about_page(cx),
         };
         div().flex_1().min_w_0().h_full().flex().flex_col().bg(Theme::bg_body()).text_color(Theme::text()).font_family(theme::UI_FONT)

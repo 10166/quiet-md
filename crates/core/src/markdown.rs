@@ -696,6 +696,11 @@ struct Md {
     math: bool,
 }
 
+/// Render a single [`RichText`] line to Markdown for read projections.
+pub(crate) fn inline_markdown(t: &RichText) -> String {
+    inline(t, &mut |_| None)
+}
+
 fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) -> String {
     // Merge runs that only differ in marks Markdown can't express (colors).
     let mut runs: Vec<(Md, String)> = vec![];

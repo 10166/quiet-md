@@ -120,7 +120,7 @@ fn step(c: &mut Core, rng: &mut Rng, allow_remote: bool) -> String {
     }
     let us = c.units();
     let any = |rng: &mut Rng| rng.pick(&us).id;
-    let n_choices = if allow_remote { 26 } else { 25 };
+    let n_choices = if allow_remote { 27 } else { 26 };
     match rng.below(n_choices) {
         0..=2 => {
             let s = *rng.pick(TEXTS);
@@ -229,6 +229,7 @@ fn step(c: &mut Core, rng: &mut Rng, allow_remote: bool) -> String {
             "trailing_line".into()
         }
         24 => comment_step(c, rng),
+        25 => agent_step(c, rng),
         _ => {
             let mut remote = c.doc.clone();
             if rng.chance(50) {
@@ -449,6 +450,51 @@ fn comment_step(c: &mut Core, rng: &mut Rng) -> String {
             format!("delete_comment({tid})")
         }
         _ => "comment(none)".into(),
+    }
+}
+
+fn agent_step(c: &mut Core, rng: &mut Rng) -> String {
+    use crate::agent;
+    let n = c.doc.blocks.len();
+    if n == 0 {
+        return "agent(empty)".into();
+    }
+    let idx = rng.below(n);
+    let target_ref = agent::make_block_ref(&[idx], &c.doc.blocks[idx]);
+    match rng.below(5) {
+        0 => {
+            let pos = *rng.pick(&[agent::InsertPosition::Before, agent::InsertPosition::After, agent::InsertPosition::Append, agent::InsertPosition::Prepend]);
+            let md = *rng.pick(&["新段落", "## 新标题\n\n- 列表一\n- 列表二", "```rust\nlet a = 1;\n```", "> 引用块"]);
+            let _ = agent::apply_insert_blocks(c, pos, Some(&target_ref), md);
+            format!("agent_insert({pos:?}, {idx})")
+        }
+        1 => {
+            let end = idx + rng.below((n - idx).min(2));
+            let end_ref = agent::make_block_ref(&[end], &c.doc.blocks[end]);
+            let allow = rng.chance(50);
+            let _ = agent::apply_replace_blocks(c, &target_ref, Some(&end_ref), "替换**内容**", allow);
+            format!("agent_replace({idx}..={end}, allow={allow})")
+        }
+        2 => {
+            let allow = rng.chance(50);
+            let _ = agent::apply_delete_blocks(c, &target_ref, None, allow);
+            format!("agent_delete({idx}, allow={allow})")
+        }
+        3 => {
+            let text = c.doc.blocks[idx].text.text.clone();
+            if let Some(ch) = text.chars().find(|&ch| ch != '\u{fffc}') {
+                let s = ch.to_string();
+                let rep = *rng.pick(TEXTS);
+                let _ = agent::apply_edit_block_text(c, &target_ref, &s, rep, Some(1));
+                return format!("agent_edit_text({idx}, {s:?} -> {rep:?})");
+            }
+            "agent_edit_text(skip)".into()
+        }
+        _ => {
+            let title = *rng.pick(&["新标题", "Agent Title", ""]);
+            c.agent_set_title(title);
+            format!("agent_set_title({title:?})")
+        }
     }
 }
 

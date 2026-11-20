@@ -46,6 +46,13 @@ impl SharedStore {
         if r.is_ok() { self.notify_saved(id, prev_ver); }
         r
     }
+    #[cfg(not(target_family = "wasm"))]
+    pub fn save_if_revision_matches(&mut self, id: &str, doc: &Document, expected_revision: &str) -> Result<Meta> {
+        let prev_ver = self.0.borrow().versions(id).into_iter().next().map(|v| v.name);
+        let r = self.0.borrow_mut().save_if_revision_matches(id, doc, expected_revision);
+        if r.is_ok() { self.notify_saved(id, prev_ver); }
+        r
+    }
     pub fn create(&mut self) -> Result<(String, Document)> {
         let r = self.0.borrow_mut().create();
         if let Ok((ref id, _)) = r { crate::sync::notify_upsert_doc(id); }

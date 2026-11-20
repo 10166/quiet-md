@@ -3801,6 +3801,277 @@ impl Core {
         }
         true
     }
+
+    // ---- agent / external structured edits
+
+    /// Resolve a parent block's child list by index path (`&[]` = top-level blocks).
+    /// Rejects non-nesting non-containers and `Grid` (whose children must be `Column`s).
+    fn agent_siblings_mut(&mut self, parent_path: &[usize]) -> Result<(&mut Vec<Block>, bool), String> {
+        if parent_path.is_empty() {
+            return Ok((&mut self.doc.blocks, true));
+        }
+        let mut list = &mut self.doc.blocks;
+        for (depth, &ix) in parent_path.iter().enumerate() {
+            let b = list.get_mut(ix).ok_or_else(|| format!("block path out of bounds at depth {depth} (index {ix})"))?;
+            if depth + 1 == parent_path.len() {
+                if matches!(b.kind, BlockKind::Grid) {
+                    return Err("cannot directly mutate columns of a grid block; target blocks inside a column instead".into());
+                }
+                if !b.kind.nests() && !b.kind.is_container() {
+                    return Err("target parent block cannot hold children".into());
+                }
+                let must_keep_one = b.kind.is_container();
+                return Ok((&mut b.children, must_keep_one));
+            }
+            list = &mut b.children;
+        }
+        unreachable!()
+    }
+
+    /// Insert sanitized blocks at `index` inside `parent_path` (`&[]` = root).
+    pub fn agent_insert_blocks(&mut self, parent_path: &[usize], index: usize, blocks: Vec<Block>) -> Result<Vec<BlockId>, String> {
+        let blocks = sanitize_agent_blocks(blocks);
+        if blocks.is_empty() {
+            return Err("no blocks to insert".into());
+        }
+        // Validate path and bounds before recording undo.
+        {
+            let (siblings, _) = self.agent_siblings_mut(parent_path)?;
+            if index > siblings.len() {
+                return Err(format!("insert index {index} exceeds sibling count {}", siblings.len()));
+            }
+        }
+        self.checkpoint(EditKind::Other);
+        self.break_coalescing();
+        let ids: Vec<BlockId> = blocks.iter().map(|b| b.id).collect();
+        let (siblings, _) = self.agent_siblings_mut(parent_path)?;
+        siblings.splice(index..index, blocks);
+        self.block_sel = None;
+        self.cell_sel = None;
+        self.fix_agent_selection();
+        Ok(ids)
+    }
+
+    /// Replace `start..=end_inclusive` inside `parent_path` with sanitized blocks.
+    pub fn agent_replace_blocks(&mut self, parent_path: &[usize], start: usize, end_inclusive: usize, blocks: Vec<Block>) -> Result<Vec<BlockId>, String> {
+        let mut blocks = sanitize_agent_blocks(blocks);
+        {
+            let (siblings, _) = self.agent_siblings_mut(parent_path)?;
+            if start > end_inclusive || end_inclusive >= siblings.len() {
+                return Err(format!("invalid block range {start}..={end_inclusive} for {} siblings", siblings.len()));
+            }
+        }
+        self.checkpoint(EditKind::Other);
+        self.break_coalescing();
+        let (siblings, must_keep_one) = self.agent_siblings_mut(parent_path)?;
+        let would_empty = start == 0 && end_inclusive + 1 == siblings.len() && blocks.is_empty();
+        if would_empty && must_keep_one {
+            blocks.push(Block::text(""));
+        }
+        let ids: Vec<BlockId> = blocks.iter().map(|b| b.id).collect();
+        siblings.splice(start..=end_inclusive, blocks);
+        if self.doc.blocks.is_empty() {
+            self.doc.blocks.push(Block::text(""));
+        }
+        self.block_sel = None;
+        self.cell_sel = None;
+        self.fix_agent_selection();
+        Ok(ids)
+    }
+
+    /// Delete `start..=end_inclusive` inside `parent_path`, preserving non-empty invariants.
+    pub fn agent_delete_blocks(&mut self, parent_path: &[usize], start: usize, end_inclusive: usize) -> Result<(), String> {
+        self.agent_replace_blocks(parent_path, start, end_inclusive, Vec::new()).map(|_| ())
+    }
+
+    /// Replace `old_text` with `new_text` inside the text block at `path`, preserving
+    /// marks, links, inline objects and comment anchors outside/around the replaced span.
+    pub fn agent_edit_block_text(&mut self, path: &[usize], old_text: &str, new_text: &str, occurrence: Option<usize>) -> Result<BlockId, String> {
+        if path.is_empty() {
+            return Err("block path cannot be empty".into());
+        }
+        if old_text.is_empty() {
+            return Err("old_text must not be empty".into());
+        }
+        if old_text.contains('\u{fffc}') || new_text.contains('\u{fffc}') {
+            return Err("old_text and new_text cannot contain inline object placeholder U+FFFC".into());
+        }
+        // Validate and find the target byte range before recording undo.
+        let (block_id, range, is_code) = {
+            let mut list = &self.doc.blocks;
+            let mut found = None;
+            for (depth, &ix) in path.iter().enumerate() {
+                let b = list.get(ix).ok_or_else(|| format!("block path out of bounds at depth {depth} (index {ix})"))?;
+                if depth + 1 == path.len() {
+                    found = Some(b);
+                } else {
+                    list = &b.children;
+                }
+            }
+            let b = found.unwrap();
+            if !b.kind.has_text() {
+                return Err("target block is not a text-editable block".into());
+            }
+            let matches: Vec<usize> = b.text.text.match_indices(old_text).map(|(i, _)| i).collect();
+            if matches.is_empty() {
+                return Err("old_text not found in target block".into());
+            }
+            let start = match occurrence {
+                Some(0) => return Err("occurrence is 1-based and must be >= 1".into()),
+                Some(n) => *matches.get(n - 1).ok_or_else(|| format!("occurrence {n} out of range (found {} matches)", matches.len()))?,
+                None => {
+                    if matches.len() > 1 {
+                        return Err(format!("old_text matched {} times in target block; provide more surrounding text or set occurrence (1..={})", matches.len(), matches.len()));
+                    }
+                    matches[0]
+                }
+            };
+            let end = start + old_text.len();
+            // Refuse overlapping inline objects.
+            for (r, m) in b.text.spans() {
+                if r.start < end && r.end > start && m.inline.is_some() {
+                    return Err("matched text overlaps an inline object".into());
+                }
+            }
+            (b.id, start..end, matches!(b.kind, BlockKind::Code { .. }))
+        };
+
+        self.checkpoint(EditKind::Other);
+        self.break_coalescing();
+        if let Some(b) = self.block_mut(block_id) {
+            let replaced = b.text.slice(range.start..range.end);
+            // Collect every comment thread anchored anywhere in the replaced span so none are lost.
+            let mut span_comments: Vec<String> = Vec::new();
+            for r in &replaced.runs {
+                for cid in &r.marks.comment_ids {
+                    if !span_comments.contains(cid) {
+                        span_comments.push(cid.clone());
+                    }
+                }
+            }
+            let marks = if is_code {
+                Marks::default()
+            } else {
+                let mut m = replaced.runs.first().map(|r| r.marks.clone()).unwrap_or_default();
+                m.inline = None;
+                for cid in &span_comments {
+                    if !m.comment_ids.contains(cid) {
+                        m.comment_ids.push(cid.clone());
+                    }
+                }
+                m
+            };
+            let mut ins = RichText::default();
+            if !new_text.is_empty() {
+                ins.push(new_text, marks);
+            }
+            b.text.replace(range, &ins);
+            // If replacing with empty text removed the last inline anchor of a comment in this block,
+            // promote it to a block-level anchor so the thread stays attached instead of becoming orphaned.
+            if new_text.is_empty() && !span_comments.is_empty() && b.kind.takes_comment() {
+                for cid in span_comments {
+                    let still_inline = b.text.runs.iter().any(|r| r.marks.comment_ids.contains(&cid));
+                    if !still_inline && !b.comment_ids.contains(&cid) {
+                        b.comment_ids.push(cid);
+                    }
+                }
+            }
+        }
+        self.block_sel = None;
+        self.cell_sel = None;
+        self.fix_agent_selection();
+        Ok(block_id)
+    }
+
+    /// Update the document title via Core so undo and selection stay consistent.
+    pub fn agent_set_title(&mut self, title: &str) {
+        let clean = title.replace(['\r', '\n'], " ");
+        self.checkpoint(EditKind::Other);
+        self.break_coalescing();
+        self.doc.title = RichText::plain(clean);
+        self.block_sel = None;
+        self.cell_sel = None;
+        self.fix_agent_selection();
+    }
+
+    /// Clamp selection and guarantee both endpoints remain visible stops in the same table/body scope.
+    fn fix_agent_selection(&mut self) {
+        self.fix_selection();
+        let us = self.units();
+        let a = us.iter().find(|u| u.id == self.sel.anchor.block).copied();
+        let h = us.iter().find(|u| u.id == self.sel.head.block).copied();
+        match (a, h) {
+            (Some(au), Some(hu)) if au.scope == hu.scope => {}
+            (_, Some(_)) => self.sel = Selection::caret(self.sel.head),
+            (Some(_), None) => self.sel = Selection::caret(self.sel.anchor),
+            (None, None) => {
+                let fallback = us.get(1).map(|u| u.id).unwrap_or(TITLE);
+                self.sel = Selection::caret(Pos::new(fallback, 0));
+            }
+        }
+    }
+}
+
+/// Normalize externally constructed blocks (e.g. from Markdown paste) so every
+/// model invariant holds: unique IDs, no styles in code, no children on leaf
+/// blocks, no dangling comment IDs, no orphan columns, and repaired tables.
+fn sanitize_agent_blocks(blocks: Vec<Block>) -> Vec<Block> {
+    fn clean_text(t: &mut RichText, strip_marks: bool) {
+        if strip_marks {
+            let plain = t.plain_text();
+            *t = RichText::plain(plain);
+            return;
+        }
+        let len = t.len();
+        if len > 0 {
+            t.update_marks(0..len, |m| m.comment_ids.clear());
+        }
+    }
+
+    fn clean_one(mut b: Block, in_grid: bool) -> Option<Block> {
+        if matches!(b.kind, BlockKind::Column { .. }) && !in_grid {
+            return None;
+        }
+        b.id = BlockId::new();
+        b.comment_ids.clear();
+        let is_code = matches!(b.kind, BlockKind::Code { .. });
+        if !b.kind.has_text() {
+            b.text = RichText::default();
+        } else {
+            clean_text(&mut b.text, is_code);
+        }
+        if let BlockKind::Table(ref mut t) = b.kind {
+            t.repair();
+            for row in &mut t.rows {
+                for cell in row {
+                    if !cell.is_covered() {
+                        cell.blocks = cell.blocks.drain(..).filter_map(|cb| clean_one(cb, false)).collect();
+                        if cell.blocks.is_empty() {
+                            cell.blocks.push(Block::text(""));
+                        }
+                    }
+                }
+            }
+        }
+        if matches!(b.kind, BlockKind::Grid) {
+            b.children = b.children.into_iter().filter_map(|c| {
+                if matches!(c.kind, BlockKind::Column { .. }) { clean_one(c, true) } else { None }
+            }).collect();
+            if b.children.is_empty() {
+                return None;
+            }
+        } else if b.kind.nests() || b.kind.is_container() {
+            b.children = b.children.into_iter().filter_map(|c| clean_one(c, false)).collect();
+            if b.kind.is_container() && b.children.is_empty() {
+                b.children.push(Block::text(""));
+            }
+        } else {
+            b.children.clear();
+        }
+        Some(b)
+    }
+
+    blocks.into_iter().filter_map(|b| clean_one(b, false)).collect()
 }
 
 #[cfg(test)]

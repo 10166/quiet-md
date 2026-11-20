@@ -25,7 +25,7 @@ pub use adapter::{
     FsLibraryAdapter, IncomingApply, LiveConflict, LocalEntity, LocalLibraryAdapter,
 };
 pub use credentials::{FileSecretStore, SecretStore, StoredCredentials};
-pub use engine::{EngineCommand, EngineCtx, LocalChangeHint, SharedStatus, SyncEvent, SyncStatus, VaultUnlock};
+pub use engine::{default_device_name, EngineCommand, EngineCtx, LocalChangeHint, SharedStatus, SyncEvent, SyncStatus, VaultUnlock};
 pub use http::validate_server_url;
 pub use scope::SyncScope;
 pub use state_db::{DEFAULT_SYNC_INTERVAL_SECS, MAX_SYNC_INTERVAL_SECS};

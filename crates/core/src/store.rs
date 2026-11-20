@@ -1557,6 +1557,22 @@ impl Store {
         self.write_doc_against(id, doc, Some(disk), true)
     }
 
+    /// Conditional save for local API / MCP edits: acquires the write lock,
+    /// checks the on-disk document's canonical revision against `expected_revision`,
+    /// and rejects if another process changed the file since it was read.
+    pub fn save_if_revision_matches(&mut self, id: &str, doc: &Document, expected_revision: &str) -> Result<Meta> {
+        let _lock = self.begin_write()?;
+        let is_md = self.is_markdown(id);
+        let disk = self.read_doc_text(id)?;
+        let disk_doc = self.parse_doc(id, &disk)?;
+        let front = if is_md { crate::markdown::front_matter(&disk).0 } else { "" };
+        let actual = crate::agent::document_revision(&disk_doc, is_md, front);
+        if actual != expected_revision.trim() {
+            anyhow::bail!("REVISION_CONFLICT:{actual}");
+        }
+        self.write_doc_against(id, doc, Some(disk), true)
+    }
+
     /// `save` for callers that already hold the write lock. A new id becomes a
     /// DocxXML file at the top of the library, named after its title.
     fn save_now(&mut self, id: &str, doc: &Document) -> Result<Meta> { self.save_in(id, doc, None) }

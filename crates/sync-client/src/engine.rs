@@ -25,7 +25,7 @@ use crate::credentials::{SecretStore, StoredCredentials};
 use crate::http::{ApiClient, ApiError};
 use crate::scope::SyncScope;
 use crate::state_db::{encode_base, now_ms, BaseSnapshot, EntityStateRow, StateDb};
-use crate::ws::{current_platform, spawn_ws_loop, WsConn, WsSignal};
+use crate::ws::{spawn_ws_loop, WsConn, WsSignal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SyncStatus {
@@ -2972,14 +2972,174 @@ fn encode_blob_bytes(vault_id: &str, keys: Option<&VaultKeys>, raw: &[u8]) -> Re
     }
 }
 
+fn sanitize_device_name(raw: &str) -> Option<String> {
+    let mut out = String::with_capacity(raw.len().min(128));
+    let mut prev_space = true;
+    for ch in raw.chars() {
+        let ch = if ch.is_control() || ch.is_whitespace() { ' ' } else { ch };
+        if ch == ' ' {
+            if !prev_space {
+                out.push(' ');
+                prev_space = true;
+            }
+        } else {
+            out.push(ch);
+            prev_space = false;
+        }
+        if out.chars().count() >= 128 {
+            break;
+        }
+    }
+    let trimmed = out.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+fn strip_local_suffix(s: &str) -> &str {
+    s.strip_suffix(".local").filter(|r| !r.trim().is_empty()).unwrap_or(s)
+}
+
+#[cfg(target_os = "macos")]
+fn run_stdout(program: &str, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    sanitize_device_name(&String::from_utf8_lossy(&out.stdout))
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn parse_pretty_hostname(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("PRETTY_HOSTNAME=") else { continue };
+        let val = rest.trim();
+        let unquoted = if (val.starts_with('"') && val.ends_with('"') && val.len() >= 2)
+            || (val.starts_with('\'') && val.ends_with('\'') && val.len() >= 2)
+        {
+            &val[1..val.len() - 1]
+        } else {
+            val
+        };
+        let mut unescaped = String::with_capacity(unquoted.len());
+        let mut chars = unquoted.chars();
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                if let Some(next) = chars.next() {
+                    unescaped.push(next);
+                }
+            } else {
+                unescaped.push(c);
+            }
+        }
+        if let Some(clean) = sanitize_device_name(&unescaped) {
+            return Some(clean);
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn run_hostname_windows() -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let out = std::process::Command::new("hostname")
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    sanitize_device_name(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn detect_device_name() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(name) = run_stdout("/usr/sbin/scutil", &["--get", "ComputerName"]) {
+            return name;
+        }
+        if let Some(name) = run_stdout("/usr/sbin/scutil", &["--get", "LocalHostName"]) {
+            return name;
+        }
+        if let Some(name) = run_stdout("/bin/hostname", &[]).and_then(|s| sanitize_device_name(strip_local_suffix(&s))) {
+            return name;
+        }
+        if let Some(name) = std::env::var("HOSTNAME").ok().and_then(|s| sanitize_device_name(strip_local_suffix(&s))) {
+            return name;
+        }
+        "Mac".into()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(name) = std::env::var("COMPUTERNAME").ok().and_then(|s| sanitize_device_name(&s)) {
+            return name;
+        }
+        if let Some(name) = run_hostname_windows() {
+            return name;
+        }
+        "Windows PC".into()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(info) = std::fs::read_to_string("/etc/machine-info")
+            && let Some(name) = parse_pretty_hostname(&info)
+        {
+            return name;
+        }
+        for path in ["/proc/sys/kernel/hostname", "/etc/hostname"] {
+            if let Ok(raw) = std::fs::read_to_string(path)
+                && let Some(name) = sanitize_device_name(strip_local_suffix(raw.trim()))
+            {
+                return name;
+            }
+        }
+        if let Some(name) = std::env::var("HOSTNAME").ok().and_then(|s| sanitize_device_name(strip_local_suffix(&s))) {
+            return name;
+        }
+        "Linux".into()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        std::env::var("COMPUTERNAME")
+            .or_else(|_| std::env::var("HOSTNAME"))
+            .ok()
+            .and_then(|s| sanitize_device_name(&s))
+            .unwrap_or_else(|| format!("Quiet.md ({})", crate::ws::current_platform()))
+    }
+}
+
 pub fn default_device_name() -> String {
-    std::env::var("COMPUTERNAME")
-        .or_else(|_| std::env::var("HOSTNAME"))
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| format!("Quiet.md ({})", current_platform()))
+    static CACHED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    CACHED.get_or_init(detect_device_name).clone()
 }
 
 pub fn sync_dir_for_root(sync_dir: PathBuf) -> PathBuf {
     sync_dir
+}
+
+#[cfg(test)]
+mod device_name_tests {
+    use super::{default_device_name, parse_pretty_hostname, sanitize_device_name, strip_local_suffix};
+
+    #[test]
+    fn sanitize_and_pretty_hostname_work() {
+        assert_eq!(sanitize_device_name("  xaa的Mac Mini \n"), Some("xaa的Mac Mini".into()));
+        assert_eq!(sanitize_device_name("  \t\n "), None);
+        assert_eq!(strip_local_suffix("xaadeMac-Mini.local"), "xaadeMac-Mini");
+        assert_eq!(
+            parse_pretty_hostname("ICON_NAME=computer-laptop\nPRETTY_HOSTNAME=\"Alice\\'s ThinkPad\"\n"),
+            Some("Alice's ThinkPad".into())
+        );
+        let detected = default_device_name();
+        assert!(!detected.is_empty());
+        assert!(detected.chars().count() <= 128);
+    }
 }

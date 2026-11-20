@@ -17,6 +17,10 @@ const REAL_FOLDERS: &str = "文档库改为真实文件夹，以标题命名，�
 /// Each version's notes: (version, [(中文, English)]). Only the running
 /// version's are shown; a version without notes shows nothing.
 const NOTES: &[(&str, &[(&str, &str)])] = &[
+    ("0.1.16", &[
+        ("AI 与本地 MCP 服务：在「设置 › AI」中可一键启用仅监听本机的 MCP Streamable HTTP 服务，支持 AI Agent 安全检索和块级编辑文档，写入前自动留存版本快照并支持 ⌘Z 撤销", "AI & local MCP server: enable the loopback-only MCP Streamable HTTP server in Settings › AI so AI agents can search and safely edit notes block-by-block with automatic pre-edit Version History snapshots and ⌘Z undo"),
+        ("云同步改进：自动识别设备主机名作为默认设备名称", "Cloud sync: improved automatic default device name detection"),
+    ]),
     ("0.1.15", &[
         ("文档评论：支持对选中文本（⌘⌥M）与整个段落添加评论、回复和标记已解决，宽屏右侧自动对齐显示浮动评论卡片，窄屏一键展开评论侧栏", "Document comments: comment on selected text (⌘⌥M) or whole blocks with replies and resolve status, floating margin cards aligned to paragraphs on wide screens, and a slide-out drawer on narrow screens"),
         ("SVG 渲染支持：支持本地、远程与内联 SVG 图片高清矢量渲染（含灯箱缩放旋转、首页卡片与白板），支持 SVG 代码块实时预览与源码切换", "SVG rendering: crisp vector rendering for local, remote, and inline SVG images (including lightbox, Home cards, and boards), plus live preview and source toggle for SVG code blocks"),

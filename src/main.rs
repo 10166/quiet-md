@@ -3,6 +3,7 @@
 
 pub(crate) const APP_ID: &str = "com.10166.quietmd";
 
+mod ai_ui;
 mod app;
 #[cfg(unix)]
 mod big_alloc;
@@ -47,6 +48,7 @@ mod native_header;
 mod printing;
 mod search;
 mod sidebar;
+mod local_api;
 mod local_files;
 mod local_folders;
 mod system_trash;
@@ -167,6 +169,7 @@ pub(crate) fn start(existed: bool, scripted: bool, into: Option<&mut Window>, in
     app::set_menus(cx);
     update::init(cx);
     sync::init(cx);
+    local_api::init(cx);
     let took = into.map(|window| window.replace_root(cx, app::Workspace::new));
     if took.is_none() { open_main_window(scripted, None, cx); }
     // A synced library (or one used elsewhere) moves to real folders only once the user agrees.

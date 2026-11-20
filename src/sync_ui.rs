@@ -89,17 +89,12 @@ mod imp {
     }
 
     fn default_device_name() -> String {
-        if let Ok(h) = std::env::var("HOSTNAME")
-            && !h.trim().is_empty()
-        {
-            return h.trim().to_string();
-        }
-        match std::env::consts::OS {
-            "macos" => "Mac".into(),
-            "windows" => "Windows PC".into(),
-            "linux" => "Linux".into(),
-            other => other.into(),
-        }
+        quiet_sync_client::default_device_name()
+    }
+
+    fn is_generic_device_name(name: &str) -> bool {
+        let t = name.trim();
+        t.is_empty() || matches!(t, "Mac" | "Windows PC" | "Linux") || t.starts_with("Quiet.md (")
     }
 
     fn make_field(cx: &mut Context<Workspace>, ph: &str, masked: bool, initial: Option<&str>) -> Entity<TextField> {
@@ -120,7 +115,12 @@ mod imp {
             let existing_creds = crate::sync::handle(cx).and_then(|h| h.credentials());
             let initial_url = existing_creds.as_ref().map(|c| c.server_url.as_str());
             let initial_email = existing_creds.as_ref().map(|c| c.email.as_str());
-            let initial_dev = existing_creds.as_ref().map(|c| c.device_name.clone()).unwrap_or_else(default_device_name);
+            let initial_dev = existing_creds
+                .as_ref()
+                .map(|c| c.device_name.as_str())
+                .filter(|n| !is_generic_device_name(n))
+                .map(str::to_string)
+                .unwrap_or_else(default_device_name);
 
             let server_url = make_field(cx, "https://sync.example.com", false, initial_url);
             let email = make_field(cx, "you@example.com", false, initial_email);
@@ -373,7 +373,14 @@ mod imp {
                 if f.text.is_empty() { f.set_text(&creds.email, cx); }
             });
             self.sync_ui.device_name.update(cx, |f, cx| {
-                if f.text.is_empty() { f.set_text(&creds.device_name, cx); }
+                if is_generic_device_name(&f.text) {
+                    let next = if !is_generic_device_name(&creds.device_name) {
+                        creds.device_name.clone()
+                    } else {
+                        default_device_name()
+                    };
+                    f.set_text(&next, cx);
+                }
             });
             if creds.vault_id.is_some() {
                 self.fetch_sync_devices(cx);

@@ -641,6 +641,20 @@ impl Editor {
         cx.notify();
     }
 
+    /// Refresh editor state after an in-place local API / MCP edit while preserving
+    /// viewport scroll position and undo history without stealing focus.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn finish_agent_edit(&mut self, cx: &mut Context<Self>) {
+        self.restore_top = self.scroll_top();
+        self.marked = None;
+        self.menu = None;
+        self.slash = None;
+        self.cat_generation = None;
+        self.ro_doc = self.read_only.then(|| self.core.doc.clone());
+        self.refresh_find(false, cx);
+        cx.notify();
+    }
+
     pub fn changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.changed_with_scroll(ScrollIntent::RevealCaret, window, cx);
     }

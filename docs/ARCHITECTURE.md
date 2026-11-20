@@ -112,6 +112,7 @@ This approach copies the entire document at each history step. A historical benc
 | `editor/fuzz_tests.rs` | Random edit fuzzer |
 | `merge.rs` | Deterministic three-way merge for DocxXML, Markdown, boards, metadata and JSON config |
 | `sync_bridge.rs` | Cloud sync inventory enumeration, remote apply under the `Store` write lock, and conflict copy generation |
+| `agent.rs` | Agent/MCP anchored Markdown projection, block addressing (`path@hash6`), revision tokens and rich-block-safe editing primitives |
 
 Whiteboard and history modules in core:
 
@@ -146,6 +147,8 @@ Whiteboard and history modules in core:
 | `assets.rs` | Embedded icons, fonts and cover gallery |
 | `devtools.rs` | Script driver compiled with `--features devtools`. See tools/harness/README.md. |
 | `history.rs` | Version drawer grouped by day, in-place read-only preview, change highlighting, naming, restore, save a copy and delete |
+| `local_api/` | Opt-in loopback-only MCP Streamable HTTP server (`127.0.0.1` + Bearer token in `<data_local_dir>/quiet-md/local-api.json`), JSON-RPC tools/resources and GPUI main-thread bridge (WASM no-op stub) |
+| `ai_ui.rs` | Settings › AI page hosting local MCP server controls and client configuration snippets |
 | `board/` view | `BoardView` replaces the document in the note area. `mod.rs` owns the scene, store and commit loop, `canvas.rs` dispatches pointers, `keys.rs` handles shortcuts, `run.rs` / `action.rs` implement actions and clipboard, `text_editor.rs` edits text and `frame_name.rs` renames frames. `editor/board.rs` handles thumbnails and entering/leaving the board. |
 | `board/tools/` | Tool state machines: `selection` (drag, handles and marquee), `shape`, `linear`, `freedraw`, `text`, `eraser`, `lasso`, `image`, `crop`, `flowchart` |
 | `board/` rendering | GPUI backend in `render.rs` and `render_geom.rs` (CPU clipping and image resampling), vello_cpu in `render_vello.rs`, overlays for selection bounds, handles and snap lines in `overlay.rs` |
