@@ -41,10 +41,12 @@ pub struct TableRef {
     pub table: Option<String>,
     pub view: Option<String>,
     pub height: f32,
+    /// Dragged wider or narrower than the text column, centred on it (None: the column's width).
+    pub width: Option<f32>,
 }
 
 impl TableRef {
-    pub fn new(src: impl Into<String>) -> Self { TableRef { src: src.into(), table: None, view: None, height: DEFAULT_HEIGHT } }
+    pub fn new(src: impl Into<String>) -> Self { TableRef { src: src.into(), table: None, view: None, height: DEFAULT_HEIGHT, width: None } }
 }
 
 /// A table file as the page the store hands out: its title and one 数据表 block showing it.
