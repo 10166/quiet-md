@@ -10,20 +10,20 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/s1dashu/quiet-md/releases/latest"><img src="https://img.shields.io/github/v/release/s1dashu/quiet-md?label=release&color=2f6feb" alt="최신 릴리스"></a>
-  <a href="https://github.com/s1dashu/quiet-md/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/s1dashu/quiet-md/ci.yml?branch=main&label=CI" alt="CI 상태"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="https://img.shields.io/github/v/release/10166/quiet-md?label=release&color=2f6feb" alt="최신 릴리스"></a>
+  <a href="https://github.com/10166/quiet-md/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/10166/quiet-md/ci.yml?branch=main&label=CI" alt="CI 상태"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="macOS, Windows, Linux 지원">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20GPUI-dea584?logo=rust" alt="Rust와 GPUI로 제작">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/s1dashu/quiet-md?color=green" alt="MIT 라이선스"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/10166/quiet-md?color=green" alt="MIT 라이선스"></a>
   <img src="https://img.shields.io/badge/status-beta-orange" alt="베타">
 </p>
 
 <p align="center">
-  <a href="https://download.quiet.md/latest/quiet-md-macos-arm64.zip"><img src="docs/images/download-macos.svg" height="56" alt="macOS용 다운로드"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-macos.svg" height="56" alt="macOS용 다운로드"></a>
   &nbsp;
-  <a href="https://download.quiet.md/latest/quiet-md-windows-x64-setup.exe"><img src="docs/images/download-windows.svg" height="56" alt="Windows용 다운로드"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-windows.svg" height="56" alt="Windows용 다운로드"></a>
   &nbsp;
-  <a href="https://download.quiet.md/latest/quiet-md-x86_64.AppImage"><img src="docs/images/download-linux.svg" height="56" alt="Linux용 다운로드"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-linux.svg" height="56" alt="Linux용 다운로드"></a>
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@
 </p>
 
 > [!NOTE]
-> Quiet.md는 **베타** 단계이며 빠르게 바뀌고 있습니다. 버그를 발견했거나 아이디어가 있다면 [이슈를 남겨 주세요](https://github.com/s1dashu/quiet-md/issues). 풀 리퀘스트를 보내 주시면 더 좋습니다.
+> Quiet.md는 **베타** 단계이며 빠르게 바뀌고 있습니다. 버그를 발견했거나 아이디어가 있다면 [이슈를 남겨 주세요](https://github.com/10166/quiet-md/issues). 풀 리퀘스트를 보내 주시면 더 좋습니다.
 
 ## Quiet.md를 쓰는 이유
 
@@ -52,25 +52,25 @@
 ## 다운로드
 
 <p align="center">
-  <a href="https://download.quiet.md/latest/quiet-md-macos-arm64.zip"><img src="docs/images/download-macos.svg" height="56" alt="macOS용 다운로드"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-macos.svg" height="56" alt="macOS용 다운로드"></a>
   &nbsp;
-  <a href="https://download.quiet.md/latest/quiet-md-windows-x64-setup.exe"><img src="docs/images/download-windows.svg" height="56" alt="Windows용 다운로드"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-windows.svg" height="56" alt="Windows용 다운로드"></a>
   &nbsp;
-  <a href="https://download.quiet.md/latest/quiet-md-x86_64.AppImage"><img src="docs/images/download-linux.svg" height="56" alt="Linux용 다운로드"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-linux.svg" height="56" alt="Linux용 다운로드"></a>
 </p>
 
 | 플랫폼 | 패키지 | 요구 사항 |
 |---|---|---|
-| **macOS**(Apple Silicon) | [quiet-md-macos-arm64.zip](https://download.quiet.md/latest/quiet-md-macos-arm64.zip) | macOS 13 이상 |
-| **Windows**(x64) | [quiet-md-windows-x64-setup.exe](https://download.quiet.md/latest/quiet-md-windows-x64-setup.exe) | Windows 10 버전 1809 이상 |
-| **Linux**(x86_64, 실험적) | [quiet-md-x86_64.AppImage](https://download.quiet.md/latest/quiet-md-x86_64.AppImage) | glibc 2.35 이상(Ubuntu 22.04 이상) |
-| **macOS**(Intel) | [quiet-md-macos-x86_64.zip](https://download.quiet.md/latest/quiet-md-macos-x86_64.zip) | macOS 13 이상 |
+| **macOS**(Apple Silicon) | [quiet-md-macos-arm64.zip](https://github.com/10166/quiet-md/releases/latest) | macOS 13 이상 |
+| **Windows**(x64) | [quiet-md-windows-x64-setup.exe](https://github.com/10166/quiet-md/releases/latest) | Windows 10 버전 1809 이상 |
+| **Linux**(x86_64, 실험적) | [quiet-md-x86_64.AppImage](https://github.com/10166/quiet-md/releases/latest) | glibc 2.35 이상(Ubuntu 22.04 이상) |
+| **macOS**(Intel) | [quiet-md-macos-x86_64.zip](https://github.com/10166/quiet-md/releases/latest) | macOS 13 이상 |
 
 - **macOS**: 압축을 풀고 `quiet.md.app`을 응용 프로그램 폴더로 끌어다 놓습니다. 앱은 Apple의 서명과 공증을 받았습니다.
 - **Windows**: 설치 프로그램을 실행합니다. 기본적으로 현재 사용자에게만 설치되며, 제거해도 노트는 지워지지 않습니다. 처음 실행할 때 SmartScreen 창이 뜨면 **추가 정보 → 실행**을 누르세요.
 - **Linux**(실험적): `chmod +x quiet-md-*.AppImage` 후 실행합니다. FUSE가 없으면 `--appimage-extract-and-run`을 붙이세요. AppImage 0.1.10부터는 앱 안에서 업데이트할 수 있고, 그 이전 Linux 버전은 한 번 직접 설치해야 합니다. 직접 써 보는 테스트는 지금까지 Wayland의 Omarchy에서만 했습니다. 자세한 내용은 [Linux 안내](CONTRIBUTING.md#linux-experimental)를 참고하세요.
 
-[Quiet.md](https://quiet.md/?lang=en)에서도 내려받을 수 있습니다. 모든 릴리스와 SHA-256 체크섬은 [GitHub Releases](https://github.com/s1dashu/quiet-md/releases)에 있습니다.
+[Quiet.md](https://quiet.md/?lang=en)에서도 내려받을 수 있습니다. 모든 릴리스와 SHA-256 체크섬은 [GitHub Releases](https://github.com/10166/quiet-md/releases)에 있습니다.
 
 처음 실행하면 인터페이스 언어, 라이브러리 위치, 빠른 메모 단축키를 고르고, Obsidian, Logseq, iA Writer, Typora의 노트를 복사해 가져올 수 있습니다. 빈 라이브러리에는 **Getting started** 가이드가 들어갑니다. 주요 기능을 10분 만에 둘러보는 안내입니다. 이미 있는 노트는 덮어쓰지 않습니다.
 
@@ -109,7 +109,7 @@
 
 Quiet.md를 함께 만들어 주신 모든 분께 감사드립니다. 이슈와 풀 리퀘스트를 환영합니다. 빌드, 테스트, 코드 규칙은 [CONTRIBUTING.md](CONTRIBUTING.md)에 있습니다.
 
-[![기여자](https://raw.githubusercontent.com/s1dashu/quiet-md/contributors-assets/docs/images/contributors.svg?v=1)](https://github.com/s1dashu/quiet-md/graphs/contributors)
+[![기여자](https://raw.githubusercontent.com/10166/quiet-md/contributors-assets/docs/images/contributors.svg?v=1)](https://github.com/10166/quiet-md/graphs/contributors)
 
 ## 최근 업데이트
 
@@ -133,7 +133,7 @@ Quiet.md를 함께 만들어 주신 모든 분께 감사드립니다. 이슈와 
 - **0.1.2**(11월 4일): macOS 표준 메뉴와 단축키(Hide, Minimize, Zoom, Full Screen)를 지원합니다. 마지막 창을 닫은 뒤에도 Dock 아이콘을 누르면 창이 다시 열립니다. 일부 중국어 글자가 잘못된 글리프로 표시되던 문제를 고쳤습니다.
 - **0.1.1**(11월 3일): 첫 Windows x64 릴리스입니다. 사용자별로 설치되고, 제거해도 노트는 남습니다. 중국어와 영어 인터페이스, 내장 가이드를 다듬었습니다.
 
-버전별 전체 릴리스 노트는 [Releases](https://github.com/s1dashu/quiet-md/releases)에 있습니다.
+버전별 전체 릴리스 노트는 [Releases](https://github.com/10166/quiet-md/releases)에 있습니다.
 
 ## 라이선스
 

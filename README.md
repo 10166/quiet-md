@@ -10,20 +10,20 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/s1dashu/quiet-md/releases/latest"><img src="https://img.shields.io/github/v/release/s1dashu/quiet-md?label=release&color=2f6feb" alt="Latest release"></a>
-  <a href="https://github.com/s1dashu/quiet-md/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/s1dashu/quiet-md/ci.yml?branch=main&label=CI" alt="CI status"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="https://img.shields.io/github/v/release/10166/quiet-md?label=release&color=2f6feb" alt="Latest release"></a>
+  <a href="https://github.com/10166/quiet-md/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/10166/quiet-md/ci.yml?branch=main&label=CI" alt="CI status"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="macOS, Windows and Linux">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20GPUI-dea584?logo=rust" alt="Built with Rust and GPUI">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/s1dashu/quiet-md?color=green" alt="MIT license"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/10166/quiet-md?color=green" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/status-beta-orange" alt="Beta">
 </p>
 
 <p align="center">
-  <a href="https://download.quiet.md/latest/quiet-md-macos-arm64.zip"><img src="docs/images/download-macos.svg" height="56" alt="Download for macOS"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-macos.svg" height="56" alt="Download for macOS"></a>
   &nbsp;
-  <a href="https://download.quiet.md/latest/quiet-md-windows-x64-setup.exe"><img src="docs/images/download-windows.svg" height="56" alt="Download for Windows"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-windows.svg" height="56" alt="Download for Windows"></a>
   &nbsp;
-  <a href="https://download.quiet.md/latest/quiet-md-x86_64.AppImage"><img src="docs/images/download-linux.svg" height="56" alt="Download for Linux"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-linux.svg" height="56" alt="Download for Linux"></a>
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@
 </p>
 
 > [!NOTE]
-> Quiet.md is in **beta** and changing quickly. If you hit a bug or have an idea, please [open an issue](https://github.com/s1dashu/quiet-md/issues) — or better, send a pull request.
+> Quiet.md is in **beta** and changing quickly. If you hit a bug or have an idea, please [open an issue](https://github.com/10166/quiet-md/issues) — or better, send a pull request.
 
 ## Why Quiet.md
 
@@ -52,25 +52,25 @@
 ## Download
 
 <p align="center">
-  <a href="https://download.quiet.md/latest/quiet-md-macos-arm64.zip"><img src="docs/images/download-macos.svg" height="56" alt="Download for macOS"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-macos.svg" height="56" alt="Download for macOS"></a>
   &nbsp;
-  <a href="https://download.quiet.md/latest/quiet-md-windows-x64-setup.exe"><img src="docs/images/download-windows.svg" height="56" alt="Download for Windows"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-windows.svg" height="56" alt="Download for Windows"></a>
   &nbsp;
-  <a href="https://download.quiet.md/latest/quiet-md-x86_64.AppImage"><img src="docs/images/download-linux.svg" height="56" alt="Download for Linux"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-linux.svg" height="56" alt="Download for Linux"></a>
 </p>
 
 | Platform | Package | Requirements |
 |---|---|---|
-| **macOS** (Apple Silicon) | [quiet-md-macos-arm64.zip](https://download.quiet.md/latest/quiet-md-macos-arm64.zip) | macOS 13 or later |
-| **Windows** (x64) | [quiet-md-windows-x64-setup.exe](https://download.quiet.md/latest/quiet-md-windows-x64-setup.exe) | Windows 10 version 1809 or later |
-| **Linux** (x86_64, experimental) | [quiet-md-x86_64.AppImage](https://download.quiet.md/latest/quiet-md-x86_64.AppImage) | glibc 2.35 or later (Ubuntu 22.04 and newer) |
-| **macOS** (Intel) | [quiet-md-macos-x86_64.zip](https://download.quiet.md/latest/quiet-md-macos-x86_64.zip) | macOS 13 or later |
+| **macOS** (Apple Silicon) | [quiet-md-macos-arm64.zip](https://github.com/10166/quiet-md/releases/latest) | macOS 13 or later |
+| **Windows** (x64) | [quiet-md-windows-x64-setup.exe](https://github.com/10166/quiet-md/releases/latest) | Windows 10 version 1809 or later |
+| **Linux** (x86_64, experimental) | [quiet-md-x86_64.AppImage](https://github.com/10166/quiet-md/releases/latest) | glibc 2.35 or later (Ubuntu 22.04 and newer) |
+| **macOS** (Intel) | [quiet-md-macos-x86_64.zip](https://github.com/10166/quiet-md/releases/latest) | macOS 13 or later |
 
 - **macOS**: unzip and drag `quiet.md.app` into Applications. The app is signed and notarized by Apple.
 - **Windows**: run the installer. By default it installs for the current user only, and uninstalling never deletes your notes. If SmartScreen appears on first launch, click **More info → Run anyway**.
 - **Linux** (experimental): `chmod +x quiet-md-*.AppImage` and run it; without FUSE, add `--appimage-extract-and-run`. AppImage 0.1.10 and later support in-app updates; older Linux versions need a one-time manual install. Interactive testing so far covers Omarchy on Wayland; see the [Linux notes](CONTRIBUTING.md#linux-experimental).
 
-You can also download from [Quiet.md](https://quiet.md/?lang=en). Every release and its SHA-256 checksums are on [GitHub Releases](https://github.com/s1dashu/quiet-md/releases).
+You can also download from [Quiet.md](https://quiet.md/?lang=en). Every release and its SHA-256 checksums are on [GitHub Releases](https://github.com/10166/quiet-md/releases).
 
 On first launch, Quiet.md asks for the interface language, where to keep your library and the quick-note shortcut, and offers to copy in notes from Obsidian, Logseq, iA Writer or Typora. An empty library gets a **Getting started** guide — a ten-minute tour of the main features. Existing notes are never overwritten.
 
@@ -110,7 +110,7 @@ A 120 Hz display gives each frame 8.3 ms. Even at P95 on a million-character doc
 
 Thanks to everyone who has helped build Quiet.md. Issues and pull requests are welcome: building, testing and code conventions are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-[![Contributors](https://raw.githubusercontent.com/s1dashu/quiet-md/contributors-assets/docs/images/contributors.svg?v=1)](https://github.com/s1dashu/quiet-md/graphs/contributors)
+[![Contributors](https://raw.githubusercontent.com/10166/quiet-md/contributors-assets/docs/images/contributors.svg?v=1)](https://github.com/10166/quiet-md/graphs/contributors)
 
 ## Recent updates
 
@@ -134,7 +134,7 @@ Thanks to everyone who has helped build Quiet.md. Issues and pull requests are w
 - **0.1.2** (Nov 4): the standard macOS menus and shortcuts (Hide, Minimize, Zoom, Full Screen); clicking the Dock icon reopens a window after the last one was closed. Fixed some Chinese characters rendering with the wrong glyphs.
 - **0.1.1** (Nov 3): first Windows x64 release, installed per user, keeping your notes on uninstall. Polished the Chinese and English interface and the built-in guide.
 
-Full notes for each version are on [Releases](https://github.com/s1dashu/quiet-md/releases).
+Full notes for each version are on [Releases](https://github.com/10166/quiet-md/releases).
 
 ## License
 

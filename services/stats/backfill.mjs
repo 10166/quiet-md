@@ -37,7 +37,7 @@ const DB = { prepare: (sql) => new Stmt(sql), batch: (stmts) => query(stmts) };
 
 const env = {
   DB, CF_API_TOKEN: token, GITHUB_TOKEN: process.env.GITHUB_TOKEN,
-  ZONE_ID: '411c824a5a3ea80fcfd2d5551529366b', GITHUB_REPO: 's1dashu/quiet-md',
+  ZONE_ID: '411c824a5a3ea80fcfd2d5551529366b', GITHUB_REPO: '10166/quiet-md',
   MAX_DAYS: process.argv[2] || '31',
 };
 await collect(env);

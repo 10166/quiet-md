@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.1.13"
+  #define AppVersion "0.1.14"
 #endif
 #ifndef AppSource
   #define AppSource "..\..\target\dist"
@@ -10,7 +10,7 @@ AppId={{59DC98EE-A136-40C9-A7BD-EB0CC50E37C2}
 AppName=Quiet.md
 AppVersion={#AppVersion}
 AppPublisher=Quiet.md
-AppPublisherURL=https://github.com/s1dashu/quiet-md
+AppPublisherURL=https://github.com/10166/quiet-md
 DefaultDirName={localappdata}\Programs\quiet.md
 DisableDirPage=no
 DisableProgramGroupPage=yes

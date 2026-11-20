@@ -1,18 +1,20 @@
 //! 自动更新. A copy installed from a release package reads
-//! `https://download.quiet.md/latest/update-<platform>.json` (written last by
-//! scripts/publish-downloads.sh) 10s after launch and every 12h while
+//! `https://github.com/10166/quiet-md/releases/latest/download/update-<platform>.json`
+//! 10s after launch and every 12h while
 //! 自动检查更新 is on; 检查更新… asks at once. Nothing is downloaded until the
 //! user asks: the package is fetched with `curl`, its minisign signature checked
 //! against packaging/update-key.pub (the trusted comment must be the package's
 //! own file name, so an old signed package cannot pose as a newer version),
-//! and on macOS the unpacked app must also carry this copy's code signature
-//! team. 重启以更新 quits through the usual save path; a detached helper waits
+//! and on macOS the unpacked app must pass `codesign --verify --deep --strict`
+//! (plus match this copy's Apple Developer team when signed with one).
+//! 重启以更新 quits through the usual save path; a detached helper waits
 //! for this process to exit, then swaps the bundle (macOS) or runs the Inno
 //! installer silently (Windows), or replaces the AppImage (Linux), then restarts.
 //!
 //! The manifest itself is not signed, so what it may say is narrowed (#41): the
-//! package must come from download.quiet.md over HTTPS (redirects included), and
-//! its signature's trusted comment must name that package, version and all.
+//! package must come from `https://github.com/10166/quiet-md/releases/download/`
+//! over HTTPS (redirects included), and its signature's trusted comment must
+//! name that package, version and all.
 //!
 //! `QUIET_MD_UPDATE_URL` points the check at another folder (testing; it also
 //! enables the check in unsigned builds, and allows http and any host). The public key can be replaced at
@@ -24,10 +26,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-const BASE: &str = "https://download.quiet.md/latest";
+const BASE: &str = "https://github.com/10166/quiet-md/releases/latest/download";
 /// Where every package lives (`v<version>/<name>`); a manifest naming any
-/// other host is refused.
-const PACKAGES: &str = "https://download.quiet.md/";
+/// other host or repository is refused.
+const PACKAGES: &str = "https://github.com/10166/quiet-md/releases/download/";
 const KEY: &str = match option_env!("QUIET_MD_UPDATE_PUBKEY") { Some(k) => k, None => include_str!("../packaging/update-key.pub") };
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -195,13 +197,14 @@ pub(crate) fn newer(a: &str, b: &str) -> bool {
     a > b
 }
 
-/// This copy can replace itself: an installed, release-signed build.
+/// This copy can replace itself: an installed release bundle (on macOS, any
+/// `.app` bundle other than the local `Quiet.md Preview.app` dev build).
 fn supported() -> bool {
     if platform().is_none() || public_key().is_none() { return false }
     if override_url().is_some() { return true }
     if crate::devtools::scripted() { return false }
     #[cfg(target_os = "macos")]
-    { app_bundle().is_some_and(|app| team(&app).is_some()) }
+    { app_bundle().is_some_and(|app| app.file_name().and_then(|n| n.to_str()) != Some("Quiet.md Preview.app")) }
     #[cfg(target_os = "windows")]
     { std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("unins000.exe").is_file())).unwrap_or(false) }
     #[cfg(target_os = "linux")]
@@ -239,7 +242,7 @@ fn signed(bytes: &[u8], signature: &str, name: &str, key: &minisign_verify::Publ
 
 fn updates_dir() -> PathBuf {
     let base = dirs::cache_dir().unwrap_or_else(fdl_core::vfs::temp_dir);
-    if cfg!(target_os = "macos") { base.join("com.s1dashu.quietmd").join("updates") }
+    if cfg!(target_os = "macos") { base.join(crate::APP_ID).join("updates") }
     else if cfg!(target_os = "linux") { base.join("quiet.md").join("updates").join(fdl_core::vfs::process_id().to_string()) }
     else { base.join("quiet.md").join("updates") }
 }
@@ -273,9 +276,10 @@ fn fetch_package(m: &Manifest) -> Result<PathBuf, String> {
         run(Command::new("/usr/bin/ditto").args(["-x", "-k"]).arg(&file).arg(&unpacked))?;
         let app = unpacked.join("quiet.md.app");
         run(Command::new("/usr/bin/codesign").args(["--verify", "--deep", "--strict"]).arg(&app)).map_err(|_| failed("codesign"))?;
-        // Signed by the same team as this copy (unsigned only against unsigned, when testing).
+        // If this copy is signed with an Apple Developer team, require the same team.
+        // Ad-hoc signed fork builds rely on the minisign signature verified above.
         let mine = app_bundle().and_then(|a| team(&a));
-        if team(&app) != mine || mine.is_none() && override_url().is_none() { return Err(failed("team")) }
+        if mine.is_some() && team(&app) != mine { return Err(failed("team")) }
         let _ = std::fs::remove_file(&file);
         Ok(app)
     }
@@ -490,31 +494,36 @@ FuE4L1zQnqL1nA/5xffpEtZyK2ca882Q1joA5X11poZ1xezdAlEMfn/36MJc5C60clQFec4vQf66MoxP
 
     #[test]
     fn manifests_must_name_the_signed_package() {
-        let ok = manifest("0.2.0", "https://download.quiet.md/v0.2.0/quiet-md-0.2.0-macos-arm64.zip", "quiet-md-0.2.0-macos-arm64.zip");
+        let ok = manifest("0.2.0", "https://github.com/10166/quiet-md/releases/download/v0.2.0/quiet-md-0.2.0-macos-arm64.zip", "quiet-md-0.2.0-macos-arm64.zip");
         assert_eq!(validate(&ok, "macos-arm64", false), Ok(()));
         assert!(validate(&ok, "macos-x86_64", false).is_err());
-        let intel = manifest("0.2.0", "https://download.quiet.md/v0.2.0/quiet-md-0.2.0-macos-x86_64.zip", "quiet-md-0.2.0-macos-x86_64.zip");
+        let intel = manifest("0.2.0", "https://github.com/10166/quiet-md/releases/download/v0.2.0/quiet-md-0.2.0-macos-x86_64.zip", "quiet-md-0.2.0-macos-x86_64.zip");
         assert_eq!(validate(&intel, "macos-x86_64", false), Ok(()));
         assert!(validate(&intel, "macos-arm64", false).is_err());
         // An older package's signature under a newer version number.
-        let replay = manifest("0.9.0", "https://download.quiet.md/v0.2.0/quiet-md-0.2.0-macos-arm64.zip", "quiet-md-0.2.0-macos-arm64.zip");
+        let replay = manifest("0.9.0", "https://github.com/10166/quiet-md/releases/download/v0.2.0/quiet-md-0.2.0-macos-arm64.zip", "quiet-md-0.2.0-macos-arm64.zip");
         assert!(validate(&replay, "macos-arm64", false).is_err());
-        let renamed = manifest("0.9.0", "https://download.quiet.md/v0.9.0/quiet-md-0.9.0-macos-arm64.zip", "quiet-md-0.2.0-macos-arm64.zip");
+        let renamed = manifest("0.9.0", "https://github.com/10166/quiet-md/releases/download/v0.9.0/quiet-md-0.9.0-macos-arm64.zip", "quiet-md-0.2.0-macos-arm64.zip");
         assert!(validate(&renamed, "macos-arm64", false).is_err());
-        let http = manifest("0.2.0", "http://download.quiet.md/v0.2.0/quiet-md-0.2.0-macos-arm64.zip", "quiet-md-0.2.0-macos-arm64.zip");
+        let http = manifest("0.2.0", "http://github.com/10166/quiet-md/releases/download/v0.2.0/quiet-md-0.2.0-macos-arm64.zip", "quiet-md-0.2.0-macos-arm64.zip");
         assert!(validate(&http, "macos-arm64", false).is_err());
         assert_eq!(validate(&http, "macos-arm64", true), Ok(()));
-        // A genuine signature does not make another host acceptable.
-        for url in ["https://evil.example/v0.2.0/quiet-md-0.2.0-macos-arm64.zip", "https://download.quiet.md.evil.example/quiet-md-0.2.0-macos-arm64.zip", "https://evil.example/download.quiet.md/quiet-md-0.2.0-macos-arm64.zip"] {
+        // A genuine signature does not make another host or repository acceptable.
+        for url in [
+            "https://evil.example/v0.2.0/quiet-md-0.2.0-macos-arm64.zip",
+            "https://github.com.evil.example/10166/quiet-md/releases/download/v0.2.0/quiet-md-0.2.0-macos-arm64.zip",
+            "https://github.com/s1dashu/quiet-md/releases/download/v0.2.0/quiet-md-0.2.0-macos-arm64.zip",
+            "https://download.quiet.md/v0.2.0/quiet-md-0.2.0-macos-arm64.zip",
+        ] {
             assert!(validate(&manifest("0.2.0", url, "quiet-md-0.2.0-macos-arm64.zip"), "macos-arm64", false).is_err(), "{url}");
         }
-        let windows = manifest("0.2.0", "https://download.quiet.md/v0.2.0/quiet-md-0.2.0-windows-x64-setup.exe", "quiet-md-0.2.0-windows-x64-setup.exe");
+        let windows = manifest("0.2.0", "https://github.com/10166/quiet-md/releases/download/v0.2.0/quiet-md-0.2.0-windows-x64-setup.exe", "quiet-md-0.2.0-windows-x64-setup.exe");
         assert_eq!(validate(&windows, "windows-x64", false), Ok(()));
         assert!(validate(&windows, "macos-arm64", false).is_err());
-        let linux = manifest("0.2.0", "https://download.quiet.md/v0.2.0/quiet-md-0.2.0-x86_64.AppImage", "quiet-md-0.2.0-x86_64.AppImage");
+        let linux = manifest("0.2.0", "https://github.com/10166/quiet-md/releases/download/v0.2.0/quiet-md-0.2.0-x86_64.AppImage", "quiet-md-0.2.0-x86_64.AppImage");
         assert_eq!(validate(&linux, "linux-x86_64", false), Ok(()));
         assert!(validate(&linux, "windows-x64", false).is_err());
-        let wrong_linux = manifest("0.2.0", "https://download.quiet.md/v0.2.0/quiet-md-0.2.0-linux-x86_64.zip", "quiet-md-0.2.0-linux-x86_64.zip");
+        let wrong_linux = manifest("0.2.0", "https://github.com/10166/quiet-md/releases/download/v0.2.0/quiet-md-0.2.0-linux-x86_64.zip", "quiet-md-0.2.0-linux-x86_64.zip");
         assert!(validate(&wrong_linux, "linux-x86_64", false).is_err());
     }
 }

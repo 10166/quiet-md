@@ -1,10 +1,11 @@
 [package]
 name = "quiet_sync_server"
-version = "0.1.13"
+version = "0.1.14"
 edition = "2024"
 description = "Self-hostable real-time sync server for Quiet.md"
 license = "MIT"
-authors = ["s1dashu"]
+authors = ["s1dashu", "10166"]
+repository = "https://github.com/10166/quiet-md"
 
 [[bin]]
 name = "quiet-sync-server"

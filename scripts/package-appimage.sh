@@ -23,13 +23,13 @@ cp -a /usr/share/X11/locale "$appdir/usr/share/X11/"
 for package in libxkbcommon0 libxkbcommon-x11-0 libxau6 libxdmcp6 libxcb-xkb1 libbsd0 libmd0 libx11-data; do
   install -Dm644 "/usr/share/doc/$package/copyright" "$appdir/usr/share/doc/$package/copyright"
 done
-convert assets/branding/app-icon.png -resize 512x512 "$stage/com.s1dashu.quietmd.png"
+convert assets/branding/app-icon.png -resize 512x512 "$stage/com.10166.quietmd.png"
 export APPIMAGE_EXTRACT_AND_RUN=1
 export OUTPUT="$out/quiet-md-$version-x86_64.AppImage"
 export VERSION="$version"
 "$tool" --appdir "$appdir" --executable "${CARGO_TARGET_DIR:-target}/dist/quiet_md" \
-  --desktop-file packaging/linux/com.s1dashu.quietmd.desktop \
-  --icon-file "$stage/com.s1dashu.quietmd.png" --custom-apprun packaging/linux/AppRun --output appimage
+  --desktop-file packaging/linux/com.10166.quietmd.desktop \
+  --icon-file "$stage/com.10166.quietmd.png" --custom-apprun packaging/linux/AppRun --output appimage
 chmod +x "$OUTPUT"
 # Inspect the packaged payload, not only the original executable.
 (cd "$stage" && "$OUTPUT" --appimage-extract >/dev/null)

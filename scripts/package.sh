@@ -12,11 +12,11 @@
 # Environment:
 #   CODESIGN_ID    证书名，默认自动取钥匙串里的第一个 "Developer ID Application"
 #   NOTARY_PROFILE notarytool 的 profile 名，默认 quiet-md
-#   BUNDLE_ID      bundle identifier，默认 app.quietmd.mac（发布前改成你自己的反向域名）
+#   BUNDLE_ID      bundle identifier，默认 com.10166.quietmd
 set -e
 cd "$(dirname "$0")/.."
 version=${1:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}
-bundle_id=${BUNDLE_ID:-app.quietmd.mac}
+bundle_id=${BUNDLE_ID:-com.10166.quietmd}
 profile=${NOTARY_PROFILE:-quiet-md}
 sign_id=${CODESIGN_ID:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -1)}
 [ -n "$sign_id" ] || {

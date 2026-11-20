@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   update:
-    if: github.repository == 's1dashu/quiet-md' && github.ref == 'refs/heads/main'
+    if: github.repository == '10166/quiet-md' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

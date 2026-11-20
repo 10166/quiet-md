@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def main():
-    repository = os.environ.get('GITHUB_REPOSITORY', 's1dashu/quiet-md')
+    repository = os.environ.get('GITHUB_REPOSITORY', '10166/quiet-md')
     pages = json.loads(subprocess.check_output([
         'gh', 'api', '--paginate', '--slurp',
         f'repos/{repository}/contributors?per_page=100',

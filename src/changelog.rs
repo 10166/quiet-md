@@ -17,6 +17,11 @@ const REAL_FOLDERS: &str = "文档库改为真实文件夹，以标题命名，�
 /// Each version's notes: (version, [(中文, English)]). Only the running
 /// version's are shown; a version without notes shows nothing.
 const NOTES: &[(&str, &[(&str, &str)])] = &[
+    ("0.1.14", &[
+        ("多端实时云同步：支持自托管同步服务端、离线续传、块级三路合并与可选端到端加密", "Multi-device cloud sync: self-hosted sync server, offline queue, block-level 3-way merge, and optional end-to-end encryption"),
+        ("云同步支持空闲同步间隔、标签页导航、存储用量统计与全新管理后台界面", "Cloud sync adds idle sync intervals, tab navigation, storage usage stats, and a redesigned admin portal"),
+        ("应用内自动更新切换至 10166/quiet-md GitHub Releases 通道", "In-app updates now use the 10166/quiet-md GitHub Releases channel"),
+    ]),
     ("0.1.13", &[
         ("画板：在文档里插入，或直接打开 .excalidraw 文件", "Boards: add one to a note, or open .excalidraw files"),
         ("版本历史：「…」›「版本历史」查看以前保存的版本", "Version history: … › Version history shows earlier saves"),

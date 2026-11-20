@@ -10,20 +10,20 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/s1dashu/quiet-md/releases/latest"><img src="https://img.shields.io/github/v/release/s1dashu/quiet-md?label=release&color=2f6feb" alt="Dernière version"></a>
-  <a href="https://github.com/s1dashu/quiet-md/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/s1dashu/quiet-md/ci.yml?branch=main&label=CI" alt="État de la CI"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="https://img.shields.io/github/v/release/10166/quiet-md?label=release&color=2f6feb" alt="Dernière version"></a>
+  <a href="https://github.com/10166/quiet-md/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/10166/quiet-md/ci.yml?branch=main&label=CI" alt="État de la CI"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="macOS, Windows et Linux">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20GPUI-dea584?logo=rust" alt="Faite avec Rust et GPUI">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/s1dashu/quiet-md?color=green" alt="Licence MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/10166/quiet-md?color=green" alt="Licence MIT"></a>
   <img src="https://img.shields.io/badge/status-beta-orange" alt="Beta">
 </p>
 
 <p align="center">
-  <a href="https://download.quiet.md/latest/quiet-md-macos-arm64.zip"><img src="docs/images/download-macos.svg" height="56" alt="Télécharger pour macOS"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-macos.svg" height="56" alt="Télécharger pour macOS"></a>
   &nbsp;
-  <a href="https://download.quiet.md/latest/quiet-md-windows-x64-setup.exe"><img src="docs/images/download-windows.svg" height="56" alt="Télécharger pour Windows"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-windows.svg" height="56" alt="Télécharger pour Windows"></a>
   &nbsp;
-  <a href="https://download.quiet.md/latest/quiet-md-x86_64.AppImage"><img src="docs/images/download-linux.svg" height="56" alt="Télécharger pour Linux"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-linux.svg" height="56" alt="Télécharger pour Linux"></a>
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@
 </p>
 
 > [!NOTE]
-> Quiet.md est en **bêta** et évolue vite. Si vous rencontrez un bug ou avez une idée, [ouvrez une issue](https://github.com/s1dashu/quiet-md/issues), ou mieux, envoyez une pull request.
+> Quiet.md est en **bêta** et évolue vite. Si vous rencontrez un bug ou avez une idée, [ouvrez une issue](https://github.com/10166/quiet-md/issues), ou mieux, envoyez une pull request.
 
 ## Pourquoi Quiet.md
 
@@ -52,25 +52,25 @@
 ## Téléchargement
 
 <p align="center">
-  <a href="https://download.quiet.md/latest/quiet-md-macos-arm64.zip"><img src="docs/images/download-macos.svg" height="56" alt="Télécharger pour macOS"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-macos.svg" height="56" alt="Télécharger pour macOS"></a>
   &nbsp;
-  <a href="https://download.quiet.md/latest/quiet-md-windows-x64-setup.exe"><img src="docs/images/download-windows.svg" height="56" alt="Télécharger pour Windows"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-windows.svg" height="56" alt="Télécharger pour Windows"></a>
   &nbsp;
-  <a href="https://download.quiet.md/latest/quiet-md-x86_64.AppImage"><img src="docs/images/download-linux.svg" height="56" alt="Télécharger pour Linux"></a>
+  <a href="https://github.com/10166/quiet-md/releases/latest"><img src="docs/images/download-linux.svg" height="56" alt="Télécharger pour Linux"></a>
 </p>
 
 | Plateforme | Paquet | Prérequis |
 |---|---|---|
-| **macOS** (Apple Silicon) | [quiet-md-macos-arm64.zip](https://download.quiet.md/latest/quiet-md-macos-arm64.zip) | macOS 13 ou ultérieur |
-| **Windows** (x64) | [quiet-md-windows-x64-setup.exe](https://download.quiet.md/latest/quiet-md-windows-x64-setup.exe) | Windows 10 version 2004 ou ultérieure |
-| **Linux** (x86_64, expérimental) | [quiet-md-x86_64.AppImage](https://download.quiet.md/latest/quiet-md-x86_64.AppImage) | glibc 2.35 ou ultérieure (Ubuntu 22.04 et plus récent) |
-| **macOS** (Intel) | [quiet-md-macos-x86_64.zip](https://download.quiet.md/latest/quiet-md-macos-x86_64.zip) | macOS 13 ou ultérieur |
+| **macOS** (Apple Silicon) | [quiet-md-macos-arm64.zip](https://github.com/10166/quiet-md/releases/latest) | macOS 13 ou ultérieur |
+| **Windows** (x64) | [quiet-md-windows-x64-setup.exe](https://github.com/10166/quiet-md/releases/latest) | Windows 10 version 2004 ou ultérieure |
+| **Linux** (x86_64, expérimental) | [quiet-md-x86_64.AppImage](https://github.com/10166/quiet-md/releases/latest) | glibc 2.35 ou ultérieure (Ubuntu 22.04 et plus récent) |
+| **macOS** (Intel) | [quiet-md-macos-x86_64.zip](https://github.com/10166/quiet-md/releases/latest) | macOS 13 ou ultérieur |
 
 - **macOS** : décompressez l'archive et glissez `quiet.md.app` dans Applications. L'app est signée et notariée par Apple.
 - **Windows** : lancez l'installateur. Par défaut, l'installation est limitée à l'utilisateur courant, et la désinstallation ne supprime jamais vos notes. Si SmartScreen apparaît au premier lancement, cliquez sur **Plus d'infos → Exécuter quand même**.
 - **Linux** (expérimental) : `chmod +x quiet-md-*.AppImage` puis lancez-le. Sans FUSE, ajoutez `--appimage-extract-and-run`. Les AppImage 0.1.10 et plus récentes prennent en charge la mise à jour depuis l'app. Les versions Linux plus anciennes nécessitent une installation manuelle unique. Les tests interactifs ont jusqu'ici porté sur Omarchy sous Wayland (voir les [notes Linux](CONTRIBUTING.md#linux-experimental)).
 
-Vous pouvez aussi télécharger depuis [Quiet.md](https://quiet.md/?lang=fr). Chaque version et ses sommes de contrôle SHA-256 sont sur [GitHub Releases](https://github.com/s1dashu/quiet-md/releases).
+Vous pouvez aussi télécharger depuis [Quiet.md](https://quiet.md/?lang=fr). Chaque version et ses sommes de contrôle SHA-256 sont sur [GitHub Releases](https://github.com/10166/quiet-md/releases).
 
 Au premier lancement, Quiet.md demande la langue de l'interface, l'emplacement de votre bibliothèque et le raccourci de note rapide, et propose de copier vos notes depuis Obsidian, Logseq, iA Writer ou Typora. Une bibliothèque vide reçoit le guide **Getting started** : une visite de dix minutes des principales fonctionnalités. Les notes existantes ne sont jamais écrasées.
 
@@ -109,7 +109,7 @@ Un écran 120 Hz laisse 8,3 ms par image. Même à P95 sur un document d'un mill
 
 Merci à toutes les personnes qui ont contribué à construire Quiet.md. Issues et pull requests sont bienvenues : compilation, tests et conventions de code sont dans [CONTRIBUTING.md](CONTRIBUTING.md).
 
-[![Contributeurs](https://raw.githubusercontent.com/s1dashu/quiet-md/contributors-assets/docs/images/contributors.svg?v=1)](https://github.com/s1dashu/quiet-md/graphs/contributors)
+[![Contributeurs](https://raw.githubusercontent.com/10166/quiet-md/contributors-assets/docs/images/contributors.svg?v=1)](https://github.com/10166/quiet-md/graphs/contributors)
 
 ## Dernières mises à jour
 
@@ -133,7 +133,7 @@ Merci à toutes les personnes qui ont contribué à construire Quiet.md. Issues 
 - **0.1.2** (4 nov) : les menus et raccourcis macOS standard (Masquer, Placer dans le Dock, Zoom, Plein écran). Cliquer sur l'icône du Dock rouvre une fenêtre après la fermeture de la dernière. Correction de certains caractères chinois rendus avec les mauvais glyphes.
 - **0.1.1** (3 nov) : première version Windows x64, installée par utilisateur, qui conserve vos notes à la désinstallation. Interface chinoise et anglaise et guide intégré peaufinés.
 
-Les notes complètes de chaque version sont sur [Releases](https://github.com/s1dashu/quiet-md/releases).
+Les notes complètes de chaque version sont sur [Releases](https://github.com/10166/quiet-md/releases).
 
 ## Licence
 

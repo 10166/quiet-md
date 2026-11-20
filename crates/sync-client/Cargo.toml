@@ -1,10 +1,11 @@
 [package]
 name = "quiet_sync_client"
-version = "0.1.13"
+version = "0.1.14"
 edition = "2024"
 description = "Async local-first sync client engine for Quiet.md"
 license = "MIT"
-authors = ["s1dashu"]
+authors = ["s1dashu", "10166"]
+repository = "https://github.com/10166/quiet-md"
 
 [dependencies]
 quiet_sync_proto = { path = "../sync-proto" }

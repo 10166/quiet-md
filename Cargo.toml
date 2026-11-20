@@ -1,11 +1,12 @@
 [package]
 name = "quiet_md"
-version = "0.1.13"
+version = "0.1.14"
 edition = "2024"
 description = "A fast, local-first rich text notes app for macOS and Windows, drawn with GPUI and compatible with Feishu DocxXML"
 license = "MIT"
 readme = "README.md"
-authors = ["s1dashu"]
+authors = ["s1dashu", "10166"]
+repository = "https://github.com/10166/quiet-md"
 keywords = ["notes", "markdown", "editor", "gpui", "local-first"]
 categories = ["text-editors"]
 

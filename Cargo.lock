@@ -1768,7 +1768,7 @@ dependencies = [
 
 [[package]]
 name = "fdl_core"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4719,7 +4719,7 @@ dependencies = [
 
 [[package]]
 name = "quiet_md"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "async-lock",
@@ -4771,7 +4771,7 @@ dependencies = [
 
 [[package]]
 name = "quiet_sync_client"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4793,7 +4793,7 @@ dependencies = [
 
 [[package]]
 name = "quiet_sync_proto"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4812,7 +4812,7 @@ dependencies = [
 
 [[package]]
 name = "quiet_sync_server"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "argon2",

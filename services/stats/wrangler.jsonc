@@ -12,7 +12,7 @@
   ],
   "vars": {
     "ZONE_ID": "411c824a5a3ea80fcfd2d5551529366b",
-    "GITHUB_REPO": "s1dashu/quiet-md",
+    "GITHUB_REPO": "10166/quiet-md",
     // Days of Cloudflare analytics one run may fill in (a missed run catches up next time).
     "MAX_DAYS": "3"
   }

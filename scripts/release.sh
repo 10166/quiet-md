@@ -47,7 +47,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <plist version="1.0"><dict>
 <key>CFBundleName</key><string>Quiet.md</string>
 <key>CFBundleDisplayName</key><string>Quiet.md</string>
-<key>CFBundleIdentifier</key><string>com.s1dashu.quietmd</string>
+<key>CFBundleIdentifier</key><string>com.10166.quietmd</string>
 <key>CFBundleExecutable</key><string>quiet_md</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
@@ -74,8 +74,12 @@ fi
 codesign --verify --deep --strict --verbose=2 "$app"
 suffix=
 if [ "$SIGNING_IDENTITY" = - ]; then
-  suffix=-unsigned
-  echo "CI package only: ad-hoc signed, without notarization; do not publish."
+  if [ -z "${ALLOW_ADHOC_RELEASE:-}" ]; then
+    suffix=-unsigned
+    echo "CI package only: ad-hoc signed, without notarization; do not publish."
+  else
+    echo "Ad-hoc signed release package (without notarization)."
+  fi
 else
   ditto -c -k --keepParent "$app" "$out/notarization.zip"
   xcrun notarytool submit "$out/notarization.zip" --keychain-profile "$NOTARY_PROFILE" --wait --output-format json > "$out/notarization.json"

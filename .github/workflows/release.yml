@@ -1,0 +1,211 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (e.g. v0.1.14; defaults to v<Cargo.toml version>)'
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Resolve release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: meta
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="${GITHUB_REF_NAME}"
+            if [ "$tag" != "v$version" ]; then
+              echo "Tag $tag does not match Cargo.toml version v$version" >&2
+              exit 1
+            fi
+          else
+            tag="${{ inputs.tag }}"
+            tag="${tag:-v$version}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  macos:
+    name: Build macOS (arm64 + x86_64)
+    needs: prepare
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust targets
+        run: rustup target add x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-on-failure: true
+          env-vars: MACOSX_DEPLOYMENT_TARGET
+
+      - name: Package Apple Silicon
+        env:
+          SIGNING_IDENTITY: '-'
+          ALLOW_ADHOC_RELEASE: '1'
+        run: scripts/release.sh
+
+      - name: Package Intel
+        env:
+          SIGNING_IDENTITY: '-'
+          ALLOW_ADHOC_RELEASE: '1'
+          MACOS_TARGET: x86_64-apple-darwin
+        run: scripts/release.sh
+
+      - name: Upload macOS release artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-macos
+          path: |
+            dist-release.*/quiet-md-*-macos-*.zip
+            dist-release.*/quiet-md-*-macos-*.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Build Windows (x64)
+    needs: prepare
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-on-failure: true
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$vs) { throw 'Visual Studio C++ tools were not found' }
+          Import-Module "$vs/Common7/Tools/Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+          & scripts/package-windows.ps1 -Iscc "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows packaging failed' }
+
+      - name: Upload Windows release artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-windows
+          path: |
+            dist/windows/unsigned/quiet-md-*-windows-x64-setup.exe
+            dist/windows/unsigned/quiet-md-*-windows-x64-setup.exe.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    name: Build Linux (x86_64 AppImage + tarball)
+    needs: prepare
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev libfreetype6-dev libwayland-dev libx11-xcb-dev libvulkan-dev libssl-dev python3 imagemagick fonts-noto-core fonts-noto-cjk
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-on-failure: true
+
+      - name: Package Linux tarball and AppImage
+        run: |
+          scripts/package-linux.sh
+          scripts/package-appimage.sh
+
+      - name: Upload Linux release artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-linux
+          path: |
+            dist/linux/quiet-md-*-x86_64.AppImage
+            dist/linux/quiet-md-*-x86_64.AppImage.sha256
+            dist/linux/quiet-md-*-linux-x86_64.tar.gz
+            dist/linux/quiet-md-*-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Sign and publish GitHub Release
+    needs: [prepare, macos, windows, linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: release-artifacts
+
+      - name: Flatten release artifacts
+        run: |
+          mkdir -p staging
+          find release-artifacts -type f \( -name 'quiet-md-*' \) -exec mv {} staging/ \;
+          ls -la staging/
+
+      - name: Sign update packages and publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Quiet.md $TAG" --generate-notes
+          fi
+
+          # Upload non-updater Linux tarball if present.
+          if [ -f "staging/quiet-md-$VERSION-linux-x86_64.tar.gz" ]; then
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+              "staging/quiet-md-$VERSION-linux-x86_64.tar.gz" \
+              "staging/quiet-md-$VERSION-linux-x86_64.tar.gz.sha256"
+          fi
+
+          update_pkgs=(
+            "staging/quiet-md-$VERSION-macos-arm64.zip"
+            "staging/quiet-md-$VERSION-macos-x86_64.zip"
+            "staging/quiet-md-$VERSION-windows-x64-setup.exe"
+            "staging/quiet-md-$VERSION-x86_64.AppImage"
+          )
+
+          if [ -n "$MINISIGN_SECRET_KEY" ]; then
+            sudo apt-get update
+            sudo apt-get install -y minisign
+            keyfile=$(mktemp)
+            trap 'rm -f "$keyfile"' EXIT
+            printf '%s\n' "$MINISIGN_SECRET_KEY" > "$keyfile"
+            chmod 600 "$keyfile"
+            MINISIGN_KEY="$keyfile" scripts/publish-downloads.sh "${update_pkgs[@]}"
+          else
+            echo "::warning::MINISIGN_SECRET_KEY secret is not configured; uploading packages without update-*.json manifests."
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber staging/quiet-md-*
+          fi

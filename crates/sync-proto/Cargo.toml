@@ -1,10 +1,11 @@
 [package]
 name = "quiet_sync_proto"
-version = "0.1.13"
+version = "0.1.14"
 edition = "2024"
 description = "Wire protocol, sync entities, and E2EE primitives for Quiet.md sync"
 license = "MIT"
-authors = ["s1dashu"]
+authors = ["s1dashu", "10166"]
+repository = "https://github.com/10166/quiet-md"
 
 [dependencies]
 anyhow = "1.0.104"
