@@ -49,6 +49,33 @@ pub struct Marks {
     /// Inline object (equation, button, mention, ...). Each object is one
     /// U+FFFC in the text.
     pub inline: Option<Inline>,
+    /// Inline comment thread IDs anchoring this text run (deduped, ordered).
+    pub comment_ids: Vec<String>,
+}
+
+/// One reply in a comment thread.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommentReply {
+    pub id: String,
+    /// Optional author display name (empty in single-user local mode).
+    pub author: String,
+    pub body: String,
+    /// Unix seconds.
+    pub created: u64,
+    pub updated: u64,
+}
+
+/// A comment thread attached to a text range or a block (or orphaned when its
+/// anchor was deleted).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommentThread {
+    pub id: String,
+    /// Snapshot of the commented text or block summary.
+    pub quote: String,
+    pub resolved: bool,
+    /// Unix seconds.
+    pub created: u64,
+    pub replies: Vec<CommentReply>,
 }
 
 /// An inline object. `xml` is its element exactly as read or as
@@ -286,13 +313,23 @@ impl RichText {
         // Marks that typing at `offset` should inherit: the run ending at or
         // containing offset (prefer the left side, like most editors).
         let mut last = Marks::default();
-        for (range, marks) in self.spans() {
+        let mut iter = self.spans().peekable();
+        while let Some((range, marks)) = iter.next() {
             if range.start < offset && offset < range.end {
-                // Strictly inside a run: links and inline code extend too.
+                // Strictly inside a run: links, inline code and comment anchors extend.
                 return Marks { inline: None, ..marks.clone() };
             }
             if range.start < offset && offset == range.end {
-                return typing_marks(marks);
+                let mut m = typing_marks(marks);
+                // At a formatting boundary inside a comment, keep comment IDs shared by both sides.
+                if let Some((_, next)) = iter.peek() {
+                    for cid in &marks.comment_ids {
+                        if next.comment_ids.contains(cid) {
+                            m.comment_ids.push(cid.clone());
+                        }
+                    }
+                }
+                return m;
             }
             if range.start >= offset {
                 if offset == 0 {
@@ -377,12 +414,14 @@ impl RichText {
     }
 }
 
-/// Marks inherited by newly typed text: links, code and inline objects don't extend.
+/// Marks inherited by newly typed text: links, code, inline objects and
+/// comment anchors don't extend past their edges.
 fn typing_marks(m: &Marks) -> Marks {
     Marks {
         link: None,
         code: false,
         inline: None,
+        comment_ids: vec![],
         ..m.clone()
     }
 }
@@ -808,6 +847,11 @@ impl BlockKind {
             BlockKind::Text | BlockKind::Heading { .. } | BlockKind::Bullet | BlockKind::Ordered { .. } | BlockKind::Todo { .. } | BlockKind::Quote
         )
     }
+
+    /// Blocks that can carry a block-level comment (`comment-ids`).
+    pub fn takes_comment(&self) -> bool {
+        !matches!(self, BlockKind::Raw { .. } | BlockKind::Column { .. })
+    }
 }
 
 /// The countdown add-on's record: `{duration, startTime, isNotify, color,
@@ -892,6 +936,8 @@ pub struct Block {
     /// Collapsed (`folded="true"`): hides children, and for a heading its
     /// section too.
     pub folded: bool,
+    /// Block-level comment thread IDs (`comment-ids` on the block's tag).
+    pub comment_ids: Vec<String>,
 }
 
 impl Block {
@@ -904,6 +950,7 @@ impl Block {
             bg: None,
             children: vec![],
             folded: false,
+            comment_ids: vec![],
         }
     }
 
@@ -916,11 +963,17 @@ impl Block {
         self
     }
 
-    /// Deep clone with fresh ids (used for paste / duplicate).
+    /// Deep clone with fresh ids (used for paste / duplicate), stripping comment
+    /// anchors so pasted copies never alias existing threads.
     pub fn fresh_ids(&self) -> Block {
         let mut b = self.clone();
         fn walk(b: &mut Block) {
             b.id = BlockId::new();
+            b.comment_ids.clear();
+            if b.text.runs.iter().any(|r| !r.marks.comment_ids.is_empty()) {
+                let len = b.text.len();
+                b.text.update_marks(0..len, |m| m.comment_ids.clear());
+            }
             for c in &mut b.children {
                 walk(c);
             }
@@ -946,6 +999,8 @@ pub struct Document {
     pub icon: Option<String>,
     pub cover: Option<Cover>,
     pub blocks: Vec<Block>,
+    /// Document comment threads (`<comments>` at the end of DocxXML).
+    pub comments: Vec<CommentThread>,
 }
 
 /// 封面: a local image plus `offset_ratio_x/y` (0 = centred).
@@ -963,6 +1018,7 @@ impl Default for Document {
             icon: None,
             cover: None,
             blocks: vec![Block::text("")],
+            comments: vec![],
         }
     }
 }
@@ -1004,7 +1060,47 @@ impl Document {
         self.title.is_empty()
             && self.icon.is_none()
             && self.cover.is_none()
-            && matches!(self.blocks.as_slice(), [b] if matches!(b.kind, BlockKind::Text) && b.text.is_empty() && b.children.is_empty())
+            && self.comments.is_empty()
+            && matches!(self.blocks.as_slice(), [b] if matches!(b.kind, BlockKind::Text) && b.text.is_empty() && b.children.is_empty() && b.comment_ids.is_empty())
+    }
+
+    /// First block carrying an anchor (block-level or inline) for `thread_id`,
+    /// in document order.
+    pub fn comment_anchor(&self, thread_id: &str) -> Option<BlockId> {
+        let mut found = None;
+        self.for_each_block(|b| {
+            if found.is_some() { return; }
+            if b.comment_ids.iter().any(|c| c == thread_id)
+                || b.text.runs.iter().any(|r| r.marks.comment_ids.iter().any(|c| c == thread_id))
+            {
+                found = Some(b.id);
+            }
+        });
+        found
+    }
+
+    /// Document-order rank of every anchored comment thread (block or inline).
+    pub fn comment_positions(&self) -> std::collections::HashMap<String, (usize, BlockId)> {
+        let mut out = std::collections::HashMap::new();
+        let mut ord = 0usize;
+        self.for_each_block(|b| {
+            let here = ord;
+            ord += 1;
+            for cid in &b.comment_ids {
+                out.entry(cid.clone()).or_insert((here, b.id));
+            }
+            for r in &b.text.runs {
+                for cid in &r.marks.comment_ids {
+                    out.entry(cid.clone()).or_insert((here, b.id));
+                }
+            }
+        });
+        out
+    }
+
+    /// Count of unresolved comment threads in this document.
+    pub fn open_comment_count(&self) -> usize {
+        self.comments.iter().filter(|t| !t.resolved).count()
     }
 
     /// Plain text of the whole document (for search and snippets).
@@ -1130,6 +1226,19 @@ mod tests {
         assert!(t.marks_at(3).bold);
         assert!(!t.marks_at(7).bold);
         assert!(t.marks_at(5).bold);
+    }
+
+    #[test]
+    fn comment_marks_extend_across_inner_format_boundaries_only() {
+        let mut t = RichText::plain("ab cd ef");
+        t.update_marks(3..5, |m| m.bold = true);
+        // Comment spans "ab cd" (plain "ab " + bold "cd").
+        t.update_marks(0..5, |m| m.comment_ids.push("c1".into()));
+        // Outer left edge (0) and outer right edge (5) do not extend.
+        assert!(t.marks_at(0).comment_ids.is_empty());
+        assert!(t.marks_at(5).comment_ids.is_empty());
+        // Formatting boundary between plain "ab " and bold "cd" at offset 3 stays inside c1.
+        assert_eq!(t.marks_at(3).comment_ids, vec!["c1"]);
     }
 
     fn grid(nr: usize, nc: usize) -> Table {

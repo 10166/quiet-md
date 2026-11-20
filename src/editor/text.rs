@@ -279,6 +279,8 @@ pub struct RichTextElement {
     pub highlight: Option<Box<dyn Fn(&str) -> Vec<crate::highlight::Span>>>,
     /// 查找和替换 hits as (range, is_current), tinted over the glyphs.
     pub found: Vec<(Range<usize>, bool)>,
+    /// Unresolved inline comment highlights as (range, is_active).
+    pub comment_highlights: Vec<(Range<usize>, bool)>,
     /// Equation numbers shown before this block (`katexEqnNo`).
     pub eq_counter: u32,
     /// The button whose 按钮设置 panel is open (`.editing`), shown with
@@ -1075,6 +1077,20 @@ impl Element for RichTextElement {
         for (hi, (_, line)) in layout.lines.iter().enumerate() {
             let tops: Vec<Pixels> = layout.rows.iter().filter(|r| r.hard == hi).map(|r| r.y + r.base_dy).collect();
             let _ = line.paint_background_rows(o, lh, &tops, gpui_align, Some(bounds), window, cx);
+        }
+        // Inline comment highlights sit above text backgrounds and below selection.
+        if !self.comment_highlights.is_empty() && !self.text.is_empty() {
+            let box_h = (px(self.spec.size * 1.42)).min(lh);
+            for (range, active) in &self.comment_highlights {
+                let bg = if *active { Theme::comment_bg_active() } else { Theme::comment_bg() };
+                let ul = Theme::comment_underline();
+                for r in layout.rects_for(range.clone()) {
+                    let top = r.top() + (lh - box_h) / 2.;
+                    window.paint_quad(fill(Bounds::new(point(r.left(), top), size(r.size.width, box_h)), bg).corner_radii(px(2.)));
+                    let ul_h = if *active { px(2.) } else { px(1.5) };
+                    window.paint_quad(fill(Bounds::new(point(r.left(), top + box_h - ul_h), size(r.size.width, ul_h)), ul));
+                }
+            }
         }
         if let Some(sel) = &self.selection {
             let rects = if self.text.is_empty() {

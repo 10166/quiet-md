@@ -340,7 +340,7 @@ pub fn resolve_images(blocks: &mut [Block], base: &Path) {
 }
 
 /// The picture formats the editor shows (`src/editor/image.rs`).
-const PICTURES: [&str; 6] = ["jpeg", "jpg", "png", "gif", "webp", "bmp"];
+const PICTURES: [&str; 7] = ["jpeg", "jpg", "png", "gif", "webp", "bmp", "svg"];
 
 /// On import: a paragraph that is just `![[name.png]]` (or `![[name.png|300]]`)
 /// — how Obsidian and its exports embed a picture — as that picture. Looked up
@@ -348,7 +348,7 @@ const PICTURES: [&str; 6] = ["jpeg", "jpg", "png", "gif", "webp", "bmp"];
 /// at the vault's top, then anywhere in the vault by a name only one file has.
 /// The vault is the nearest folder above the page holding `.obsidian`, else
 /// `root` (the folder being imported). What can't be found or shown
-/// (`![[page#heading]]`, a missing file, an svg) stays the text it was.
+/// (`![[page#heading]]`, a missing file, a pdf) stays the text it was.
 pub fn wiki_images(blocks: &mut [Block], page_dir: &Path, root: Option<&Path>) {
     let vault = page_dir.ancestors().find(|d| d.join(".obsidian").fs_is_dir()).or(root);
     let attachments = vault.and_then(|v| {
@@ -470,7 +470,7 @@ pub fn parse_file(text: &str, title: &str, base: Option<&Path>) -> Document {
     if blocks.is_empty() {
         blocks.push(Block::text(""));
     }
-    Document { title: RichText::plain(title), icon: None, cover: None, blocks }
+    Document { title: RichText::plain(title), icon: None, cover: None, blocks, comments: vec![] }
 }
 
 /// `doc` written back as a Markdown file, after the file's `front` matter.
@@ -1024,8 +1024,8 @@ mod tests {
         let notes = root.join("notes");
         for d in ["notes", ".obsidian", "files", "deep/er"] { crate::vfs::create_dir_all(root.join(d)).unwrap(); }
         crate::vfs::write(root.join(".obsidian/app.json"), r#"{"attachmentFolderPath":"files"}"#).unwrap();
-        for f in ["notes/p 1.png", "files/att.png", "deep/er/far.png", "drawing.svg", "notes/twice.png", "files/twice.png"] { crate::vfs::write(root.join(f), b"png").unwrap(); }
-        let src = "4、\n\n![[p 1.png]]\n\n![[p 1.png|300x200]]\n\n![[att.png]]\n\n![[far.png]]\n\n![[missing.png]]\n\n![[page#heading]]\n\n![[drawing.svg]]\n\n![[deep/er/far.png]]\n";
+        for f in ["notes/p 1.png", "files/att.png", "deep/er/far.png", "drawing.svg", "slides.pdf", "notes/twice.png", "files/twice.png"] { crate::vfs::write(root.join(f), b"png").unwrap(); }
+        let src = "4、\n\n![[p 1.png]]\n\n![[p 1.png|300x200]]\n\n![[att.png]]\n\n![[far.png]]\n\n![[missing.png]]\n\n![[page#heading]]\n\n![[drawing.svg]]\n\n![[slides.pdf]]\n\n![[deep/er/far.png]]\n";
         let mut doc = parse_file(src, "page", Some(&notes));
         wiki_images(&mut doc.blocks, &notes, None);
         let pics: Vec<(PathBuf, Option<f32>)> = doc.blocks.iter().filter_map(|b| match &b.kind {
@@ -1033,9 +1033,9 @@ mod tests {
             _ => None,
         }).collect();
         let p1 = notes.join("p 1.png");
-        assert_eq!(pics, vec![(p1.clone(), None), (p1, Some(300.)), (root.join("files/att.png"), None), (root.join("deep/er/far.png"), None), (root.join("deep/er/far.png"), None)]);
+        assert_eq!(pics, vec![(p1.clone(), None), (p1, Some(300.)), (root.join("files/att.png"), None), (root.join("deep/er/far.png"), None), (root.join("drawing.svg"), None), (root.join("deep/er/far.png"), None)]);
         let texts: Vec<&str> = doc.blocks.iter().map(|b| b.text.text.as_str()).filter(|t| !t.is_empty()).collect();
-        assert_eq!(texts, vec!["4、", "![[missing.png]]", "![[page#heading]]", "![[drawing.svg]]"]);
+        assert_eq!(texts, vec!["4、", "![[missing.png]]", "![[page#heading]]", "![[slides.pdf]]"]);
         // Imported as a DocxXML page (not edited as Markdown) too.
         let mut blocks = crate::paste::markdown_to_blocks("![[att.png]]\n", crate::paste::Off { file: true, ..Default::default() });
         wiki_images(&mut blocks, &notes, None);

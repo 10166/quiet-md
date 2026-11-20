@@ -102,6 +102,7 @@ fn hash_block(b: &Block, orders: &rustc_hash::FxHashMap<BlockId, String>, h: &mu
     b.text.text.len().hash(h);
     b.text.runs.len().hash(h);
     b.folded.hash(h);
+    b.comment_ids.len().hash(h);
     match &b.kind {
         BlockKind::Heading { level, .. } => (level, orders.get(&b.id)).hash(h),
         BlockKind::Code { wrap, .. } => wrap.hash(h),
@@ -243,6 +244,40 @@ impl R<'_> {
         spec.link_underline = !bm && self.focused && sel.head.block == id;
         let selection = if bm || sel.is_collapsed() { None } else { core.range_in(id, &self.units) };
         let caret_here = !bm && core.cell_sel.is_none() && sel.head.block == id && sel.is_collapsed();
+        let comment_highlights = if self.ghost || id == TITLE || self.ed.markdown {
+            vec![]
+        } else {
+            let mut ch: Vec<(std::ops::Range<usize>, bool)> = vec![];
+            if !core.doc.comments.is_empty() {
+                for (range, m) in text.spans() {
+                    if m.comment_ids.is_empty() { continue; }
+                    if !m.comment_ids.iter().any(|cid| self.ed.is_comment_open(cid)) { continue; }
+                    let active = self.ed.active_comment.as_ref().is_some_and(|a| m.comment_ids.contains(a));
+                    match ch.last_mut() {
+                        Some((prev, prev_a)) if prev.end == range.start && *prev_a == active => prev.end = range.end,
+                        _ => ch.push((range, active)),
+                    }
+                }
+            }
+            if let Some(core::CommentTarget::Inline { start, end }) = self.ed.draft_comment
+                && !core.is_code(id)
+                && let (Some(si), Some(ei), Some(mi)) = (
+                    core.unit_index(&self.units, start.block),
+                    core.unit_index(&self.units, end.block),
+                    core.unit_index(&self.units, id),
+                )
+            {
+                let (a, b, ai, bi) = if (si, start.offset) <= (ei, end.offset) { (start, end, si, ei) } else { (end, start, ei, si) };
+                if ai <= mi && mi <= bi {
+                    let lo = if mi == ai { text.text.floor_char_boundary(a.offset.min(text.len())) } else { 0 };
+                    let hi = if mi == bi { text.text.floor_char_boundary(b.offset.min(text.len())) } else { text.len() };
+                    if lo < hi {
+                        ch.push((lo..hi, true));
+                    }
+                }
+            }
+            ch
+        };
         RichTextElement {
             id,
             text: text.clone(),
@@ -259,6 +294,7 @@ impl R<'_> {
             show_caret: caret_here && self.focused && self.ed.caret_visible && !self.ed.read_only,
             highlight: None,
             found: if self.ghost { vec![] } else { self.ed.find_hits(id) },
+            comment_highlights,
             eq_counter: self.eqnos.get(&id).copied().unwrap_or(0),
             button_edit: if self.ghost { None } else { self.ed.button_preview(id) },
             scroll: None,
@@ -350,7 +386,7 @@ impl R<'_> {
         let content: AnyElement = match &b.kind {
             BlockKind::Text | BlockKind::Heading { .. } => self.text_block(b, env, cx),
             BlockKind::Bullet | BlockKind::Ordered { .. } | BlockKind::Todo { .. } => self.list_item(b, siblings, idx, env, cx),
-            BlockKind::Code { lang, wrap, .. } => self.code_block(b, lang, *wrap, cx),
+            BlockKind::Code { lang, wrap, .. } => self.code_block(b, lang, *wrap, env, cx),
             // The focus decoration: a 4pt bar at the column edge, the text
             // 12pt after it and unchanged.
             BlockKind::Quote => {
@@ -768,14 +804,51 @@ impl R<'_> {
             .into_any_element()
     }
 
-    fn code_block(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<Editor>) -> AnyElement {
-        if crate::settings::feishu() { return self.code_block_feishu(b, lang, wrap, cx); }
+    fn svg_code_preview_box(&self, id: BlockId, im: std::sync::Arc<RenderImage>, (nw, nh): (f32, f32), max_w: f32, with_code: bool, radius: f32, cx: &mut Context<Editor>) -> AnyElement {
+        let avail_w = (max_w - 32.).max(120.);
+        let max_h = 520.;
+        let scale = (avail_w / nw.max(1.)).min(max_h / nh.max(1.)).min(1.);
+        let (dw, dh) = ((nw * scale).max(16.), (nh * scale).max(16.));
+        div()
+            .id(("svg-code-preview", id.0))
+            .w_full()
+            .bg(Theme::bg_body())
+            .when(with_code, |d| d.border_t_1().border_color(Theme::code_border()).rounded_b(px(radius)).py(px(16.)).px(px(16.)))
+            .when(!with_code, |d| d.pt(px(36.)).pb(px(16.)).px(px(16.)).rounded(px(radius)))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(img(im).w(px(dw)).h(px(dh)).object_fit(ObjectFit::Contain))
+            .when(!with_code && !self.ed.read_only, |d| {
+                d.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |e, ev: &MouseDownEvent, window, cx| {
+                        if ev.click_count == 2 {
+                            cx.stop_propagation();
+                            e.svg_code_open.insert(id);
+                            e.core.clear_block_sel();
+                            e.core.sel = core::Selection::caret(core::Pos::new(id, 0));
+                            window.focus(&e.focus, cx);
+                            cx.notify();
+                        }
+                    }),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn code_block(&self, b: &Block, lang: &str, wrap: bool, env: Env, cx: &mut Context<Editor>) -> AnyElement {
+        if crate::settings::feishu() { return self.code_block_feishu(b, lang, wrap, env, cx); }
 
         let id = b.id;
         let g = SharedString::from(format!("code-{}", id.0));
         let st = theme::style();
         let (code_size, code_line, radius) = (st.num("pre.size"), st.num("pre.line"), st.num("pre.radius"));
         let gutter_w = if st.flag("pre.numbers") { GUTTER_W } else { 0. };
+        let avail_w = if env.width > 0. { env.width } else { self.ed.content_width() };
+        let svg_preview = matches!(lang, "XML" | "HTML" | "Plain Text" | "SVG")
+            .then(|| self.ed.img.svg_code_preview(&b.text.text, avail_w))
+            .flatten();
         // SF Mono 13 on a 20pt line.
         let spec = TextSpec {
             size: code_size,
@@ -814,6 +887,7 @@ impl R<'_> {
         // right-aligned), revealed on hover / while editing.
         let editing = self.focused && self.ed.core.sel.head.block == id;
         let folded = self.ed.code_folded.contains(&id);
+        let show_code = svg_preview.is_none() || editing || self.ed.svg_code_open.contains(&id);
         // Handle hovered / its menu open (`.hovered`): light blue ring
         // over a clear body so the block tint shows; block-selected: blue
         // border on the gray body.
@@ -945,7 +1019,7 @@ impl R<'_> {
             .when(menu_on, |d| {
                 d.child(outer_ring(Theme::code_hover_ring()))
             })
-            .when(!folded && !menu_on && gutter_w > 0., |d| {
+            .when(!folded && !menu_on && gutter_w > 0. && show_code && svg_preview.is_none(), |d| {
                 d.child(
                     div()
                         .absolute()
@@ -981,8 +1055,35 @@ impl R<'_> {
                             .items_center()
                             .gap(px(17.))
                             .when(!editing, |d| d.opacity(0.).group_hover(g.clone(), |s| s.opacity(1.)))
+                            .when(!folded && svg_preview.is_some(), |d| {
+                                d.child(
+                                    header_btn("code-svg-toggle")
+                                        .child(if show_code { crate::settings::tr("仅预览", "Preview") } else { crate::settings::tr("源码", "Code") })
+                                        .child(sep(-8.))
+                                        .on_mouse_down(
+                                            MouseButton::Left,
+                                            cx.listener(move |e, _, window, cx| {
+                                                cx.stop_propagation();
+                                                if show_code {
+                                                    e.svg_code_open.remove(&id);
+                                                    if e.core.sel.head.block == id || e.core.sel.anchor.block == id {
+                                                        e.core.select_block(id);
+                                                    }
+                                                } else {
+                                                    e.svg_code_open.insert(id);
+                                                    if !e.read_only {
+                                                        e.core.clear_block_sel();
+                                                        e.core.sel = core::Selection::caret(core::Pos::new(id, 0));
+                                                        window.focus(&e.focus, cx);
+                                                    }
+                                                }
+                                                cx.notify();
+                                            }),
+                                        ),
+                                )
+                            })
                             .child(lang_btn)
-                            .when(!folded, |d| {
+                            .when(!folded && show_code, |d| {
                                 d.child(
                                     header_btn("code-wrap")
                                         .child(icon("wrap-text", 14., Theme::icon()))
@@ -1019,7 +1120,7 @@ impl R<'_> {
             )
             .child(fold_btn)
             .when(folded, |d| d.child(div().h(px(36.))))
-            .when(!folded, |d| {
+            .when(!folded && show_code, |d| {
                 d.child(
                     div()
                         .pt(px(36.))
@@ -1051,6 +1152,9 @@ impl R<'_> {
                         .child(self.code_column(id, wrap, el, 12.)),
                 )
             })
+            .when_some((!folded).then_some(svg_preview).flatten(), |d, (im, dims)| {
+                d.child(self.svg_code_preview_box(id, im, dims, avail_w, show_code, radius, cx))
+            })
             .into_any_element()
     }
 }
@@ -1081,6 +1185,18 @@ impl Editor {
         let mut nonces = self.grid_overrides();
         // A folded code block is a 40px row.
         nonces.extend(self.code_folded.iter().map(|&id| (id, id.0.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1)));
+        // SVG code blocks change height when toggling between preview-only and code+preview.
+        nonces.extend(self.svg_code_open.iter().map(|&id| (id, id.0.wrapping_mul(0x517c_c1b7_2722_0a95) ^ 0x5f67)));
+        if focused && !self.core.in_block_mode() {
+            let h = self.core.sel.head.block;
+            if let Some(b) = self.core.block(h)
+                && matches!(b.kind, BlockKind::Code { .. })
+                && super::image::is_svg_bytes(b.text.text.as_bytes())
+                && !self.svg_code_open.contains(&h)
+            {
+                nonces.push((h, h.0.wrapping_mul(0x517c_c1b7_2722_0a95) ^ 0x5f68));
+            }
+        }
         nonces.extend(self.image_nonces(focused).into_iter().chain(self.button_nonce()));
         // Walking a long document costs ~1.5ms (1M chars): skip it when
         // nothing the rows depend on changed, as on every scrolling frame.
@@ -1237,6 +1353,49 @@ impl Editor {
                 let depth = outer.len();
                 // 版本历史 显示改动: this block is new or was rewritten here.
                 if let Some(fill) = self.mark_fill(b.id) { bgs.push((depth, fill)) }
+                let open_cids = if self.markdown { vec![] } else { self.open_comment_ids_for_block(b) };
+                self.collect_visible_comments(b);
+                let block_comment_active = !self.markdown && (
+                    self.draft_comment.is_some_and(|t| match t {
+                        core::CommentTarget::Block(bid) => bid == b.id,
+                        core::CommentTarget::Inline { start, .. } => start.block == b.id && self.core.is_code(b.id),
+                    })
+                    || self.active_comment.as_ref().is_some_and(|a| b.comment_ids.contains(a) && self.is_comment_open(a))
+                );
+                if block_comment_active {
+                    bgs.push((depth, Theme::comment_bg_active()));
+                }
+                let comment_badge = (!open_cids.is_empty() && !self.rail_active() && !self.preview).then(|| {
+                    let active = self.active_comment.as_ref().is_some_and(|a| open_cids.contains(a));
+                    let first = open_cids[0].clone();
+                    let count = open_cids.len();
+                    let tint = if active { Theme::comment_underline() } else { Theme::text_caption() };
+                    div()
+                        .id(("comment-badge", b.id.0))
+                        .absolute()
+                        .top(px(gap + 2.))
+                        .right(px(-40.))
+                        .h(px(22.))
+                        .px(px(6.))
+                        .rounded(px(11.))
+                        .flex()
+                        .items_center()
+                        .gap(px(3.))
+                        .cursor_pointer()
+                        .bg(if active { Theme::comment_bg_active() } else { Theme::comment_bg() })
+                        .hover(|s| s.bg(Theme::comment_bg_active()))
+                        .text_size(px(11.))
+                        .text_color(tint)
+                        .tip_above(crate::settings::tr("查看评论", "View comments"), None)
+                        .child(icon("comment", 12., tint))
+                        .child(format!("{count}"))
+                        .on_mouse_down(MouseButton::Left, cx.listener(move |e, _, _, cx| {
+                            cx.stop_propagation();
+                            e.active_comment = Some(first.clone());
+                            cx.emit(super::view::EditorEvent::FocusComment(first.clone()));
+                            cx.notify();
+                        }))
+                });
                 r.flat = flattens(b).then_some(b.id);
                 let ends = |d: usize| !matches!(self.items.get(ix + 1), Some(Item::Block { path: next, .. }) if next.starts_with(&path[..=d]));
                 let last = sel_depth.is_some_and(ends);
@@ -1256,6 +1415,7 @@ impl Editor {
                             .bg(fill)
                     }))
                     .child(r.block(b, list, bi, Env { depth, root: depth == 0, width: self.layout.content - 25. * depth as f32, ..TOP }, cx))
+                    .children(comment_badge)
                     .when_some(sel_depth, |d, sd| {
                         d.child(
                             div()
@@ -1364,6 +1524,7 @@ impl Editor {
         // Overlays are positioned from last frame's layout, so build them
         // before the caches are reset for this frame.
         let overlays = self.render_overlays(window, cx);
+        let comment_rail = self.render_comment_rail(window, cx);
         let lightbox = self.lightbox_el(window, cx);
         let board = self.board_el();
         self.sync_tables(window, cx);
@@ -1399,6 +1560,7 @@ impl Editor {
         }
         self.cache.borrow_mut().clear();
         self.block_bounds.borrow_mut().clear();
+        self.comment_rail.visible_anchors.borrow_mut().clear();
         self.tables.geo.borrow_mut().clear();
         self.tables.stuck.borrow_mut().clear();
         self.img.boxes.borrow_mut().clear();
@@ -1459,7 +1621,8 @@ impl Editor {
                     let stale = ed.content_origin.get() != origin0
                         || bounds.size != pane0
                         || probes.iter().any(|(p, v)| ed.probe(*p) != *v)
-                        || code_rows(&ed.cache.borrow()) != ed.code_rows;
+                        || code_rows(&ed.cache.borrow()) != ed.code_rows
+                        || ed.comment_rail_stale();
                     if stale {
                         // Painting: `refresh` would be dropped.
                         let e = entity.clone();
@@ -1645,6 +1808,7 @@ impl Editor {
             .child(self.page_scrollbar())
             .children(file_line)
             .children(catalogue)
+            .children(comment_rail)
             .children(overlays)
             .children(col_overlay)
             .children(table_overlay)
@@ -1764,7 +1928,7 @@ pub(super) fn block_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env
         let content: AnyElement = match &b.kind {
             BlockKind::Text | BlockKind::Heading { .. } => self.text_block(b, env, cx),
             BlockKind::Bullet | BlockKind::Ordered { .. } | BlockKind::Todo { .. } => self.list_item(b, siblings, idx, env, cx),
-            BlockKind::Code { lang, wrap, .. } => self.code_block(b, lang, *wrap, cx),
+            BlockKind::Code { lang, wrap, .. } => self.code_block(b, lang, *wrap, env, cx),
             BlockKind::Quote => div()
                 .relative()
                 .pl(px(14.))
@@ -2069,11 +2233,15 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
 }
 
 impl R<'_> {
-fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<Editor>) -> AnyElement {
+fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, env: Env, cx: &mut Context<Editor>) -> AnyElement {
         use crate::feishu_theme::{self as theme, Theme};
 
         let id = b.id;
         let g = SharedString::from(format!("code-{}", id.0));
+        let avail_w = if env.width > 0. { env.width } else { self.ed.content_width() };
+        let svg_preview = matches!(lang, "XML" | "HTML" | "Plain Text" | "SVG")
+            .then(|| self.ed.img.svg_code_preview(&b.text.text, avail_w))
+            .flatten();
         let spec = TextSpec {
             size: 14.,
             line_height: 22.,
@@ -2111,6 +2279,7 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
         // right-aligned), revealed on hover / while editing.
         let editing = self.focused && self.ed.core.sel.head.block == id;
         let folded = self.ed.code_folded.contains(&id);
+        let show_code = svg_preview.is_none() || editing || self.ed.svg_code_open.contains(&id);
         // Handle hovered / its menu open (`.hovered`): light blue ring
         // over a clear body so the block tint shows; block-selected: blue
         // border on the gray body.
@@ -2262,8 +2431,35 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
                             .items_center()
                             .gap(px(17.))
                             .when(!editing, |d| d.opacity(0.).group_hover(g.clone(), |s| s.opacity(1.)))
+                            .when(!folded && svg_preview.is_some(), |d| {
+                                d.child(
+                                    header_btn("code-svg-toggle")
+                                        .child(if show_code { crate::settings::tr("仅预览", "Preview") } else { crate::settings::tr("源码", "Code") })
+                                        .child(sep(-8.))
+                                        .on_mouse_down(
+                                            MouseButton::Left,
+                                            cx.listener(move |e, _, window, cx| {
+                                                cx.stop_propagation();
+                                                if show_code {
+                                                    e.svg_code_open.remove(&id);
+                                                    if e.core.sel.head.block == id || e.core.sel.anchor.block == id {
+                                                        e.core.select_block(id);
+                                                    }
+                                                } else {
+                                                    e.svg_code_open.insert(id);
+                                                    if !e.read_only {
+                                                        e.core.clear_block_sel();
+                                                        e.core.sel = core::Selection::caret(core::Pos::new(id, 0));
+                                                        window.focus(&e.focus, cx);
+                                                    }
+                                                }
+                                                cx.notify();
+                                            }),
+                                        ),
+                                )
+                            })
                             .child(lang_btn)
-                            .when(!folded, |d| {
+                            .when(!folded && show_code, |d| {
                                 d.child(
                                     header_btn("code-wrap")
                                         .child(icon("wrap-text", 16., Theme::icon()))
@@ -2300,7 +2496,7 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
             )
             .child(fold_btn)
             .when(folded, |d| d.child(div().h(px(38.))))
-            .when(!folded, |d| {
+            .when(!folded && show_code, |d| {
                 d.child(
                     div()
                         .pt(px(40.))
@@ -2329,6 +2525,9 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
                         )
                         .child(self.code_column(id, wrap, el, 14.)),
                 )
+            })
+            .when_some((!folded).then_some(svg_preview).flatten(), |d, (im, dims)| {
+                d.child(self.svg_code_preview_box(id, im, dims, avail_w, show_code, 8., cx))
             })
             .into_any_element()
     }

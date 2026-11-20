@@ -244,6 +244,7 @@ fn info(name: &str) -> Option<(usize, &'static str, &'static str)> {
         "PastePlain" => (2, "粘贴为纯文本", "Paste as plain text"),
         "Link" => (2, "插入链接", "Insert link"),
         "InsertReminder" => (2, "插入提醒", "Insert reminder"),
+        "AddComment" => (2, "添加评论", "Add comment"),
         "MoveBlockUp" => (2, "上移当前块", "Move block up"),
         "MoveBlockDown" => (2, "下移当前块", "Move block down"),
         "ToggleTodo" => (2, "切换任务完成状态", "Check / uncheck to-do"),

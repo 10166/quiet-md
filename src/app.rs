@@ -335,6 +335,8 @@ pub struct Workspace {
     pub preview: Option<crate::history::Preview>,
     /// 命名版本: the row's name being typed.
     pub version_rename: Option<crate::history::VersionRename>,
+    /// Right-side comment panel for the open document.
+    pub comments: Option<crate::comments::CommentPanel>,
     pub list_scroll: ScrollHandle,
     pub search_scroll: ScrollHandle,
     /// Last-frame bounds of the row menu's 下载 submenu.
@@ -589,6 +591,7 @@ impl Workspace {
             history: None,
             preview: None,
             version_rename: None,
+            comments: None,
             list_scroll: ScrollHandle::new(),
             search_scroll: ScrollHandle::new(),
             row_sub_bounds: Rc::new(Cell::new(None)),
@@ -688,6 +691,7 @@ impl Workspace {
         if self.current.as_deref() == Some(id) {
             return true;
         }
+        if self.comments.is_some() { self.close_comments(cx); }
         let target = id.to_string();
         if !self.save_before(cx, move |w, window, cx| {
             w.open(&target, window, cx);
@@ -792,6 +796,12 @@ impl Workspace {
                 if this.unsaved && this.save_task.is_none() {
                     this.schedule_save(window, cx);
                 }
+            }
+            EditorEvent::StartComment { target, quote } => {
+                this.start_comment_draft(*target, quote.clone(), window, cx);
+            }
+            EditorEvent::FocusComment(tid) => {
+                this.focus_comment_thread(tid, cx);
             }
         }));
         // Opening a document puts the caret in it, unless the user is typing a search.
@@ -990,6 +1000,7 @@ impl Workspace {
     pub fn show_view(&mut self, view: View, cx: &mut Context<Self>) {
         self.cancel_shortcut_recording(cx);
         self.close_history(cx);
+        self.close_comments(cx);
         // 阅读位置: leaving the document with ⌘H or 回收站 also counts.
         if view != View::Doc { self.remember_scroll(cx) }
         if view == View::Trash {
@@ -1614,7 +1625,10 @@ impl Workspace {
         // and the title keeps the room. Left: the sidebar's buttons when it is
         // closed; right: the three actions.
         let left = if self.sidebar_open { 18. } else { theme::TRAFFIC_LIGHTS_W + 4. + 28. + 4. + 28. + 25. };
-        let room = pane_w - left - crate::ui::header_right_inset() - 3. * HEADER_ACTIONS_H - 8. - 16.;
+        let comments_ok = self.comments_supported(cx);
+        let open_comments = self.open_comment_count(cx);
+        let action_slots = if comments_ok { 4. } else { 3. };
+        let room = pane_w - left - crate::ui::header_right_inset() - action_slots * HEADER_ACTIONS_H - 8. - 16.;
         if room < 360. && !crumbs.is_empty() {
             let path: Vec<&str> = std::iter::once(start).chain(chain.iter().map(|c| c.1.as_str())).collect();
             crumbs = vec![
@@ -1719,6 +1733,39 @@ impl Workspace {
                     .h(px(HEADER_ACTIONS_H)).flex_none()
                     .flex()
                     .items_center()
+                    .when(comments_ok, |d| {
+                        let open = self.comments.is_some();
+                        d.child(
+                            div()
+                                .id("doc-comments")
+                                .no_drag()
+                                .relative()
+                                .h(px(HEADER_ACTIONS_H))
+                                .min_w(px(HEADER_ACTIONS_H))
+                                .px(if open_comments > 0 { px(8.) } else { px(0.) })
+                                .rounded(px(8.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .gap(px(4.))
+                                .cursor_pointer()
+                                .when(open, |d| d.bg(Theme::fill_hover()))
+                                .hover(|s| s.bg(Theme::fill_hover_strong()))
+                                .active(|s| s.bg(Theme::fill_pressed()))
+                                .tip(crate::settings::tr("评论", "Comments"), Some(crate::shortcuts::hint("editor::AddComment", "⌘ + ⌥ + M")))
+                                .child(icon("comment", 16., if open || open_comments > 0 { Theme::text() } else { Theme::icon() }))
+                                .when(open_comments > 0, |d| {
+                                    d.child(
+                                        div()
+                                            .text_size(px(12.))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(Theme::text_caption())
+                                            .child(format!("{open_comments}")),
+                                    )
+                                })
+                                .on_click(cx.listener(|w, _, window, cx| w.toggle_comments(window, cx))),
+                        )
+                    })
                     .when(self.current.is_some(), |d| {
                         d.child(
                             // No tooltip while its dropdown is open; the menu hangs
@@ -1793,6 +1840,7 @@ impl Render for Workspace {
         let doc_menu = self.render_doc_menu(window, cx);
         let doc_info = self.render_doc_info(cx);
         let history = self.render_history(cx);
+        let comments = self.render_comments(cx);
         let confirm = self.render_confirm(cx);
         let trash_menu = self.render_trash_menu(cx);
         let home_menus = self.render_home_menus(cx);
@@ -1824,6 +1872,7 @@ impl Render for Workspace {
                                 .h_full()
                                 .children(self.editor.clone()),
                         )
+                        .children(comments)
                         .children(self.render_shortcuts(cx)),
                 )
                 .into_any_element(),
@@ -1900,6 +1949,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &crate::modes::ReadMode, window, cx| w.set_mode(true, window, cx)))
             .on_action(cx.listener(|w, _: &crate::modes::ToggleShortcuts, _, cx| {
                 w.shortcuts = !w.shortcuts;
+                if w.shortcuts { w.close_comments(cx); }
                 cx.notify();
             }))
             .on_key_down(cx.listener(|w, ev: &KeyDownEvent, window, cx| {
@@ -1915,9 +1965,10 @@ impl Render for Workspace {
                     cx.stop_propagation();
                     return;
                 }
-                if ev.keystroke.key == "escape" && (w.doc_info.is_some() || w.history.is_some() || w.doc_menu || w.mode_menu) {
+                if ev.keystroke.key == "escape" && (w.doc_info.is_some() || w.history.is_some() || w.comments.is_some() || w.doc_menu || w.mode_menu) {
                     w.doc_info = None;
                     if w.history.is_some() { w.close_history(cx); }
+                    if w.comments.is_some() { w.escape_comments(window, cx); }
                     w.mode_menu = false;
                     w.doc_menu = false;
                     w.doc_sub = None;

@@ -3,6 +3,7 @@ mod datatable;
 mod button;
 mod caption;
 mod catalogue;
+mod comments_rail;
 mod countdown;
 mod cover;
 pub use fdl_core::editor::core;

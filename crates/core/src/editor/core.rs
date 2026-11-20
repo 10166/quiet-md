@@ -558,7 +558,7 @@ impl Core {
         units(&self.doc)
     }
 
-    fn unit_index(&self, units: &[Unit], id: BlockId) -> Option<usize> {
+    pub fn unit_index(&self, units: &[Unit], id: BlockId) -> Option<usize> {
         units.iter().position(|u| u.id == id)
     }
 
@@ -945,7 +945,19 @@ impl Core {
         };
         let middle: Vec<BlockId> = us[si + 1..ei].iter().map(|u| u.id).collect();
         if start_unit.text {
-            let tail = if self.is_code(s.block) { RichText::plain(tail.plain_text()) } else { tail };
+            let mut extra_cids: Vec<String> = vec![];
+            let tail = if self.is_code(s.block) {
+                for r in &tail.runs {
+                    for cid in &r.marks.comment_ids {
+                        if !extra_cids.contains(cid) {
+                            extra_cids.push(cid.clone());
+                        }
+                    }
+                }
+                RichText::plain(tail.plain_text())
+            } else {
+                tail
+            };
             if let Some(t) = self.text_mut(s.block) {
                 let len = t.len();
                 t.replace(s.offset..len, &tail);
@@ -956,7 +968,14 @@ impl Core {
             if e.block != TITLE {
                 // Children of the end block move under the start block when
                 // it can hold them; otherwise they follow it.
-                let kids = self.block_mut(e.block).map(|b| std::mem::take(&mut b.children)).unwrap_or_default();
+                let (kids, end_cids) = self.block_mut(e.block)
+                    .map(|b| (std::mem::take(&mut b.children), std::mem::take(&mut b.comment_ids)))
+                    .unwrap_or_default();
+                for cid in end_cids {
+                    if !extra_cids.contains(&cid) {
+                        extra_cids.push(cid);
+                    }
+                }
                 self.remove_lift(e.block);
                 match self.block_mut(s.block) {
                     Some(b) if b.kind.nests() => {
@@ -965,6 +984,16 @@ impl Core {
                         b.children = kids;
                     }
                     _ => self.insert_all_after(s.block, kids),
+                }
+            }
+            if !extra_cids.is_empty() && s.block != TITLE
+                && let Some(b) = self.block_mut(s.block)
+                && b.kind.takes_comment()
+            {
+                for cid in extra_cids {
+                    if !b.comment_ids.contains(&cid) {
+                        b.comment_ids.push(cid);
+                    }
                 }
             }
             self.normalize();
@@ -1534,9 +1563,21 @@ impl Core {
             return;
         }
         let text = self.text_of(id).cloned().unwrap_or_default();
-        let kids = self.block_mut(id).map(|b| std::mem::take(&mut b.children)).unwrap_or_default();
+        let (kids, cids) = self.block_mut(id)
+            .map(|b| (std::mem::take(&mut b.children), std::mem::take(&mut b.comment_ids)))
+            .unwrap_or_default();
         let at = self.len_of(prev.id);
         self.text_mut(prev.id).unwrap().append(&text);
+        if !cids.is_empty() && prev.id != TITLE
+            && let Some(pb) = self.block_mut(prev.id)
+            && pb.kind.takes_comment()
+        {
+            for cid in cids {
+                if !pb.comment_ids.contains(&cid) {
+                    pb.comment_ids.push(cid);
+                }
+            }
+        }
         self.remove_subtree(id);
         match self.block_mut(prev.id) {
             Some(pb) if pb.kind.nests() => pb.children.extend(kids),
@@ -1898,6 +1939,13 @@ impl Core {
                     return;
                 }
                 if let BlockKind::Code { .. } = k {
+                    for r in &b.text.runs {
+                        for cid in &r.marks.comment_ids {
+                            if !b.comment_ids.contains(cid) {
+                                b.comment_ids.push(cid.clone());
+                            }
+                        }
+                    }
                     b.text = RichText::plain(b.text.plain_text());
                 }
                 // A folded heading hides its section, any other fold just the children: drop the fold
@@ -3453,6 +3501,308 @@ fn roman(mut n: u32) -> String {
     s
 }
 
+/// Where a new comment anchors: an inline text range or a whole block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommentTarget {
+    Inline { start: Pos, end: Pos },
+    Block(BlockId),
+}
+
+fn push_unique_id(list: &mut Vec<String>, id: &str) {
+    if !list.iter().any(|x| x == id) {
+        list.push(id.to_string());
+    }
+}
+
+fn truncate_quote(s: &str, max_chars: usize) -> String {
+    let cleaned: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = cleaned.chars();
+    let head: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() { format!("{head}…") } else { head }
+}
+
+fn block_summary(b: &Block) -> String {
+    let txt = b.text.plain_text();
+    if !txt.trim().is_empty() {
+        return truncate_quote(&txt, 80);
+    }
+    match &b.kind {
+        BlockKind::Image { caption, .. } => caption.as_deref().filter(|c| !c.trim().is_empty()).map(|c| truncate_quote(c, 80)).unwrap_or_else(|| "[图片]".into()),
+        BlockKind::File(f) => if f.name.is_empty() { "[文件]".into() } else { truncate_quote(&f.name, 80) },
+        BlockKind::Code { caption, lang, .. } => caption.as_deref().filter(|c| !c.trim().is_empty()).map(|c| truncate_quote(c, 80)).unwrap_or_else(|| format!("[{lang}]")),
+        BlockKind::Table(_) => "[表格]".into(),
+        BlockKind::Board(_) => "[画板]".into(),
+        BlockKind::DataTable(_) => "[数据表]".into(),
+        BlockKind::Divider => "[分割线]".into(),
+        BlockKind::SubPageList => "[子页面列表]".into(),
+        BlockKind::Countdown(_) => "[倒计时]".into(),
+        BlockKind::Quote | BlockKind::Callout { .. } | BlockKind::Grid => {
+            for c in &b.children {
+                let s = block_summary(c);
+                if !s.is_empty() { return s; }
+            }
+            String::new()
+        }
+        _ => String::new(),
+    }
+}
+
+fn fresh_comment_id(prefix: char, existing: impl Fn(&str) -> bool) -> String {
+    loop {
+        let id = format!("{prefix}_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+        if !existing(&id) {
+            return id;
+        }
+    }
+}
+
+fn strip_comment_id(blocks: &mut [Block], thread_id: &str) {
+    for b in blocks {
+        b.comment_ids.retain(|c| c != thread_id);
+        if b.text.runs.iter().any(|r| r.marks.comment_ids.iter().any(|c| c == thread_id)) {
+            let len = b.text.len();
+            b.text.update_marks(0..len, |m| m.comment_ids.retain(|c| c != thread_id));
+        }
+        strip_comment_id(&mut b.children, thread_id);
+        if let BlockKind::Table(t) = &mut b.kind {
+            for row in &mut t.rows {
+                for cell in row {
+                    strip_comment_id(&mut cell.blocks, thread_id);
+                }
+            }
+        }
+    }
+}
+
+impl Core {
+    /// Quote snippet shown in the composer / comment card for `target`.
+    pub fn comment_quote(&self, target: &CommentTarget) -> String {
+        match *target {
+            CommentTarget::Block(id) => self.block(id).map(block_summary).unwrap_or_default(),
+            CommentTarget::Inline { start, end } => {
+                let us = self.units();
+                let (Some(si), Some(ei)) = (self.unit_index(&us, start.block), self.unit_index(&us, end.block)) else {
+                    return String::new();
+                };
+                let (a, b, ai, bi) = if (si, start.offset) <= (ei, end.offset) { (start, end, si, ei) } else { (end, start, ei, si) };
+                let mut parts = vec![];
+                for (idx, u) in us.iter().enumerate().take(bi + 1).skip(ai) {
+                    if u.id == TITLE { continue; }
+                    if let Some(t) = self.text_of(u.id) {
+                        let lo = if idx == ai { t.text.floor_char_boundary(a.offset.min(t.len())) } else { 0 };
+                        let hi = if idx == bi { t.text.floor_char_boundary(b.offset.min(t.len())) } else { t.len() };
+                        if lo < hi {
+                            let seg = t.slice(lo..hi).plain_text();
+                            if !seg.trim().is_empty() { parts.push(seg); }
+                        }
+                    }
+                }
+                if parts.is_empty() {
+                    self.block(a.block).map(block_summary).unwrap_or_default()
+                } else {
+                    truncate_quote(&parts.join(" "), 80)
+                }
+            }
+        }
+    }
+
+    /// Revalidate a draft comment anchor after edits or remote reloads.
+    ///
+    /// Returns `Some(target)` when the anchor still matches `orig_quote` (or
+    /// can be uniquely rebased inside the same block), and `None` when the
+    /// target block is gone or shifted ambiguously.
+    pub fn validate_comment_target(&self, target: CommentTarget, orig_quote: &str, same_gen: bool) -> Option<CommentTarget> {
+        if same_gen {
+            return match target {
+                CommentTarget::Block(id) if id != TITLE && self.block(id).is_some_and(|b| b.kind.takes_comment()) => Some(target),
+                CommentTarget::Inline { start, end } => {
+                    let us = self.units();
+                    (self.unit_index(&us, start.block).is_some() && self.unit_index(&us, end.block).is_some()).then_some(target)
+                }
+                _ => None,
+            };
+        }
+        match target {
+            CommentTarget::Block(id) => (id != TITLE && self.block(id).is_some_and(|b| b.kind.takes_comment())).then_some(target),
+            CommentTarget::Inline { start, end } => {
+                let us = self.units();
+                let (si, ei) = (self.unit_index(&us, start.block)?, self.unit_index(&us, end.block)?);
+                let (a, b) = if (si, start.offset) <= (ei, end.offset) { (start, end) } else { (end, start) };
+                // Check bounds and exact quote match first.
+                let bounds_ok = self.text_of(a.block).is_some_and(|t| a.offset <= t.len() && t.text.is_char_boundary(a.offset))
+                    && self.text_of(b.block).is_some_and(|t| b.offset <= t.len() && t.text.is_char_boundary(b.offset));
+                if bounds_ok && self.comment_quote(&target) == orig_quote {
+                    return Some(target);
+                }
+                // Single-block inline draft: rebase if the exact quoted text appears uniquely in that block.
+                if a.block == b.block && !orig_quote.is_empty() && !orig_quote.ends_with('…')
+                    && let Some(t) = self.text_of(a.block)
+                    && !t.text.contains('\u{fffc}')
+                {
+                    let mut matches = t.text.match_indices(orig_quote);
+                    if let Some((pos, _)) = matches.next()
+                        && matches.next().is_none()
+                    {
+                        return Some(CommentTarget::Inline {
+                            start: Pos::new(a.block, pos),
+                            end: Pos::new(a.block, pos + orig_quote.len()),
+                        });
+                    }
+                }
+                None
+            }
+        }
+    }
+
+    /// Add a new comment thread anchored to an inline range or block.
+    pub fn add_comment(&mut self, target: CommentTarget, author: String, body: String, now: u64) -> Option<String> {
+        let body = body.trim().to_string();
+        if body.is_empty() {
+            return None;
+        }
+        let quote = self.comment_quote(&target);
+        let tid = fresh_comment_id('c', |id| self.doc.comments.iter().any(|t| t.id == id));
+        let rid = fresh_comment_id('r', |_| false);
+
+        // Validate and collect anchor ops before checkpointing.
+        enum AnchorOp {
+            Inline(BlockId, Range<usize>),
+            Block(BlockId),
+        }
+        let mut ops: Vec<AnchorOp> = vec![];
+        match target {
+            CommentTarget::Block(id) => {
+                if id == TITLE { return None; }
+                let b = self.block(id)?;
+                if !b.kind.takes_comment() { return None; }
+                ops.push(AnchorOp::Block(id));
+            }
+            CommentTarget::Inline { start, end } => {
+                let us = self.units();
+                let (si, ei) = (self.unit_index(&us, start.block)?, self.unit_index(&us, end.block)?);
+                let (a, b, ai, bi) = if (si, start.offset) <= (ei, end.offset) { (start, end, si, ei) } else { (end, start, ei, si) };
+                for (idx, u) in us.iter().enumerate().take(bi + 1).skip(ai) {
+                    if u.id == TITLE { continue; }
+                    if self.is_code(u.id) {
+                        ops.push(AnchorOp::Block(u.id));
+                    } else if u.text {
+                        if let Some(t) = self.text_of(u.id) {
+                            let lo = if idx == ai { t.text.floor_char_boundary(a.offset.min(t.len())) } else { 0 };
+                            let hi = if idx == bi { t.text.floor_char_boundary(b.offset.min(t.len())) } else { t.len() };
+                            if lo < hi {
+                                ops.push(AnchorOp::Inline(u.id, lo..hi));
+                            }
+                        }
+                    } else if self.block(u.id).is_some_and(|blk| blk.kind.takes_comment()) {
+                        ops.push(AnchorOp::Block(u.id));
+                    }
+                }
+                if ops.is_empty() {
+                    if a.block != TITLE && self.block(a.block).is_some_and(|blk| blk.kind.takes_comment()) {
+                        ops.push(AnchorOp::Block(a.block));
+                    } else {
+                        return None;
+                    }
+                }
+            }
+        }
+
+        self.checkpoint(EditKind::Other);
+        self.break_coalescing();
+        for op in ops {
+            match op {
+                AnchorOp::Block(id) => {
+                    if let Some(b) = self.block_mut(id) {
+                        push_unique_id(&mut b.comment_ids, &tid);
+                    }
+                }
+                AnchorOp::Inline(id, range) => {
+                    if let Some(t) = self.text_mut(id) {
+                        t.update_marks(range, |m| push_unique_id(&mut m.comment_ids, &tid));
+                    }
+                }
+            }
+        }
+        self.doc.comments.push(CommentThread {
+            id: tid.clone(),
+            quote,
+            resolved: false,
+            created: now,
+            replies: vec![CommentReply { id: rid, author, body, created: now, updated: now }],
+        });
+        Some(tid)
+    }
+
+    pub fn add_reply(&mut self, thread_id: &str, author: String, body: String, now: u64) -> Option<String> {
+        let body = body.trim().to_string();
+        if body.is_empty() {
+            return None;
+        }
+        let idx = self.doc.comments.iter().position(|t| t.id == thread_id)?;
+        let rid = fresh_comment_id('r', |id| self.doc.comments[idx].replies.iter().any(|r| r.id == id));
+        self.checkpoint(EditKind::Other);
+        self.break_coalescing();
+        self.doc.comments[idx].replies.push(CommentReply { id: rid.clone(), author, body, created: now, updated: now });
+        Some(rid)
+    }
+
+    pub fn edit_reply(&mut self, thread_id: &str, reply_id: &str, body: String, now: u64) -> bool {
+        let body = body.trim().to_string();
+        if body.is_empty() {
+            return false;
+        }
+        let Some(ti) = self.doc.comments.iter().position(|t| t.id == thread_id) else { return false };
+        let Some(ri) = self.doc.comments[ti].replies.iter().position(|r| r.id == reply_id) else { return false };
+        if self.doc.comments[ti].replies[ri].body == body {
+            return false;
+        }
+        self.checkpoint(EditKind::Other);
+        self.break_coalescing();
+        self.doc.comments[ti].replies[ri].body = body;
+        self.doc.comments[ti].replies[ri].updated = now;
+        true
+    }
+
+    pub fn delete_reply(&mut self, thread_id: &str, reply_id: &str) -> bool {
+        let Some(ti) = self.doc.comments.iter().position(|t| t.id == thread_id) else { return false };
+        let Some(ri) = self.doc.comments[ti].replies.iter().position(|r| r.id == reply_id) else { return false };
+        if self.doc.comments[ti].replies.len() <= 1 {
+            return self.delete_comment(thread_id);
+        }
+        self.checkpoint(EditKind::Other);
+        self.break_coalescing();
+        self.doc.comments[ti].replies.remove(ri);
+        true
+    }
+
+    pub fn set_comment_resolved(&mut self, thread_id: &str, resolved: bool) -> bool {
+        let Some(ti) = self.doc.comments.iter().position(|t| t.id == thread_id) else { return false };
+        if self.doc.comments[ti].resolved == resolved {
+            return false;
+        }
+        self.checkpoint(EditKind::Other);
+        self.break_coalescing();
+        self.doc.comments[ti].resolved = resolved;
+        true
+    }
+
+    pub fn delete_comment(&mut self, thread_id: &str) -> bool {
+        let Some(ti) = self.doc.comments.iter().position(|t| t.id == thread_id) else { return false };
+        self.checkpoint(EditKind::Other);
+        self.break_coalescing();
+        self.doc.comments.remove(ti);
+        strip_comment_id(&mut self.doc.blocks, thread_id);
+        if self.doc.title.runs.iter().any(|r| r.marks.comment_ids.iter().any(|c| c == thread_id)) {
+            let len = self.doc.title.len();
+            self.doc.title.update_marks(0..len, |m| m.comment_ids.retain(|c| c != thread_id));
+        }
+        if let Some(m) = self.pending_marks.as_mut() {
+            m.comment_ids.retain(|c| c != thread_id);
+        }
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4223,5 +4573,50 @@ mod tests {
         c.receive_remote(conflict_remote, false);
         assert!(!c.undo());
         assert_eq!(c.doc.blocks[0].text.text, "one-from-remote");
+    }
+
+    #[test]
+    fn comments_inline_block_code_and_undo() {
+        let mut c = doc("<title>T</title><p>hello world</p><pre lang=\"rust\"><code>let x = 1;</code></pre><figure view-type=\"Card\"><source path=\".assets/a.pdf\" name=\"a.pdf\"/></figure>");
+        let p = id(&c, 1);
+        let code = id(&c, 2);
+        let file = id(&c, 3);
+
+        // Inline comment on "world": typing inside extends it, typing at right edge does not.
+        let cid = c.add_comment(CommentTarget::Inline { start: Pos::new(p, 6), end: Pos::new(p, 11) }, String::new(), "检查拼写".into(), 10).unwrap();
+        assert_eq!(c.doc.comments[0].quote, "world");
+        c.sel = Selection::caret(Pos::new(p, 8));
+        c.insert_text("X");
+        assert!(c.doc.blocks[0].text.marks_at(8).comment_ids.contains(&cid));
+        c.sel = Selection::caret(Pos::new(p, 12));
+        c.insert_text("!");
+        assert!(c.doc.blocks[0].text.marks_at(13).comment_ids.is_empty());
+
+        // Inline selection inside a code block anchors as block-level comment (code keeps zero marks).
+        let code_cid = c.add_comment(CommentTarget::Inline { start: Pos::new(code, 0), end: Pos::new(code, 5) }, String::new(), "类型标注".into(), 11).unwrap();
+        assert!(c.doc.blocks[1].comment_ids.contains(&code_cid));
+        assert!(c.doc.blocks[1].text.runs.iter().all(|r| r.marks == Marks::default()));
+
+        // File block comment.
+        let file_cid = c.add_comment(CommentTarget::Block(file), String::new(), "请核对附件".into(), 12).unwrap();
+        assert!(c.doc.blocks[2].comment_ids.contains(&file_cid));
+        assert_eq!(c.doc.comments.last().unwrap().quote, "a.pdf");
+
+        // Reply, edit, resolve, delete & undo.
+        let rid = c.add_reply(&cid, "Bob".into(), "收到".into(), 13).unwrap();
+        assert!(c.edit_reply(&cid, &rid, "已修正".into(), 14));
+        assert!(c.set_comment_resolved(&cid, true));
+        assert!(c.doc.comments[0].resolved);
+        assert!(c.delete_comment(&cid));
+        assert!(c.doc.comments.iter().all(|t| t.id != cid));
+        assert!(c.doc.blocks[0].text.runs.iter().all(|r| r.marks.comment_ids.is_empty()));
+        assert!(c.undo());
+        assert!(c.doc.comments.iter().any(|t| t.id == cid));
+        assert!(c.doc.blocks[0].text.runs.iter().any(|r| r.marks.comment_ids.contains(&cid)));
+
+        // Turning a commented paragraph into a code block promotes inline comment IDs to block-level.
+        c.turn_into(&[p], BlockKind::Code { lang: "rust".into(), caption: None, wrap: false });
+        assert!(c.doc.blocks[0].comment_ids.contains(&cid));
+        assert!(c.doc.blocks[0].text.runs.iter().all(|r| r.marks == Marks::default()));
     }
 }

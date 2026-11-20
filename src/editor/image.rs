@@ -28,9 +28,10 @@ use web_time::Instant;
 pub(super) const MIN: f32 = 32.;
 /// Size of an image whose pixels can't be measured.
 const FALLBACK: (f32, f32) = (480., 270.);
-const FORMATS: [&str; 6] = ["jpeg", "jpg", "png", "gif", "webp", "bmp"];
+const FORMATS: [&str; 7] = ["jpeg", "jpg", "png", "gif", "webp", "bmp", "svg"];
 const MAX_BYTES: u64 = 20 * 1024 * 1024;
-pub(super) const BAD_FORMAT: &str = "图片格式仅支持 jpeg、jpg、png、gif、webp、bmp";
+const MAX_SVG_PX: u32 = 4096;
+pub(super) const BAD_FORMAT: &str = "图片格式仅支持 jpeg、jpg、png、gif、webp、bmp、svg";
 const BAD_DIMS: &str = "识别图片宽高失败";
 const TOO_BIG: &str = "上传图片大小不能超过 20 MB";
 const FULL: [f32; 4] = [0., 0., 1., 1.];
@@ -170,6 +171,10 @@ pub struct ImageUi {
     retried: HashMap<String, Instant>,
     /// Where dragged-in files would land, and the drop line.
     pub(super) file_drop: Option<(BlockId, DropPlace, Bounds<Pixels>)>,
+    /// Cached rasterized previews of SVG code blocks, keyed by `(hash, len, cap)`.
+    svg_previews: RefCell<HashMap<(u64, usize, u32), Option<(Arc<RenderImage>, (f32, f32))>>>,
+    /// Evicted preview textures dropped on the next frame.
+    svg_preview_trash: RefCell<Vec<Arc<RenderImage>>>,
 }
 
 type Decoded = Result<Arc<RenderImage>, ImageCacheError>;
@@ -320,6 +325,136 @@ fn decode(path: &Path, cap: u32) -> Decoded {
 /// is), shrunk while decoding as `decode` does (board image sources).
 pub fn decode_rgba(path: &Path, cap: u32) -> Option<image::RgbaImage> { shrunk(path, cap).ok().map(|(im, _, _)| im.into_rgba8()) }
 
+/// Decodes in-memory raster or SVG bytes as straight RGBA, with the long edge
+/// capped to `cap` (0: natural size, SVGs clamped to `MAX_SVG_PX`).
+pub fn decode_rgba_bytes(bytes: &[u8], cap: u32) -> Option<image::RgbaImage> {
+    if is_svg_bytes(bytes) {
+        return render_svg(bytes, cap).map(|(im, _, _)| im.into_rgba8());
+    }
+    let mut im = image::load_from_memory(bytes).ok()?;
+    if cap > 0 && im.width().max(im.height()) > cap { im = im.thumbnail(cap, cap); }
+    Some(im.into_rgba8())
+}
+
+/// Decodes in-memory raster or SVG bytes as a GPUI BGRA `RenderImage`.
+pub fn decode_render_bytes(bytes: &[u8], cap: u32) -> Option<Arc<RenderImage>> {
+    let (im, w, _) = if is_svg_bytes(bytes) {
+        render_svg(bytes, cap)?
+    } else {
+        let im = image::load_from_memory(bytes).ok()?;
+        let (w, h) = (im.width(), im.height());
+        let im = if cap > 0 && w.max(h) > cap { im.thumbnail(cap, cap) } else { im };
+        (im, w, h)
+    };
+    let mut rgba = im.into_rgba8();
+    for px in rgba.as_chunks_mut::<4>().0 { px.swap(0, 2); }
+    let scale = rgba.width() as f32 / w.max(1) as f32;
+    Some(Arc::new(RenderImage::new(vec![image::Frame::new(rgba)]).with_scale_factor(scale)))
+}
+
+/// Cached system + bundled font database for SVG text rendering.
+fn svg_fontdb() -> Arc<resvg::usvg::fontdb::Database> {
+    static DB: std::sync::OnceLock<Arc<resvg::usvg::fontdb::Database>> = std::sync::OnceLock::new();
+    DB.get_or_init(|| {
+        let mut db = resvg::usvg::fontdb::Database::new();
+        db.load_system_fonts();
+        crate::board::fonts::load_into(&mut db, false);
+        Arc::new(db)
+    }).clone()
+}
+
+fn has_svg_tag(text: &str) -> bool {
+    let low = text.to_ascii_lowercase();
+    let is_svg_start = |s: &str| {
+        s.strip_prefix("<svg").is_some_and(|rest| rest.is_empty() || rest.starts_with(|c: char| c.is_ascii_whitespace() || matches!(c, '>' | '/')))
+    };
+    if is_svg_start(&low) { return true; }
+    if !(low.starts_with("<?xml") || low.starts_with("<!--") || low.starts_with("<!doctype")) { return false; }
+    let mut rest = low.as_str();
+    while let Some(i) = rest.find("<svg") {
+        let after = &rest[i..];
+        if is_svg_start(after) { return true; }
+        rest = &rest[i + 4..];
+    }
+    false
+}
+
+/// Fast prefix sniff for SVG markup (skips UTF-8 BOM and leading whitespace).
+pub(crate) fn is_svg_bytes(bytes: &[u8]) -> bool {
+    let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+    let s = bytes.iter().position(|b| !b.is_ascii_whitespace()).map_or(&[][..], |i| &bytes[i..]);
+    if s.len() < 4 || s[0] != b'<' { return false; }
+    let head = &s[..s.len().min(4096)];
+    let mut n = head.len();
+    while n > 0 && std::str::from_utf8(&head[..n]).is_err() { n -= 1; }
+    std::str::from_utf8(&head[..n]).is_ok_and(has_svg_tag)
+}
+
+fn parse_svg(bytes: &[u8]) -> Option<resvg::usvg::Tree> {
+    if bytes.len() as u64 > MAX_BYTES || !is_svg_bytes(bytes) { return None; }
+    let mut opts = resvg::usvg::Options {
+        resources_dir: None,
+        fontdb: svg_fontdb(),
+        ..resvg::usvg::Options::default()
+    };
+    // Never read external files referenced from untrusted SVG `<image href="…">`.
+    opts.image_href_resolver.resolve_string = Box::new(|_, _| None);
+    let tree = resvg::usvg::Tree::from_data(bytes, &opts).ok()?;
+    let sz = tree.size();
+    (sz.width().is_finite() && sz.height().is_finite() && sz.width() > 0. && sz.height() > 0.).then_some(tree)
+}
+
+/// Natural pixel size of an SVG document.
+pub(crate) fn svg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    let sz = parse_svg(bytes)?.size();
+    Some((sz.width().round().clamp(1., 65536.) as u32, sz.height().round().clamp(1., 65536.) as u32))
+}
+
+/// Rasterizes an SVG to straight RGBA directly at `cap` on the long edge (0:
+/// natural size, clamped to `MAX_SVG_PX`), returning `(image, natural_w, natural_h)`.
+fn render_svg(bytes: &[u8], cap: u32) -> Option<(image::DynamicImage, u32, u32)> {
+    let tree = parse_svg(bytes)?;
+    let (nw, nh) = (tree.size().width(), tree.size().height());
+    let (w, h) = (nw.round().clamp(1., 65536.) as u32, nh.round().clamp(1., 65536.) as u32);
+    let long = nw.max(nh).max(1.);
+    let target = if cap > 0 { cap.min(MAX_SVG_PX) as f32 } else { long.min(MAX_SVG_PX as f32) };
+    let k = target / long;
+    let tw = (nw * k).round().clamp(1., MAX_SVG_PX as f32) as u32;
+    let th = (nh * k).round().clamp(1., MAX_SVG_PX as f32) as u32;
+    let mut pm = resvg::tiny_skia::Pixmap::new(tw, th)?;
+    let xf = resvg::tiny_skia::Transform::from_scale(tw as f32 / nw, th as f32 / nh);
+    resvg::render(&tree, xf, &mut pm.as_mut());
+    // tiny-skia stores premultiplied RGBA; demultiply to straight RGBA.
+    let mut px = Vec::with_capacity(tw as usize * th as usize * 4);
+    for p in pm.pixels() {
+        let c = p.demultiply();
+        px.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
+    }
+    let im = image::RgbaImage::from_raw(tw, th, px)?;
+    Some((image::DynamicImage::ImageRgba8(im), w, h))
+}
+
+/// Natural dimensions of raster or SVG bytes.
+pub(crate) fn dimensions_from_bytes(bytes: &[u8]) -> Option<(u32, u32)> {
+    image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()
+        .and_then(|r| r.into_dimensions().ok())
+        .or_else(|| svg_dimensions(bytes))
+}
+
+/// Natural dimensions of a raster or SVG image file on disk.
+pub(crate) fn dimensions_from_path(path: &Path) -> Option<(u32, u32)> {
+    let is_svg_ext = path.extension().and_then(|s| s.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("svg"));
+    if !is_svg_ext
+        && let Some(d) = image::ImageReader::open(path).ok().and_then(|r| r.with_guessed_format().ok()).and_then(|r| r.into_dimensions().ok())
+    {
+        return Some(d);
+    }
+    let bytes = crate::store::read_bounded(path, MAX_BYTES).ok()?;
+    svg_dimensions(&bytes)
+}
+
 /// `path` decoded with its long edge at most `cap` (0: as is), with the
 /// file's own size.
 fn shrunk(path: &Path, cap: u32) -> Result<(image::DynamicImage, u32, u32), ImageCacheError> {
@@ -328,6 +463,9 @@ fn shrunk(path: &Path, cap: u32) -> Result<(image::DynamicImage, u32, u32), Imag
         Some(p) => p,
         None => {
             let bytes = fdl_core::vfs::read(path)?;
+            if is_svg_bytes(&bytes) {
+                return render_svg(&bytes, cap).ok_or_else(|| ImageCacheError::Other(Arc::new(anyhow::anyhow!("invalid svg"))));
+            }
             let format = image::guess_format(&bytes)?;
             let jpeg = if format == image::ImageFormat::Jpeg && cap > 0 {
                 std::panic::catch_unwind(|| decode_jpeg(&bytes, cap)).ok().flatten()
@@ -593,6 +731,8 @@ impl ImageUi {
             generation: 0,
             retried: HashMap::new(),
             file_drop: None,
+            svg_previews: RefCell::default(),
+            svg_preview_trash: RefCell::default(),
         }
     }
 
@@ -631,13 +771,37 @@ impl ImageUi {
         if let Some(d) = self.dims.borrow().get(p) {
             return *d;
         }
-        let d = image::ImageReader::open(p)
-            .ok()
-            .and_then(|r| r.with_guessed_format().ok())
-            .and_then(|r| r.into_dimensions().ok())
-            .map(|(w, h)| (w as f32, h as f32));
+        let d = dimensions_from_path(p).map(|(w, h)| (w as f32, h as f32));
         self.dims.borrow_mut().insert(p.to_path_buf(), d);
         d
+    }
+
+    /// Cached rasterized preview for an SVG code block, returning `(image, (natural_w, natural_h))`.
+    pub(super) fn svg_code_preview(&self, svg: &str, long_px: f32) -> Option<(Arc<RenderImage>, (f32, f32))> {
+        let bytes = svg.as_bytes();
+        if !is_svg_bytes(bytes) { return None; }
+        let target = cap(long_px * SCALE.with(|s| s.get())).clamp(256, MAX_SVG_PX);
+        let mut h = rustc_hash::FxHasher::default();
+        bytes.hash(&mut h);
+        let key = (h.finish(), bytes.len(), target);
+        if let Some(hit) = self.svg_previews.borrow().get(&key) {
+            return hit.clone();
+        }
+        let val = render_svg(bytes, target).map(|(im, w, h)| {
+            let mut rgba = im.into_rgba8();
+            for px in rgba.as_chunks_mut::<4>().0 { px.swap(0, 2); }
+            let scale = rgba.width() as f32 / w.max(1) as f32;
+            (Arc::new(RenderImage::new(vec![image::Frame::new(rgba)]).with_scale_factor(scale)), (w as f32, h as f32))
+        });
+        let mut cache = self.svg_previews.borrow_mut();
+        if cache.len() >= 32 {
+            let mut trash = self.svg_preview_trash.borrow_mut();
+            for (_, v) in cache.drain() {
+                if let Some((im, _)) = v { trash.push(im); }
+            }
+        }
+        cache.insert(key, val.clone());
+        val
     }
 
     fn local(&self, src: &str) -> Option<PathBuf> {
@@ -1711,7 +1875,12 @@ impl Editor {
         let Some(lb) = &self.img.lightbox else { return };
         let Some((path, crop, _, _)) = lb.ids.get(lb.ix).and_then(|id| self.lb_source(*id)) else { return };
         let fmt = image::ImageReader::open(&path).ok().and_then(|r| r.with_guessed_format().ok()).and_then(|r| r.format());
-        let ext = fmt.and_then(|f| f.extensions_str().first().copied()).unwrap_or("png");
+        let is_svg = fmt.is_none() && crate::store::read_bounded(&path, MAX_BYTES).ok().is_some_and(|b| is_svg_bytes(&b));
+        let ext = if is_svg && crop == FULL {
+            "svg"
+        } else {
+            fmt.and_then(|f| f.extensions_str().first().copied()).unwrap_or("png")
+        };
         let dir = dirs::download_dir().or_else(dirs::home_dir).unwrap_or_default();
         let rx = cx.prompt_for_new_path(&dir, Some(&format!("image.{ext}")));
         let bg = cx.background_executor().clone();
@@ -1720,7 +1889,11 @@ impl Editor {
             bg.spawn(async move {
                 if crop == FULL {
                     let _ = fdl_core::vfs::copy(&path, &dest);
-                } else if let Ok(im) = image::ImageReader::open(&path).and_then(|r| r.with_guessed_format()).map_err(anyhow::Error::from).and_then(|r| Ok(r.decode()?)) {
+                } else if let Some(im) = if is_svg {
+                    crate::store::read_bounded(&path, MAX_BYTES).ok().and_then(|b| render_svg(&b, 2048)).map(|(im, _, _)| im)
+                } else {
+                    image::ImageReader::open(&path).ok().and_then(|r| r.with_guessed_format().ok()).and_then(|r| r.decode().ok())
+                } {
                     let (w, h) = (im.width() as f32, im.height() as f32);
                     let (x, y) = ((crop[0] * w).round() as u32, (crop[1] * h).round() as u32);
                     let (cw, ch) = (((crop[2] - crop[0]) * w).round().max(1.) as u32, ((crop[3] - crop[1]) * h).round().max(1.) as u32);
@@ -1763,6 +1936,9 @@ impl Editor {
 
     /// Animations, the fit and the end of the closing fade.
     pub(super) fn tick_image_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        for im in self.img.svg_preview_trash.borrow_mut().drain(..) {
+            let _ = window.drop_image(im);
+        }
         if self.img.toast.as_ref().is_some_and(|(_, _, t)| t.elapsed() >= Duration::from_secs(3)) {
             self.img.toast = None;
         }
@@ -2250,12 +2426,13 @@ fn remote_srcs(blocks: &[Block], out: &mut Vec<String>) {
 /// A downloaded remote image (no extension in the cache) as a new asset.
 fn adopt_file(cached: &Path) -> Option<PathBuf> {
     let bytes = fdl_core::vfs::read(cached).ok()?;
-    let ext = match image::guess_format(&bytes).ok()? {
-        image::ImageFormat::Png => "png",
-        image::ImageFormat::Jpeg => "jpg",
-        image::ImageFormat::Gif => "gif",
-        image::ImageFormat::WebP => "webp",
-        image::ImageFormat::Bmp => "bmp",
+    let ext = match image::guess_format(&bytes) {
+        Ok(image::ImageFormat::Png) => "png",
+        Ok(image::ImageFormat::Jpeg) => "jpg",
+        Ok(image::ImageFormat::Gif) => "gif",
+        Ok(image::ImageFormat::WebP) => "webp",
+        Ok(image::ImageFormat::Bmp) => "bmp",
+        Err(_) if svg_dimensions(&bytes).is_some() => "svg",
         _ => return None,
     };
     store_image(&bytes, ext).ok()
@@ -2276,7 +2453,7 @@ fn download(url: &str, dest: &Path) -> bool {
         .status()
         .is_ok_and(|s| s.success());
     let ok = fetched
-        && image::ImageReader::open(&tmp).ok().and_then(|r| r.with_guessed_format().ok()).and_then(|r| r.into_dimensions().ok()).is_some()
+        && dimensions_from_path(&tmp).is_some()
         && fdl_core::vfs::rename(&tmp, dest).is_ok();
     if !ok {
         let _ = fdl_core::vfs::remove_file(&tmp);
@@ -2286,7 +2463,12 @@ fn download(url: &str, dest: &Path) -> bool {
 
 /// Crops and turns the image `rot` quarter turns counter-clockwise (BGRA).
 fn decode_rotated(path: &Path, crop: [f32; 4], rot: u8) -> Option<Arc<RenderImage>> {
-    let im = image::ImageReader::open(path).ok()?.with_guessed_format().ok()?.decode().ok()?;
+    let im = if let Some(im) = image::ImageReader::open(path).ok().and_then(|r| r.with_guessed_format().ok()).and_then(|r| r.decode().ok()) {
+        im
+    } else {
+        let bytes = crate::store::read_bounded(path, MAX_BYTES).ok()?;
+        render_svg(&bytes, 2048)?.0
+    };
     let (w, h) = (im.width() as f32, im.height() as f32);
     let im = if crop == FULL {
         im
@@ -2321,7 +2503,8 @@ pub(crate) fn clipboard_image_data(img: &gpui::Image) -> Result<(std::borrow::Co
         ImageFormat::Gif => "gif",
         ImageFormat::Webp => "webp",
         ImageFormat::Bmp => "bmp",
-        ImageFormat::Svg | ImageFormat::Ico | ImageFormat::Pnm => return Err(BAD_FORMAT),
+        ImageFormat::Svg => "svg",
+        ImageFormat::Ico | ImageFormat::Pnm => return Err(BAD_FORMAT),
         ImageFormat::Tiff => {
             let im = image::ImageReader::with_format(std::io::Cursor::new(&img.bytes), image::ImageFormat::Tiff)
                 .decode().map_err(|_| BAD_DIMS)?;
@@ -2358,11 +2541,15 @@ pub(crate) fn store_image_named(bytes: &[u8], ext: &str, name: Option<&str>) -> 
     if bytes.len() as u64 > MAX_BYTES {
         return Err(TOO_BIG);
     }
-    image::ImageReader::new(std::io::Cursor::new(bytes))
-        .with_guessed_format()
-        .ok()
-        .and_then(|r| r.into_dimensions().ok())
-        .ok_or(BAD_DIMS)?;
+    if ext == "svg" {
+        svg_dimensions(bytes).ok_or(BAD_DIMS)?;
+    } else {
+        image::ImageReader::new(std::io::Cursor::new(bytes))
+            .with_guessed_format()
+            .ok()
+            .and_then(|r| r.into_dimensions().ok())
+            .ok_or(BAD_DIMS)?;
+    }
     let id = uuid::Uuid::new_v4().to_string();
     let name: Option<String> = name.map(|n| n.chars().map(|c| if matches!(c, '/' | '\\' | ':') || c.is_control() { '_' } else { c }).take(80).collect::<String>())
         .map(|n| n.trim().trim_start_matches('.').to_string()).filter(|n| !n.is_empty());
@@ -2432,9 +2619,21 @@ pub(crate) fn localize_pasted_images(blocks: &mut Vec<Block>) {
         let BlockKind::Image { src, .. } = &b.kind else { return true };
         let local = if let Some(data) = src.strip_prefix("data:image/") {
             let Some((head, payload)) = data.split_once(',') else { return false };
-            let ext = head.split(';').next().unwrap_or_default().replace("jpeg", "jpg");
-            let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(payload.trim()) else { return false };
-            image_block_from(&bytes, &ext)
+            let mime = head.split(';').next().unwrap_or_default().to_ascii_lowercase();
+            let ext = match mime.as_str() {
+                "jpeg" => "jpg",
+                "svg+xml" => "svg",
+                other => other,
+            };
+            let bytes = if head.split(';').any(|p| p.eq_ignore_ascii_case("base64")) {
+                let Ok(b) = base64::engine::general_purpose::STANDARD.decode(payload.trim()) else { return false };
+                b
+            } else if ext == "svg" {
+                crate::markdown::percent_decode(payload).into_bytes()
+            } else {
+                return false;
+            };
+            image_block_from(&bytes, ext)
         } else if src.starts_with('/') {
             image_block_from_file(Path::new(src.as_str()))
         } else {
@@ -2452,7 +2651,7 @@ pub(crate) fn localize_pasted_images(blocks: &mut Vec<Block>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{cap, clipboard_image_data, decode, decode_png, local_image_path, pasted_remote, BAD_DIMS};
+    use super::{cap, clipboard_image_data, decode, decode_png, decode_rgba_bytes, decode_rotated, dimensions_from_path, is_svg_bytes, local_image_path, pasted_remote, render_svg, svg_dimensions, BAD_DIMS, FULL};
     use crate::model::{Block, BlockKind, RichText};
     use gpui::ImageFormat;
 
@@ -2577,5 +2776,73 @@ mod tests {
         assert_eq!(ext, "gif");
         assert!(matches!(bytes, std::borrow::Cow::Borrowed(_)));
         assert_eq!(&*bytes, img.bytes);
+    }
+
+    #[test]
+    fn clipboard_svg_keeps_original_bytes() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"></svg>"#;
+        let img = gpui::Image::from_bytes(ImageFormat::Svg, svg.to_vec());
+        let (bytes, ext) = clipboard_image_data(&img).unwrap();
+        assert_eq!(ext, "svg");
+        assert_eq!(&*bytes, svg);
+    }
+
+    #[test]
+    fn svg_detects_measures_and_renders_crisply() {
+        let dir = fdl_core::vfs::temp_dir().join(format!("qmd-svg-{}", uuid::Uuid::new_v4()));
+        fdl_core::vfs::create_dir_all(&dir).unwrap();
+
+        // Explicit size + solid & semi-transparent fills (verifies demultiply).
+        let svg = br##"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50" viewBox="0 0 100 50">
+  <rect x="0" y="0" width="50" height="50" fill="#ff0000"/>
+  <rect x="50" y="0" width="50" height="50" fill="#0000ff" fill-opacity="0.5"/>
+</svg>"##;
+        assert!(is_svg_bytes(svg));
+        assert_eq!(svg_dimensions(svg), Some((100, 50)));
+
+        let path = dir.join("diagram.svg");
+        fdl_core::vfs::write(&path, svg).unwrap();
+        assert_eq!(dimensions_from_path(&path), Some((100, 50)));
+        assert_eq!(local_image_path(&path.display().to_string()).as_deref(), Some(path.as_path()));
+
+        // Vector upscaling: 100x50 rendered at cap=1024 produces 1024x512 crisp pixels.
+        let (im, nw, nh) = render_svg(svg, 1024).unwrap();
+        assert_eq!((nw, nh, im.width(), im.height()), (100, 50, 1024, 512));
+        let rgba = im.into_rgba8();
+        assert_eq!(rgba.get_pixel(100, 256).0, [255, 0, 0, 255]);
+        let semi = rgba.get_pixel(900, 256).0;
+        assert!(semi[0] == 0 && semi[1] == 0 && semi[2] >= 250 && (semi[3] as i32 - 128).abs() <= 2, "{semi:?}");
+
+        // `decode` scales device pixels cleanly and supports lightbox rotation.
+        let decoded = decode(&path, 512).unwrap();
+        assert_eq!((decoded.size(0).width.0, decoded.size(0).height.0), (512, 256));
+        let rot = decode_rotated(&path, FULL, 1).unwrap();
+        assert_eq!((rot.size(0).width.0, rot.size(0).height.0), (1024, 2048));
+
+        // ViewBox-only SVG without width/height attributes.
+        let vb = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 160"><circle cx="160" cy="80" r="60" fill="green"/></svg>"#;
+        assert_eq!(svg_dimensions(vb), Some((320, 160)));
+        let rgba = decode_rgba_bytes(vb, 640).unwrap();
+        assert_eq!((rgba.width(), rgba.height()), (640, 320));
+
+        // Huge viewBox is safely clamped to MAX_SVG_PX instead of OOMing.
+        let huge = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100000 50000"><rect width="100000" height="50000" fill="black"/></svg>"#;
+        let (huge_im, _, _) = render_svg(huge, 0).unwrap();
+        assert_eq!((huge_im.width(), huge_im.height()), (4096, 2048));
+
+        // CJK text renders visible glyphs via system fonts.
+        let cjk = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"80\"><text x=\"20\" y=\"52\" font-size=\"32\" fill=\"#111111\">架构图</text></svg>".as_bytes();
+        let cjk_im = decode_rgba_bytes(cjk, 400).unwrap();
+        assert!(cjk_im.pixels().any(|p| p.0[3] > 200), "expected CJK text pixels in rendered SVG");
+
+        // External file href is ignored safely; non-SVG bytes are rejected.
+        let ext_ref = br#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><image href="/etc/hosts" width="40" height="40"/></svg>"#;
+        assert!(render_svg(ext_ref, 80).is_some());
+        assert!(!is_svg_bytes(b"\x89PNG\r\n\x1a\n"));
+        assert!(!is_svg_bytes(b"<html><body>hi</body></html>"));
+        assert!(svg_dimensions(b"<svg><unclosed").is_none());
+
+        let _ = fdl_core::vfs::remove_dir_all(&dir);
     }
 }

@@ -67,7 +67,7 @@ pub fn insert_images(me: &mut BoardView, images: Vec<(Vec<u8>, String, Option<St
         let rel = path.strip_prefix(crate::store::Store::root_dir()).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| path.to_string_lossy().into_owned());
         let id = generate_id_from_file(&bytes);
         let mime = normalize_file_mime_type(&format!("x.{ext}"), "", &bytes);
-        let natural = image::ImageReader::new(std::io::Cursor::new(&bytes)).with_guessed_format().ok().and_then(|r| r.into_dimensions().ok()).map(|(w, h)| (w as f64, h as f64));
+        let natural = crate::editor::image::dimensions_from_bytes(&bytes).map(|(w, h)| (w as f64, h as f64));
         let now = super::super::mutate::get_updated_timestamp();
         me.files.entry(id.clone()).or_insert(FileData { id: id.clone(), mime_type: mime, data_url: None, path: Some(rel), created: now, last_retrieved: Some(now), version: None, extra: Default::default() });
         let frame = me.top_frame_at(at, &Default::default());

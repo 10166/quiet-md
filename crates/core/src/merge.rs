@@ -6,7 +6,7 @@ use crate::board::restore::ExportedAppState;
 use crate::board::types::Element;
 use crate::docxml;
 use crate::markdown;
-use crate::model::{Block, BlockId, BlockKind, Cover, Document, RichText, Table};
+use crate::model::{Block, BlockId, BlockKind, CommentReply, CommentThread, Cover, Document, RichText, Table};
 use crate::store::Meta;
 use crate::whiteboard::Board;
 use serde_json::Value;
@@ -37,16 +37,23 @@ impl<T> MergeResult<T> {
 /// report a `ConflictNote` so the caller can preserve `remote` as a conflict copy.
 pub fn merge_documents(base: &Document, local: &Document, remote: &Document) -> MergeResult<Document> {
     let mut conflicts = Vec::new();
-    let title = merge_value(&base.title, &local.title, &remote.title, "title", &mut conflicts);
+    let mut title = merge_value(&base.title, &local.title, &remote.title, "title", &mut conflicts);
     let icon = merge_value(&base.icon, &local.icon, &remote.icon, "icon", &mut conflicts);
     let cover = merge_cover(&base.cover, &local.cover, &remote.cover, &mut conflicts);
     let mut blocks = merge_block_list(&base.blocks, &local.blocks, &remote.blocks, &mut conflicts);
     if blocks.is_empty() {
         blocks.push(Block::text(""));
     }
+    let comments = merge_comments(&base.comments, &local.comments, &remote.comments);
+    let live: HashSet<&str> = comments.iter().map(|t| t.id.as_str()).collect();
+    if title.runs.iter().any(|r| r.marks.comment_ids.iter().any(|c| !live.contains(c.as_str()))) {
+        let len = title.len();
+        title.update_marks(0..len, |m| m.comment_ids.retain(|c| live.contains(c.as_str())));
+    }
+    prune_dangling_comment_ids(&mut blocks, &live);
     reassign_fresh_ids(&mut blocks);
     MergeResult {
-        value: Document { title, icon, cover, blocks },
+        value: Document { title, icon, cover, blocks, comments },
         conflicts,
     }
 }
@@ -320,14 +327,7 @@ fn pick_winning_element(local: &Element, remote: &Element) -> Element {
 }
 
 fn block_full_fp(b: &Block) -> String {
-    docxml::serialize(&Document { title: RichText::default(), icon: None, cover: None, blocks: vec![b.clone()] })
-}
-
-fn block_shallow_fp(b: &Block) -> String {
-    let mut shallow = b.clone();
-    shallow.children.clear();
-    shallow.folded = false;
-    docxml::serialize(&Document { title: RichText::default(), icon: None, cover: None, blocks: vec![shallow] })
+    docxml::serialize(&Document { title: RichText::default(), icon: None, cover: None, blocks: vec![b.clone()], comments: vec![] })
 }
 
 #[derive(Clone, Debug)]
@@ -606,12 +606,138 @@ fn resolve_hunk(
     out.extend_from_slice(local);
 }
 
+fn block_body_no_comments_fp(b: &Block) -> String {
+    let mut shallow = b.clone();
+    shallow.children.clear();
+    shallow.folded = false;
+    shallow.comment_ids.clear();
+    if shallow.text.runs.iter().any(|r| !r.marks.comment_ids.is_empty()) {
+        let len = shallow.text.len();
+        shallow.text.update_marks(0..len, |m| m.comment_ids.clear());
+    }
+    docxml::serialize(&Document { title: RichText::default(), icon: None, cover: None, blocks: vec![shallow], comments: vec![] })
+}
+
+fn merge_id_set(base: &[String], local: &[String], remote: &[String]) -> Vec<String> {
+    let base_set: HashSet<&str> = base.iter().map(String::as_str).collect();
+    let remote_set: HashSet<&str> = remote.iter().map(String::as_str).collect();
+    let mut out: Vec<String> = vec![];
+    for id in local {
+        if base_set.contains(id.as_str()) && !remote_set.contains(id.as_str()) {
+            continue;
+        }
+        if !out.contains(id) {
+            out.push(id.clone());
+        }
+    }
+    for id in remote {
+        if !base_set.contains(id.as_str()) && !out.contains(id) {
+            out.push(id.clone());
+        }
+    }
+    out
+}
+
+fn merge_inline_comments_same_text(base: &RichText, local: &RichText, remote: &RichText) -> RichText {
+    if local.text != base.text || remote.text != base.text {
+        return local.clone();
+    }
+    let mut cuts = vec![0usize, base.text.len()];
+    for rt in [base, local, remote] {
+        let mut off = 0;
+        for r in &rt.runs {
+            off += r.len;
+            cuts.push(off);
+        }
+    }
+    cuts.sort_unstable();
+    cuts.dedup();
+    fn cids_at(rt: &RichText, at: usize) -> &[String] {
+        for (r, m) in rt.spans() {
+            if r.start <= at && at < r.end {
+                return &m.comment_ids;
+            }
+        }
+        &[]
+    }
+    let marks_at = |rt: &RichText, at: usize| -> crate::model::Marks {
+        for (r, m) in rt.spans() {
+            if r.start <= at && at < r.end {
+                return m.clone();
+            }
+        }
+        Default::default()
+    };
+    let mut out = RichText::default();
+    for w in cuts.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        if a >= b { continue; }
+        let mut m = marks_at(local, a);
+        m.comment_ids = merge_id_set(cids_at(base, a), cids_at(local, a), cids_at(remote, a));
+        out.push(&local.text[a..b], m);
+    }
+    out
+}
+
+/// Carry block-level and newly added inline comment anchors from `source`
+/// (which did not rewrite text) onto `target` (which kept the edited text).
+fn carry_comment_anchors(base: &Block, source: &Block, target: &mut Block) {
+    target.comment_ids = merge_id_set(&base.comment_ids, &target.comment_ids, &source.comment_ids);
+    let mut base_inline: HashSet<&str> = HashSet::new();
+    for r in &base.text.runs {
+        for cid in &r.marks.comment_ids {
+            base_inline.insert(cid.as_str());
+        }
+    }
+    let mut added: Vec<String> = vec![];
+    for r in &source.text.runs {
+        for cid in &r.marks.comment_ids {
+            if !base_inline.contains(cid.as_str()) && !added.contains(cid) {
+                added.push(cid.clone());
+            }
+        }
+    }
+    for cid in added {
+        let mut lo = usize::MAX;
+        let mut hi = 0usize;
+        for (r, m) in source.text.spans() {
+            if m.comment_ids.contains(&cid) {
+                lo = lo.min(r.start);
+                hi = hi.max(r.end);
+            }
+        }
+        let placed_inline = lo < hi
+            && !matches!(target.kind, BlockKind::Code { .. })
+            && !source.text.text[lo..hi].contains('\u{fffc}')
+            && {
+                let seg = &source.text.text[lo..hi];
+                let mut matches = target.text.text.match_indices(seg);
+                if let Some((pos, _)) = matches.next()
+                    && matches.next().is_none()
+                {
+                    target.text.update_marks(pos..pos + seg.len(), |m| {
+                        if !m.comment_ids.contains(&cid) {
+                            m.comment_ids.push(cid.clone());
+                        }
+                    });
+                    true
+                } else {
+                    false
+                }
+            };
+        if !placed_inline && target.kind.takes_comment() && !target.comment_ids.contains(&cid) {
+            target.comment_ids.push(cid);
+        }
+    }
+}
+
 fn try_merge_single_block(base: &Block, local: &Block, remote: &Block, conflicts: &mut Vec<ConflictNote>) -> Option<Block> {
     if let (BlockKind::Board(bb), BlockKind::Board(lb), BlockKind::Board(rb)) = (&base.kind, &local.kind, &remote.kind) {
         let mut merged = merge_boards(bb, lb, rb);
         conflicts.append(&mut merged.conflicts);
         let mut out = local.clone();
         out.kind = BlockKind::Board(Arc::new(merged.value));
+        out.comment_ids = merge_id_set(&base.comment_ids, &local.comment_ids, &remote.comment_ids);
         return Some(out);
     }
     if let (BlockKind::Table(bt), BlockKind::Table(lt), BlockKind::Table(rt)) = (&base.kind, &local.kind, &remote.kind)
@@ -619,14 +745,38 @@ fn try_merge_single_block(base: &Block, local: &Block, remote: &Block, conflicts
     {
         let mut out = local.clone();
         out.kind = BlockKind::Table(merged_table);
+        out.comment_ids = merge_id_set(&base.comment_ids, &local.comment_ids, &remote.comment_ids);
         return Some(out);
     }
-    if block_shallow_fp(base) == block_shallow_fp(local) && block_shallow_fp(base) == block_shallow_fp(remote) {
+    let base_nc = block_body_no_comments_fp(base);
+    let local_nc = block_body_no_comments_fp(local);
+    let remote_nc = block_body_no_comments_fp(remote);
+    if local_nc == base_nc && remote_nc == base_nc {
         let folded = if local.folded == base.folded { remote.folded } else { local.folded };
         let children = merge_block_list(&base.children, &local.children, &remote.children, conflicts);
         let mut out = local.clone();
         out.folded = folded;
         out.children = children;
+        out.comment_ids = merge_id_set(&base.comment_ids, &local.comment_ids, &remote.comment_ids);
+        out.text = merge_inline_comments_same_text(&base.text, &local.text, &remote.text);
+        return Some(out);
+    }
+    if local_nc == base_nc {
+        let folded = if local.folded == base.folded { remote.folded } else { local.folded };
+        let children = merge_block_list(&base.children, &local.children, &remote.children, conflicts);
+        let mut out = remote.clone();
+        out.folded = folded;
+        out.children = children;
+        carry_comment_anchors(base, local, &mut out);
+        return Some(out);
+    }
+    if remote_nc == base_nc {
+        let folded = if local.folded == base.folded { remote.folded } else { local.folded };
+        let children = merge_block_list(&base.children, &local.children, &remote.children, conflicts);
+        let mut out = local.clone();
+        out.folded = folded;
+        out.children = children;
+        carry_comment_anchors(base, remote, &mut out);
         return Some(out);
     }
     None
@@ -676,6 +826,112 @@ fn try_merge_tables(base: &Table, local: &Table, remote: &Table, conflicts: &mut
     Some(t)
 }
 
+fn merge_comments(base: &[CommentThread], local: &[CommentThread], remote: &[CommentThread]) -> Vec<CommentThread> {
+    let base_map: HashMap<&str, &CommentThread> = base.iter().map(|t| (t.id.as_str(), t)).collect();
+    let local_map: HashMap<&str, &CommentThread> = local.iter().map(|t| (t.id.as_str(), t)).collect();
+    let remote_map: HashMap<&str, &CommentThread> = remote.iter().map(|t| (t.id.as_str(), t)).collect();
+    let mut order: Vec<&str> = vec![];
+    let mut seen: HashSet<&str> = HashSet::new();
+    for t in local.iter().chain(remote.iter()) {
+        if seen.insert(t.id.as_str()) {
+            order.push(t.id.as_str());
+        }
+    }
+    let mut out = vec![];
+    for id in order {
+        let b = base_map.get(id).copied();
+        let l = local_map.get(id).copied();
+        let r = remote_map.get(id).copied();
+        match (b, l, r) {
+            (_, Some(lt), Some(rt)) => {
+                if lt == rt {
+                    out.push(lt.clone());
+                } else {
+                    let resolved = match b {
+                        Some(bt) if lt.resolved == bt.resolved => rt.resolved,
+                        _ => lt.resolved,
+                    };
+                    let quote = match b {
+                        Some(bt) if lt.quote == bt.quote => rt.quote.clone(),
+                        _ => lt.quote.clone(),
+                    };
+                    let replies = merge_replies(b.map(|bt| bt.replies.as_slice()).unwrap_or(&[]), &lt.replies, &rt.replies);
+                    out.push(CommentThread { id: lt.id.clone(), quote, resolved, created: lt.created.min(rt.created), replies });
+                }
+            }
+            (Some(bt), Some(lt), None) => {
+                // Remote deleted thread; keep only if local concurrently changed it.
+                if bt != lt {
+                    out.push(lt.clone());
+                }
+            }
+            (None, Some(lt), None) => out.push(lt.clone()),
+            (Some(bt), None, Some(rt)) => {
+                if bt != rt {
+                    out.push(rt.clone());
+                }
+            }
+            (None, None, Some(rt)) => out.push(rt.clone()),
+            (_, None, None) => {}
+        }
+    }
+    out
+}
+
+fn merge_replies(base: &[CommentReply], local: &[CommentReply], remote: &[CommentReply]) -> Vec<CommentReply> {
+    let base_map: HashMap<&str, &CommentReply> = base.iter().map(|r| (r.id.as_str(), r)).collect();
+    let local_map: HashMap<&str, &CommentReply> = local.iter().map(|r| (r.id.as_str(), r)).collect();
+    let remote_map: HashMap<&str, &CommentReply> = remote.iter().map(|r| (r.id.as_str(), r)).collect();
+    let mut order: Vec<&str> = vec![];
+    let mut seen: HashSet<&str> = HashSet::new();
+    for r in local.iter().chain(remote.iter()) {
+        if seen.insert(r.id.as_str()) {
+            order.push(r.id.as_str());
+        }
+    }
+    let mut out = vec![];
+    for id in order {
+        let b = base_map.get(id).copied();
+        let l = local_map.get(id).copied();
+        let r = remote_map.get(id).copied();
+        match (b, l, r) {
+            (_, Some(lr), Some(rr)) => {
+                if lr == rr || b.is_some_and(|br| br == rr) {
+                    out.push(lr.clone());
+                } else if b.is_some_and(|br| br == lr) || rr.updated > lr.updated {
+                    out.push(rr.clone());
+                } else {
+                    out.push(lr.clone());
+                }
+            }
+            (Some(br), Some(lr), None) => if br != lr { out.push(lr.clone()); },
+            (None, Some(lr), None) => out.push(lr.clone()),
+            (Some(br), None, Some(rr)) => if br != rr { out.push(rr.clone()); },
+            (None, None, Some(rr)) => out.push(rr.clone()),
+            (_, None, None) => {}
+        }
+    }
+    out
+}
+
+fn prune_dangling_comment_ids(blocks: &mut [Block], live: &HashSet<&str>) {
+    for b in blocks {
+        b.comment_ids.retain(|c| live.contains(c.as_str()));
+        if b.text.runs.iter().any(|r| r.marks.comment_ids.iter().any(|c| !live.contains(c.as_str()))) {
+            let len = b.text.len();
+            b.text.update_marks(0..len, |m| m.comment_ids.retain(|c| live.contains(c.as_str())));
+        }
+        prune_dangling_comment_ids(&mut b.children, live);
+        if let BlockKind::Table(t) = &mut b.kind {
+            for row in &mut t.rows {
+                for cell in row {
+                    prune_dangling_comment_ids(&mut cell.blocks, live);
+                }
+            }
+        }
+    }
+}
+
 fn reassign_fresh_ids(blocks: &mut [Block]) {
     for b in blocks {
         b.id = BlockId::new();
@@ -703,6 +959,7 @@ mod tests {
             icon: None,
             cover: None,
             blocks: paras.iter().map(|s| Block::text(s)).collect(),
+            comments: vec![],
         }
     }
 
@@ -866,5 +1123,108 @@ mod tests {
         let div_a: Vec<String> = (0..2200).map(|i| format!("a-{i}")).collect();
         let div_b: Vec<String> = (0..2200).map(|i| format!("b-{i}")).collect();
         assert!(lcs_pairs(&div_a, &div_b).is_none());
+    }
+
+    #[test]
+    fn comments_merge_concurrent_threads_and_replies() {
+        let mut base = doc_with("Doc", &["A", "B"]);
+        base.comments.push(CommentThread {
+            id: "c1".into(),
+            quote: "A".into(),
+            resolved: false,
+            created: 10,
+            replies: vec![CommentReply { id: "r1".into(), author: String::new(), body: "init".into(), created: 10, updated: 10 }],
+        });
+        base.blocks[0].comment_ids.push("c1".into());
+
+        let mut local = base.clone();
+        local.comments[0].replies.push(CommentReply { id: "r2".into(), author: String::new(), body: "local reply".into(), created: 20, updated: 20 });
+
+        let mut remote = base.clone();
+        remote.comments[0].resolved = true;
+        remote.comments[0].replies.push(CommentReply { id: "r3".into(), author: String::new(), body: "remote reply".into(), created: 25, updated: 25 });
+        remote.comments.push(CommentThread {
+            id: "c2".into(),
+            quote: "B".into(),
+            resolved: false,
+            created: 30,
+            replies: vec![CommentReply { id: "r4".into(), author: String::new(), body: "new".into(), created: 30, updated: 30 }],
+        });
+        remote.blocks[1].comment_ids.push("c2".into());
+
+        let merged = merge_documents(&base, &local, &remote);
+        assert!(!merged.has_conflicts(), "{:?}", merged.conflicts);
+        assert_eq!(merged.value.comments.len(), 2);
+        assert!(merged.value.comments[0].resolved);
+        assert_eq!(merged.value.comments[0].replies.len(), 3);
+        assert_eq!(merged.value.blocks[1].comment_ids, vec!["c2"]);
+    }
+
+    #[test]
+    fn comment_anchors_merge_without_conflict_against_content_edits() {
+        let mk_thread = |id: &str| CommentThread {
+            id: id.into(),
+            quote: "q".into(),
+            resolved: false,
+            created: 10,
+            replies: vec![CommentReply { id: format!("r_{id}"), author: String::new(), body: "hi".into(), created: 10, updated: 10 }],
+        };
+
+        // 1. Local edits paragraph text; remote adds a block comment -> clean merge, anchor preserved.
+        let base = doc_with("Doc", &["hello world"]);
+        let mut local = base.clone();
+        local.blocks[0].text = RichText::plain("hello quiet world");
+        let mut remote = base.clone();
+        remote.blocks[0].comment_ids.push("c1".into());
+        remote.comments.push(mk_thread("c1"));
+        let merged = merge_documents(&base, &local, &remote);
+        assert!(!merged.has_conflicts(), "{:?}", merged.conflicts);
+        assert_eq!(merged.value.blocks[0].text.text, "hello quiet world");
+        assert_eq!(merged.value.blocks[0].comment_ids, vec!["c1"]);
+
+        // 2. Local edits paragraph text; remote adds an inline comment on "world" -> clean merge, inline anchor rebased.
+        let mut remote2 = base.clone();
+        remote2.blocks[0].text.update_marks(6..11, |m| m.comment_ids.push("c2".into()));
+        remote2.comments.push(mk_thread("c2"));
+        let merged2 = merge_documents(&base, &local, &remote2);
+        assert!(!merged2.has_conflicts(), "{:?}", merged2.conflicts);
+        assert_eq!(merged2.value.blocks[0].text.text, "hello quiet world");
+        assert!(merged2.value.blocks[0].text.runs.iter().any(|r| r.marks.comment_ids.contains(&"c2".to_string())));
+
+        // 3. Concurrent inline comments on different words of the same paragraph -> both preserved.
+        let mut l3 = base.clone();
+        l3.blocks[0].text.update_marks(0..5, |m| m.comment_ids.push("ca".into()));
+        l3.comments.push(mk_thread("ca"));
+        let mut r3 = base.clone();
+        r3.blocks[0].text.update_marks(6..11, |m| m.comment_ids.push("cb".into()));
+        r3.comments.push(mk_thread("cb"));
+        let merged3 = merge_documents(&base, &l3, &r3);
+        assert!(!merged3.has_conflicts(), "{:?}", merged3.conflicts);
+        assert!(merged3.value.blocks[0].text.runs.iter().any(|r| r.marks.comment_ids.contains(&"ca".to_string())));
+        assert!(merged3.value.blocks[0].text.runs.iter().any(|r| r.marks.comment_ids.contains(&"cb".to_string())));
+
+        // 4. Local edits table cell; remote adds block comment to table -> clean merge, table anchor preserved.
+        let t = Table {
+            col_widths: vec![100., 100.],
+            header_rows: 1,
+            header_col: false,
+            rows: vec![vec![
+                TableCell { blocks: vec![Block::text("A")], ..TableCell::empty() },
+                TableCell { blocks: vec![Block::text("B")], ..TableCell::empty() },
+            ]],
+        };
+        let t_base = Document { title: RichText::plain("T"), blocks: vec![Block::new(BlockKind::Table(t), RichText::default())], ..Default::default() };
+        let mut t_local = t_base.clone();
+        if let BlockKind::Table(tbl) = &mut t_local.blocks[0].kind {
+            tbl.rows[0][0].blocks[0].text = RichText::plain("A1");
+        }
+        let mut t_remote = t_base.clone();
+        t_remote.blocks[0].comment_ids.push("ct".into());
+        t_remote.comments.push(mk_thread("ct"));
+        let t_merged = merge_documents(&t_base, &t_local, &t_remote);
+        assert!(!t_merged.has_conflicts(), "{:?}", t_merged.conflicts);
+        assert_eq!(t_merged.value.blocks[0].comment_ids, vec!["ct"]);
+        let BlockKind::Table(mt) = &t_merged.value.blocks[0].kind else { panic!() };
+        assert_eq!(mt.rows[0][0].blocks[0].text.text, "A1");
     }
 }

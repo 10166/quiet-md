@@ -30,6 +30,11 @@ const ROW_H: f32 = 30.;
 const INDENT: f32 = 14.;
 /// A heading this close below the viewport top already counts as current.
 const ACTIVE_LINE: f32 = 90.;
+/// Wide-screen right-margin floating comment card width and gutters.
+pub const COMMENT_CARD_W: f32 = 248.;
+pub const COMMENT_RAIL_GAP: f32 = 24.;
+pub const COMMENT_RAIL_RIGHT: f32 = 24.;
+pub const COMMENT_RAIL_W: f32 = COMMENT_RAIL_GAP + COMMENT_CARD_W + COMMENT_RAIL_RIGHT;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum CatMode {
@@ -52,13 +57,37 @@ pub struct PageLayout {
     /// Width of the text column.
     pub content: f32,
     pub cat: CatMode,
+    /// Right-margin floating comment rail width when the pane is wide enough.
+    pub comment_rail: Option<f32>,
 }
 
-pub fn page_layout(o: f32, max: Option<f32>, has_cat: bool, pinned: bool) -> PageLayout {
+pub fn page_layout(o: f32, max: Option<f32>, has_cat: bool, pinned: bool, has_rail: bool) -> PageLayout {
     let centered = |cat| {
         let m = max.map_or(PAD, |w| ((o - w) / 2.).max(PAD));
-        PageLayout { ml: m, mr: m, content: o - 2. * m, cat }
+        PageLayout { ml: m, mr: m, content: o - 2. * m, cat, comment_rail: None }
     };
+    if has_rail {
+        if has_cat && pinned && o >= RESPONSE_MIN + PAD + EDITOR_MIN + COMMENT_RAIL_W {
+            let ml_ideal = UNFOLD + PAD;
+            let avail = o - ml_ideal - COMMENT_RAIL_W;
+            let (ml, mr, content) = if avail >= EDITOR_MIN {
+                let c = max.map_or(avail, |w| avail.min(w));
+                let extra = avail - c;
+                (ml_ideal + extra / 2., COMMENT_RAIL_W + extra / 2., c)
+            } else {
+                (o - EDITOR_MIN - COMMENT_RAIL_W, COMMENT_RAIL_W, EDITOR_MIN)
+            };
+            return PageLayout { ml, mr, content, cat: CatMode::Pinned(ml - PAD), comment_rail: Some(COMMENT_RAIL_W) };
+        }
+        if o >= PAD + EDITOR_MIN + COMMENT_RAIL_W {
+            let cat = if !has_cat { CatMode::None } else if pinned { CatMode::Forced } else { CatMode::Unpinned };
+            let avail = o - PAD - COMMENT_RAIL_W;
+            let content = max.map_or(avail, |w| avail.min(w));
+            let sym = (o - content) / 2.;
+            let (ml, mr) = if sym >= COMMENT_RAIL_W { (sym, sym) } else { ((o - content - COMMENT_RAIL_W).max(PAD), COMMENT_RAIL_W) };
+            return PageLayout { ml, mr, content, cat, comment_rail: Some(COMMENT_RAIL_W) };
+        }
+    }
     if !has_cat {
         return centered(CatMode::None);
     }
@@ -82,7 +111,7 @@ pub fn page_layout(o: f32, max: Option<f32>, has_cat: bool, pinned: bool) -> Pag
         }
         Some(_) => (o - EDITOR_MIN - PAD, PAD),
     };
-    PageLayout { ml, mr, content: o - ml - mr, cat: CatMode::Pinned(ml - PAD) }
+    PageLayout { ml, mr, content: o - ml - mr, cat: CatMode::Pinned(ml - PAD), comment_rail: None }
 }
 
 /// One catalogue row.
@@ -194,7 +223,11 @@ impl Editor {
             CatMode::Pinned(u) => self.layout.ml - PAD - u.min(RESPONSE_MAX),
             _ => self.layout.ml - PAD,
         };
-        (l.max(0.), (self.layout.mr - PAD).max(0.))
+        let r = match self.layout.comment_rail {
+            Some(rw) => self.layout.mr - rw,
+            None => self.layout.mr - PAD,
+        };
+        (l.max(0.), r.max(0.))
     }
 
     /// Recomputes the outline and the page margins for this frame.
@@ -204,7 +237,8 @@ impl Editor {
             self.cat_entries = Rc::new(entries(&self.core.doc));
         }
         let o = f32::from(self.pane_size().width);
-        self.layout = page_layout(o, self.column_max(), !self.cat_entries.is_empty(), self.cat_pinned);
+        let has_rail = self.has_rail_comments();
+        self.layout = page_layout(o, self.column_max(), !self.cat_entries.is_empty(), self.cat_pinned, has_rail);
     }
 
     /// Scroll-spy: the last heading at most 90px below the viewport top. A
@@ -459,6 +493,37 @@ impl Editor {
         // uniform_list counted the bottom padding twice.
         .pb(px(if scrolls { 44. } else { 22. }));
         div().w(px(width)).child(list).into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{COMMENT_RAIL_W, CatMode, EDITOR_MIN, PAD, page_layout};
+
+    #[test]
+    fn page_layout_reserves_comment_rail_on_wide_screens() {
+        // Very wide: centered page keeps symmetric margins >= COMMENT_RAIL_W.
+        let l = page_layout(1480., Some(820.), false, false, true);
+        assert_eq!(l.comment_rail, Some(COMMENT_RAIL_W));
+        assert!((l.ml + l.content + l.mr - 1480.).abs() < 0.01);
+        assert!((l.ml - l.mr).abs() < 0.01 && l.mr >= COMMENT_RAIL_W);
+
+        // Medium-wide: shifts column left gently to fit the floating rail.
+        let l = page_layout(1140., Some(820.), false, false, true);
+        assert_eq!(l.comment_rail, Some(COMMENT_RAIL_W));
+        assert!((l.ml + l.content + l.mr - 1140.).abs() < 0.01);
+        assert!(l.ml >= PAD && l.mr >= COMMENT_RAIL_W && l.content >= EDITOR_MIN);
+
+        // With pinned catalogue + comment rail on a wide pane.
+        let l = page_layout(1300., Some(820.), true, true, true);
+        assert_eq!(l.comment_rail, Some(COMMENT_RAIL_W));
+        assert!(matches!(l.cat, CatMode::Pinned(_)));
+        assert!((l.ml + l.content + l.mr - 1300.).abs() < 0.01);
+
+        // Narrow: falls back to no floating rail.
+        let l = page_layout(800., Some(820.), false, false, true);
+        assert_eq!(l.comment_rail, None);
+        assert!((l.ml + l.content + l.mr - 800.).abs() < 0.01);
     }
 }
 

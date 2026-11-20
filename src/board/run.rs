@@ -387,8 +387,12 @@ pub fn paste(me: &mut BoardView, plain: bool, window: &mut Window, cx: &mut Cont
         }
         PasteContent::SvgText(t) => match embedded_scene(t.as_bytes(), super::image::mime::SVG) {
             Some(s) => insert_scene(me, &s.elements, Some(&s.files), at, false, cx),
-            // (upstream inserts other SVG code as an SVG image, which our pictures can't show)
-            None => paste_text(me, &t, true, at, cx),
+            None => match super::image::normalize_svg(&t) {
+                Ok(svg) if crate::editor::image::svg_dimensions(svg.as_bytes()).is_some() => {
+                    super::tools::image::insert_images(me, vec![(svg.into_bytes(), "svg".into(), None)], at, window, cx);
+                }
+                _ => paste_text(me, &t, true, at, cx),
+            },
         },
         PasteContent::Nothing => {}
     }

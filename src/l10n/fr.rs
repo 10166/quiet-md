@@ -425,7 +425,7 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("本地上传", "Importer"),
     ("推荐使用尺寸为 2,000 × 400 的图片，显示效果最佳", "Pour un résultat optimal, utilisez une image de 2 000 × 400."),
     ("新增分栏", "Ajouter une colonne"),
-    ("图片格式仅支持 jpeg、jpg、png、gif、webp、bmp", "Formats d’image pris en charge : JPEG, JPG, PNG, GIF, WebP et BMP"),
+    ("图片格式仅支持 jpeg、jpg、png、gif、webp、bmp、svg", "Formats d’image pris en charge : JPEG, JPG, PNG, GIF, WebP, BMP et SVG"),
     ("识别图片宽高失败", "Impossible de lire les dimensions de l’image"),
     ("上传图片大小不能超过 20 MB", "L’image ne doit pas dépasser 20 Mo"),
     ("文件不存在", "Fichier introuvable"),

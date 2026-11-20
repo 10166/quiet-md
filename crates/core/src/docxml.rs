@@ -104,6 +104,12 @@ pub fn parse(xml: &str) -> Result<Document> {
             });
             continue;
         }
+        if let Node::El(e) = n
+            && e.name == "comments"
+        {
+            doc.comments.extend(parse_comments(e));
+            continue;
+        }
         parse_block_node(n, &mut doc.blocks);
     }
     if doc.blocks.is_empty() {
@@ -184,7 +190,9 @@ fn parse_block(e: &Element, out: &mut Vec<Block>) {
         let json: String = e.children.iter().filter_map(|n| if let Node::Text(t) = n { Some(t.as_str()) } else { None }).collect();
         let height = e.attr("height").and_then(|v| v.parse::<f32>().ok()).filter(|h| h.is_finite() && *h > 0.).unwrap_or(crate::whiteboard::DEFAULT_HEIGHT);
         if let Some(bd) = crate::whiteboard::Board::from_scene(&json, height) {
-            out.push(Block::new(BlockKind::Board(std::sync::Arc::new(bd)), RichText::default()));
+            let mut b = Block::new(BlockKind::Board(std::sync::Arc::new(bd)), RichText::default());
+            b.comment_ids = parse_comment_ids(e);
+            out.push(b);
             return;
         }
     }
@@ -192,7 +200,9 @@ fn parse_block(e: &Element, out: &mut Vec<Block>) {
     if name == "datatable" && let Some(src) = e.attr("src").filter(|s| !s.is_empty()) {
         let height = e.attr("height").and_then(|v| v.parse::<f32>().ok()).filter(|h| h.is_finite() && *h > 0.).unwrap_or(crate::table::DEFAULT_HEIGHT);
         let named = |k: &str| e.attr(k).filter(|v| !v.is_empty()).map(str::to_string);
-        out.push(Block::new(BlockKind::DataTable(crate::table::TableRef { src: src.to_string(), table: named("table"), view: named("view"), height }), RichText::default()));
+        let mut b = Block::new(BlockKind::DataTable(crate::table::TableRef { src: src.to_string(), table: named("table"), view: named("view"), height }), RichText::default());
+        b.comment_ids = parse_comment_ids(e);
+        out.push(b);
         return;
     }
     let mut block = match name {
@@ -323,6 +333,9 @@ fn parse_block(e: &Element, out: &mut Vec<Block>) {
     }
     block.folded = e.attr("folded") == Some("true");
     block.bg = parse_bg(e, &block.kind);
+    if block.kind.takes_comment() {
+        block.comment_ids = parse_comment_ids(e);
+    }
     out.push(block);
 }
 
@@ -353,8 +366,53 @@ fn parse_li(li: &Element, ordered: bool) -> Block {
     b.align = parse_align(li);
     b.folded = li.attr("folded") == Some("true");
     b.bg = parse_bg(li, &b.kind);
+    b.comment_ids = parse_comment_ids(li);
     b.children = nested;
     b
+}
+
+fn parse_comment_ids(e: &Element) -> Vec<String> {
+    let Some(raw) = e.attr("comment-ids") else { return vec![] };
+    let mut out = vec![];
+    for id in raw.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        if !out.iter().any(|x| x == id) {
+            out.push(id.to_string());
+        }
+    }
+    out
+}
+
+fn comment_ids_attr(b: &Block) -> String {
+    if b.comment_ids.is_empty() || !b.kind.takes_comment() {
+        String::new()
+    } else {
+        format!(" comment-ids=\"{}\"", esc_attr(&b.comment_ids.join(",")))
+    }
+}
+
+fn parse_comments(e: &Element) -> Vec<CommentThread> {
+    let mut out = vec![];
+    for n in &e.children {
+        let Node::El(th) = n else { continue };
+        if th.name != "thread" { continue }
+        let Some(id) = th.attr("id").filter(|s| !s.is_empty()) else { continue };
+        let resolved = th.attr("resolved") == Some("true");
+        let created = th.attr("created").and_then(|v| v.parse().ok()).unwrap_or(0);
+        let quote = th.attr("quote").unwrap_or_default().to_string();
+        let mut replies = vec![];
+        for rn in &th.children {
+            let Node::El(r) = rn else { continue };
+            if r.name != "reply" { continue }
+            let Some(rid) = r.attr("id").filter(|s| !s.is_empty()) else { continue };
+            let author = r.attr("author").unwrap_or_default().to_string();
+            let r_created = r.attr("created").and_then(|v| v.parse().ok()).unwrap_or(0);
+            let r_updated = r.attr("updated").and_then(|v| v.parse().ok()).unwrap_or(r_created);
+            let body = code_text(&r.children);
+            replies.push(CommentReply { id: rid.to_string(), author, body, created: r_created, updated: r_updated });
+        }
+        out.push(CommentThread { id: id.to_string(), quote, resolved, created, replies });
+    }
+    out
 }
 
 /// A block background; a callout's own `background-color` is its fill.
@@ -682,6 +740,13 @@ fn walk_inline(nodes: &[Node], marks: &Marks, out: &mut RichText) {
                         if let Some(c) = e.attr("background-color") {
                             m.bg_color = Some(ColorName(c.into()));
                         }
+                        if let Some(ids) = e.attr("comment-ids") {
+                            for id in ids.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                                if !m.comment_ids.iter().any(|x| x == id) {
+                                    m.comment_ids.push(id.to_string());
+                                }
+                            }
+                        }
                     }
                     _ => {
                         // Inline objects (equations, mentions, ...) are one U+FFFC
@@ -726,7 +791,55 @@ pub fn serialize(doc: &Document) -> String {
     write_inline(&doc.title, &mut s);
     s.push_str("</title>\n");
     write_blocks(&doc.blocks, &mut s, 0);
+    if !doc.comments.is_empty() {
+        write_comments(&doc.comments, &mut s);
+    }
     s
+}
+
+fn write_comments(comments: &[CommentThread], s: &mut String) {
+    s.push_str("<comments>\n");
+    for t in comments {
+        s.push_str(&format!("  <thread id=\"{}\"", esc_attr(&t.id)));
+        if t.resolved {
+            s.push_str(" resolved=\"true\"");
+        }
+        if t.created != 0 {
+            s.push_str(&format!(" created=\"{}\"", t.created));
+        }
+        if !t.quote.is_empty() {
+            s.push_str(&format!(" quote=\"{}\"", esc_attr(&t.quote).replace('\n', "&#10;")));
+        }
+        if t.replies.is_empty() {
+            s.push_str("/>\n");
+            continue;
+        }
+        s.push_str(">\n");
+        for r in &t.replies {
+            s.push_str(&format!("    <reply id=\"{}\"", esc_attr(&r.id)));
+            if !r.author.is_empty() {
+                s.push_str(&format!(" author=\"{}\"", esc_attr(&r.author)));
+            }
+            if r.created != 0 {
+                s.push_str(&format!(" created=\"{}\"", r.created));
+            }
+            if r.updated != r.created {
+                s.push_str(&format!(" updated=\"{}\"", r.updated));
+            }
+            s.push('>');
+            let mut first = true;
+            for part in r.body.split('\n') {
+                if !first {
+                    s.push_str("<br/>");
+                }
+                first = false;
+                s.push_str(&esc(part));
+            }
+            s.push_str("</reply>\n");
+        }
+        s.push_str("  </thread>\n");
+    }
+    s.push_str("</comments>\n");
 }
 
 thread_local! {
@@ -790,7 +903,7 @@ fn write_blocks(blocks: &[Block], s: &mut String, depth: usize) {
                         BlockKind::Ordered { seq: Some(n) } => format!(" seq=\"{n}\""),
                         _ => String::new(),
                     };
-                    s.push_str(&format!("<li{seq}{}{}{}>", align_attr(li.align), bg_attr(li), folded_attr(li.folded)));
+                    s.push_str(&format!("<li{seq}{}{}{}{}>", align_attr(li.align), bg_attr(li), folded_attr(li.folded), comment_ids_attr(li)));
                     write_inline(&li.text, s);
                     // An empty item's first child paragraph would be read
                     // back as the item's own text (parse_li); spell it out.
@@ -836,18 +949,19 @@ fn write_block(b: &Block, s: &mut String, depth: usize) {
     indent(s, depth);
     let al = format!("{}{}", align_attr(b.align), bg_attr(b));
     let fo = folded_attr(b.folded && b.kind.has_text());
+    let cm = comment_ids_attr(b);
     match &b.kind {
         BlockKind::Text => {
-            s.push_str(&format!("<p{al}{fo}>"));
+            s.push_str(&format!("<p{al}{fo}{cm}>"));
             write_text_with_children(b, "</p>", s, depth);
         }
         BlockKind::Heading { level, seq_auto } => {
             let seq = if *seq_auto { " seq=\"auto\"" } else { "" };
-            s.push_str(&format!("<h{level}{seq}{al}{fo}>"));
+            s.push_str(&format!("<h{level}{seq}{al}{fo}{cm}>"));
             write_text_with_children(b, &format!("</h{level}>"), s, depth);
         }
         BlockKind::Todo { done } => {
-            s.push_str(&format!("<checkbox done=\"{done}\"{al}{fo}>"));
+            s.push_str(&format!("<checkbox done=\"{done}\"{al}{fo}{cm}>"));
             write_inline(&b.text, s);
             if !b.children.is_empty() {
                 s.push('\n');
@@ -865,12 +979,13 @@ fn write_block(b: &Block, s: &mut String, depth: usize) {
             if *wrap {
                 s.push_str(" wrap=\"true\"");
             }
+            s.push_str(&cm);
             s.push_str("><code>");
             s.push_str(&esc(&b.text.text));
             s.push_str("</code></pre>\n");
         }
         BlockKind::Quote => {
-            s.push_str(&format!("<blockquote{}>\n", bg_attr(b)));
+            s.push_str(&format!("<blockquote{}{cm}>\n", bg_attr(b)));
             write_blocks(&b.children, s, depth + 1);
             indent(s, depth);
             s.push_str("</blockquote>\n");
@@ -886,13 +1001,14 @@ fn write_block(b: &Block, s: &mut String, depth: usize) {
             if let Some(c) = text_color {
                 s.push_str(&format!(" text-color=\"{}\"", esc_attr(&c.0)));
             }
+            s.push_str(&cm);
             s.push_str(">\n");
             write_blocks(&b.children, s, depth + 1);
             indent(s, depth);
             s.push_str("</callout>\n");
         }
-        BlockKind::Divider => s.push_str("<hr/>\n"),
-        BlockKind::SubPageList => s.push_str("<sub-page-list/>\n"),
+        BlockKind::Divider => s.push_str(&format!("<hr{cm}/>\n")),
+        BlockKind::SubPageList => s.push_str(&format!("<sub-page-list{cm}/>\n")),
         BlockKind::Countdown(c) => {
             s.push_str(&format!(
                 "<countdown duration=\"{}\" start-time=\"{}\" notify=\"{}\" color=\"{}\" timing=\"{}\"",
@@ -909,11 +1025,12 @@ fn write_block(b: &Block, s: &mut String, depth: usize) {
             if !c.date.is_empty() {
                 s.push_str(&format!(" date=\"{}\" time=\"{}\"", esc_attr(&c.date), esc_attr(&c.time)));
             }
+            s.push_str(&cm);
             s.push_str("/>\n");
         }
         BlockKind::File(f) => {
             let view = if f.view == FileView::Preview { "Preview" } else { "Card" };
-            s.push_str(&format!("<figure view-type=\"{view}\"{al}>{}</figure>\n", source_xml(f)));
+            s.push_str(&format!("<figure view-type=\"{view}\"{al}{cm}>{}</figure>\n", source_xml(f)));
         }
         BlockKind::Image { src_kind, src, width, height, caption, crop } => {
             s.push_str(&format!("<img {}=\"{}\"", src_kind, esc_attr(src)));
@@ -936,11 +1053,12 @@ fn write_block(b: &Block, s: &mut String, depth: usize) {
                 Align::Center => " align=\"center\"",
                 Align::Right => " align=\"right\"",
             });
+            s.push_str(&cm);
             s.push_str("/>\n");
         }
-        BlockKind::Table(t) => write_table(t, s, depth),
+        BlockKind::Table(t) => write_table(t, &cm, s, depth),
         BlockKind::Grid => {
-            s.push_str("<grid>\n");
+            s.push_str(&format!("<grid{cm}>\n"));
             for col in &b.children {
                 let ratio = if let BlockKind::Column { ratio } = col.kind { ratio } else { 0.5 };
                 indent(s, depth + 1);
@@ -959,7 +1077,7 @@ fn write_block(b: &Block, s: &mut String, depth: usize) {
             s.push_str("</column>\n");
         }
         BlockKind::Board(bd) => {
-            s.push_str(&format!("<whiteboard type=\"excalidraw\" height=\"{}\">", fmt_num(bd.height)));
+            s.push_str(&format!("<whiteboard type=\"excalidraw\" height=\"{}\"{cm}>", fmt_num(bd.height)));
             s.push_str(&esc(&bd.scene_json()));
             s.push_str("</whiteboard>\n");
         }
@@ -967,7 +1085,7 @@ fn write_block(b: &Block, s: &mut String, depth: usize) {
             s.push_str(&format!("<datatable src=\"{}\"", esc_attr(&t.src)));
             if let Some(n) = &t.table { s.push_str(&format!(" table=\"{}\"", esc_attr(n))); }
             if let Some(n) = &t.view { s.push_str(&format!(" view=\"{}\"", esc_attr(n))); }
-            s.push_str(&format!(" height=\"{}\"/>\n", fmt_num(t.height)));
+            s.push_str(&format!(" height=\"{}\"{cm}/>\n", fmt_num(t.height)));
         }
         BlockKind::Raw { xml, .. } => {
             if IN_CELL.get() {
@@ -992,8 +1110,8 @@ fn fmt_num(v: f32) -> String {
     if v.fract() == 0.0 { format!("{}", v as i64) } else { format!("{}", (v * 1000.0).round() / 1000.0) }
 }
 
-fn write_table(t: &Table, s: &mut String, depth: usize) {
-    s.push_str("<table>\n");
+fn write_table(t: &Table, cm: &str, s: &mut String, depth: usize) {
+    s.push_str(&format!("<table{cm}>\n"));
     indent(s, depth + 1);
     s.push_str("<colgroup>");
     for w in &t.col_widths {
@@ -1054,13 +1172,16 @@ fn write_table(t: &Table, s: &mut String, depth: usize) {
 /// wrappers share the elements, so a colored paragraph is one `<span>`.
 fn wrappers(m: &Marks) -> Vec<(String, &'static str)> {
     let mut w = vec![];
-    if m.text_color.is_some() || m.bg_color.is_some() {
+    if m.text_color.is_some() || m.bg_color.is_some() || !m.comment_ids.is_empty() {
         let mut open = "<span".to_string();
         if let Some(c) = &m.text_color {
             open.push_str(&format!(" text-color=\"{}\"", esc_attr(&c.0)));
         }
         if let Some(c) = &m.bg_color {
             open.push_str(&format!(" background-color=\"{}\"", esc_attr(&c.0)));
+        }
+        if !m.comment_ids.is_empty() {
+            open.push_str(&format!(" comment-ids=\"{}\"", esc_attr(&m.comment_ids.join(","))));
         }
         open.push('>');
         w.push((open, "</span>"));
@@ -1092,9 +1213,15 @@ fn write_inline(t: &RichText, s: &mut String) {
     for (range, m) in t.spans() {
         if let Some(obj) = &m.inline {
             close_to(&mut stack, 0, s);
+            if !m.comment_ids.is_empty() {
+                s.push_str(&format!("<span comment-ids=\"{}\">", esc_attr(&m.comment_ids.join(","))));
+            }
             // Adjacent identical objects share one run.
             for _ in t.text[range].chars() {
                 s.push_str(&obj.xml);
+            }
+            if !m.comment_ids.is_empty() {
+                s.push_str("</span>");
             }
             continue;
         }
@@ -1373,6 +1500,43 @@ mod tests {
         let doc = parse("<title>T</title><source path=\"/x/y.mp4\"/>").unwrap();
         let BlockKind::File(f) = &doc.blocks[0].kind else { panic!("file expected") };
         assert_eq!((f.name.as_str(), f.view), ("y.mp4", FileView::Card));
+    }
+
+    #[test]
+    fn comments_round_trip() {
+        let x = concat!(
+            "<title>T</title>\n",
+            "<p comment-ids=\"c2\">普通 <span comment-ids=\"c1\">划词 <b>加粗</b></span> 文本 <span comment-ids=\"c1\"><latex>x^2</latex></span></p>\n",
+            "<figure view-type=\"Card\" comment-ids=\"c3\"><source path=\".assets/a.pdf\" name=\"a.pdf\"/></figure>\n",
+            "<pre lang=\"rust\" comment-ids=\"c4\"><code>let x = 1;</code></pre>\n",
+            "<comments>\n",
+            "  <thread id=\"c1\" created=\"100\" quote=\"划词 加粗\">\n",
+            "    <reply id=\"r1\" created=\"100\">第一条<br/>第二行</reply>\n",
+            "    <reply id=\"r2\" author=\"Alice\" created=\"110\" updated=\"120\">回复 &lt;ok&gt;</reply>\n",
+            "  </thread>\n",
+            "  <thread id=\"c2\" resolved=\"true\" created=\"105\" quote=\"普通\">\n",
+            "    <reply id=\"r3\" created=\"105\">已解决</reply>\n",
+            "  </thread>\n",
+            "  <thread id=\"c3\" created=\"106\" quote=\"a.pdf\">\n",
+            "    <reply id=\"r4\" created=\"106\">检查附件</reply>\n",
+            "  </thread>\n",
+            "  <thread id=\"c4\" created=\"107\" quote=\"let x = 1;\">\n",
+            "    <reply id=\"r5\" created=\"107\">代码块批注</reply>\n",
+            "  </thread>\n",
+            "</comments>\n",
+        );
+        let doc = parse(x).unwrap();
+        assert_eq!(doc.comments.len(), 4);
+        assert_eq!(doc.comments[0].replies[0].body, "第一条\n第二行");
+        assert_eq!(doc.comments[0].replies[1].author, "Alice");
+        assert!(doc.comments[1].resolved);
+        assert_eq!(doc.blocks[0].comment_ids, vec!["c2"]);
+        assert_eq!(doc.blocks[1].comment_ids, vec!["c3"]);
+        assert_eq!(doc.blocks[2].comment_ids, vec!["c4"]);
+        assert_eq!(serialize(&doc), x);
+        // Markdown export never leaks comment markup.
+        let md = crate::markdown::to_markdown(&doc);
+        assert!(!md.contains("comment-ids") && !md.contains("<comments>"));
     }
 
     /// Every block kind, in the canonical saved form: loading and saving it changes nothing.

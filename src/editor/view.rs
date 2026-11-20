@@ -47,6 +47,10 @@ pub enum EditorEvent {
     HistoryEscape,
     /// Pending IME composition finished or cancelled.
     ImeCommitted,
+    /// User triggered 评论 on a selection or block.
+    StartComment { target: super::core::CommentTarget, quote: String },
+    /// User clicked a comment highlight or block comment badge in the editor.
+    FocusComment(String),
 }
 
 /// A child page shown by 子页面列表 blocks.
@@ -247,6 +251,8 @@ pub struct Editor {
     pub(super) file: super::file::FileUi,
     /// Folded code blocks (view state only).
     pub(super) code_folded: std::collections::HashSet<BlockId>,
+    /// SVG code blocks currently showing their source alongside the preview.
+    pub(super) svg_code_open: std::collections::HashSet<BlockId>,
     /// Numbers of auto-numbered headings, refreshed each frame.
     pub(super) heading_orders: rustc_hash::FxHashMap<BlockId, String>,
     /// (rows, cols) under the pointer in the "+" panel's table / column size picker.
@@ -270,6 +276,12 @@ pub struct Editor {
     pub history_drawer: bool,
     /// Blocks this snapshot added or rewrote, tinted while 显示改动 is on.
     pub diff_marks: Option<std::collections::HashMap<BlockId, fdl_core::changes::Change>>,
+    /// Comment thread currently selected in the right-side panel (for highlight sync).
+    pub active_comment: Option<String>,
+    /// Target currently being commented on in the right-side composer (stays highlighted while blurred).
+    pub draft_comment: Option<super::core::CommentTarget>,
+    /// Wide-screen floating Y-aligned comment cards in the right margin.
+    pub comment_rail: super::comments_rail::CommentRail,
     /// The 文档信息 row under the title.
     pub info: crate::store::InfoRow,
     /// 阅读位置: where to put the page once this document's rows are laid out
@@ -474,6 +486,7 @@ impl Editor {
             img: super::image::ImageUi::new(cx),
             file: super::file::FileUi::new(),
             code_folded: Default::default(),
+            svg_code_open: Default::default(),
             heading_orders: Default::default(),
             size_pick: (0, 0),
             modified,
@@ -485,6 +498,9 @@ impl Editor {
             preview: false,
             history_drawer: false,
             diff_marks: None,
+            active_comment: None,
+            draft_comment: None,
+            comment_rail: Default::default(),
             info: Default::default(),
             restore_top: None,
             cd,
@@ -630,7 +646,7 @@ impl Editor {
     }
 
     /// Pointer edits to an independent target must not scroll to an old caret.
-    pub(super) fn changed_preserving_viewport(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn changed_preserving_viewport(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.changed_with_scroll(ScrollIntent::PreserveViewport, window, cx);
     }
 
@@ -1906,6 +1922,9 @@ impl Editor {
         if self.cropping() {
             return self.cancel_crop(cx);
         }
+        if self.escape_comment_rail(window, cx) {
+            return;
+        }
         if self.mention.is_some() {
             self.mention = None;
         } else if self.slash.is_some() || self.menu.is_some() {
@@ -2377,6 +2396,7 @@ impl Editor {
             .on_action(guard(cx, Self::on_link))
             .on_action(guard(cx, Self::on_apply_last_color))
             .on_action(guard(cx, Self::on_insert_reminder))
+            .on_action(guard(cx, Self::on_add_comment))
             .on_action(guard(cx, Self::on_turn_text))
             .on_action(guard(cx, Self::on_turn_h1))
             .on_action(guard(cx, Self::on_turn_h2))
@@ -2483,6 +2503,24 @@ impl Editor {
         // A plain click opens a link (the caret still lands).
         if ev.click_count == 1 && !ev.modifiers.shift && self.link_under(ev.position).is_some() {
             self.link_press(pos);
+        }
+        // Clicking an inline comment highlight focuses that thread (in the
+        // floating margin rail on wide screens, or in the right drawer).
+        if ev.click_count == 1 && !ev.modifiers.shift && !self.markdown && !self.preview {
+            if let Some(cid) = self.inline_comment_at(pos) {
+                self.active_comment = Some(cid.clone());
+                if !self.rail_active() {
+                    cx.emit(EditorEvent::FocusComment(cid));
+                }
+            } else if self.rail_active() && self.comment_rail.draft.is_none() {
+                self.active_comment = None;
+                if self.comment_rail.replying.as_ref().is_some_and(|r| r.field.read(cx).text.trim().is_empty()) {
+                    self.comment_rail.replying = None;
+                }
+                if self.comment_rail.editing.as_ref().is_some_and(|e| e.field.read(cx).text.trim().is_empty()) {
+                    self.comment_rail.editing = None;
+                }
+            }
         }
         self.core.clear_block_sel();
         self.goal_x = None;
@@ -2728,6 +2766,10 @@ impl Editor {
             BlockAct::HeaderRow => self.core.table_toggle_header_row(block),
             BlockAct::HeaderCol => self.core.table_toggle_header_col(block),
             BlockAct::DistributeCols => self.core.table_distribute(block),
+            BlockAct::Comment => {
+                self.start_comment_on_block(block, window, cx);
+                return;
+            }
         }
         window.focus(&self.focus, cx);
         self.changed(window, cx);
@@ -2737,6 +2779,120 @@ impl Editor {
         self.reveal = Some((super::render::Reveal::Block(id), 0));
         if let Some(u) = self.core.units().iter().find(|u| u.id == id) {
             self.core.sel = Selection::caret(Pos::new(u.id, 0));
+        }
+        cx.notify();
+    }
+
+    /// True if `thread_id` exists in the document and is still unresolved.
+    pub fn is_comment_open(&self, thread_id: &str) -> bool {
+        self.core.doc.comments.iter().any(|t| t.id == thread_id && !t.resolved)
+    }
+
+    /// Unresolved comment thread IDs anchored on `b` (block-level + inline), deduped.
+    pub fn open_comment_ids_for_block(&self, b: &Block) -> Vec<String> {
+        if self.core.doc.comments.is_empty() {
+            return vec![];
+        }
+        let mut out = vec![];
+        for cid in &b.comment_ids {
+            if self.is_comment_open(cid) && !out.contains(cid) {
+                out.push(cid.clone());
+            }
+        }
+        for r in &b.text.runs {
+            for cid in &r.marks.comment_ids {
+                if self.is_comment_open(cid) && !out.contains(cid) {
+                    out.push(cid.clone());
+                }
+            }
+        }
+        out
+    }
+
+    fn inline_comment_at(&self, pos: Pos) -> Option<String> {
+        if pos.block == TITLE || self.core.doc.comments.is_empty() {
+            return None;
+        }
+        let t = self.core.text_of(pos.block)?;
+        let mut hit: Option<&[String]> = None;
+        for (r, m) in t.spans() {
+            if r.start <= pos.offset && pos.offset < r.end && !m.comment_ids.is_empty() {
+                hit = Some(&m.comment_ids);
+                break;
+            }
+        }
+        let ids = hit?;
+        if let Some(active) = &self.active_comment
+            && ids.contains(active)
+            && self.is_comment_open(active)
+        {
+            return Some(active.clone());
+        }
+        ids.iter().find(|cid| self.is_comment_open(cid)).cloned()
+    }
+
+    pub fn on_add_comment(&mut self, _: &k::AddComment, window: &mut Window, cx: &mut Context<Self>) {
+        self.start_comment_from_selection(window, cx);
+    }
+
+    pub fn current_comment_target(&self) -> Option<(super::core::CommentTarget, String)> {
+        if self.markdown || self.read_only || self.preview || self.board_open() || self.table_open() {
+            return None;
+        }
+        let target = if self.core.in_block_mode() {
+            let id = self.core.block_sel_ids().into_iter().find(|&id| self.core.block(id).is_some_and(|b| b.kind.takes_comment()))?;
+            super::core::CommentTarget::Block(id)
+        } else if !self.core.sel.is_collapsed() {
+            let (start, end) = self.core.ordered();
+            if start.block == TITLE && end.block == TITLE { return None; }
+            super::core::CommentTarget::Inline { start, end }
+        } else {
+            let id = self.core.sel.head.block;
+            if id == TITLE || !self.core.block(id).is_some_and(|b| b.kind.takes_comment()) { return None; }
+            super::core::CommentTarget::Block(id)
+        };
+        let quote = self.core.comment_quote(&target);
+        Some((target, quote))
+    }
+
+    pub fn start_comment_from_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((target, _)) = self.current_comment_target() else { return };
+        self.begin_comment(target, window, cx);
+    }
+
+    pub fn start_comment_on_block(&mut self, block: BlockId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.markdown || self.read_only || self.preview {
+            return;
+        }
+        if block == TITLE || !self.core.block(block).is_some_and(|b| b.kind.takes_comment()) {
+            return;
+        }
+        self.begin_comment(super::core::CommentTarget::Block(block), window, cx);
+    }
+
+    fn begin_comment(&mut self, target: super::core::CommentTarget, window: &mut Window, cx: &mut Context<Self>) {
+        let quote = self.core.comment_quote(&target);
+        self.menu = None;
+        self.toolbar_hidden = true;
+        if self.can_use_comment_rail() {
+            self.start_rail_draft(target, quote, window, cx);
+            return;
+        }
+        self.draft_comment = Some(target);
+        self.active_comment = None;
+        cx.emit(EditorEvent::StartComment { target, quote });
+        cx.notify();
+    }
+
+    pub fn reveal_comment(&mut self, thread_id: &str, cx: &mut Context<Self>) {
+        self.active_comment = Some(thread_id.to_string());
+        if let Some(id) = self.core.doc.comment_anchor(thread_id) {
+            self.core.unfold_to(id);
+            if self.core.dirty {
+                self.core.dirty = false;
+                cx.emit(EditorEvent::Changed);
+            }
+            self.reveal = Some((super::render::Reveal::Block(id), 0));
         }
         cx.notify();
     }
@@ -2824,6 +2980,7 @@ pub enum BlockAct {
     HeaderRow,
     HeaderCol,
     DistributeCols,
+    Comment,
 }
 
 impl EntityInputHandler for Editor {

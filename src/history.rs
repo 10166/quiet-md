@@ -86,6 +86,7 @@ fn delta_text(name: &str, delta: &HashMap<String, (usize, usize)>) -> String {
 
 impl Workspace {
     pub fn open_history(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_comments(cx);
         self.flush(cx);
         let versions = self.store.versions(id);
         let mut delta = HashMap::new();

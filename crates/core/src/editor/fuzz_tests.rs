@@ -120,7 +120,7 @@ fn step(c: &mut Core, rng: &mut Rng, allow_remote: bool) -> String {
     }
     let us = c.units();
     let any = |rng: &mut Rng| rng.pick(&us).id;
-    let n_choices = if allow_remote { 25 } else { 24 };
+    let n_choices = if allow_remote { 26 } else { 25 };
     match rng.below(n_choices) {
         0..=2 => {
             let s = *rng.pick(TEXTS);
@@ -228,6 +228,7 @@ fn step(c: &mut Core, rng: &mut Rng, allow_remote: bool) -> String {
             c.trailing_line();
             "trailing_line".into()
         }
+        24 => comment_step(c, rng),
         _ => {
             let mut remote = c.doc.clone();
             if rng.chance(50) {
@@ -397,6 +398,60 @@ fn object_step(c: &mut Core, rng: &mut Rng) -> String {
     }
 }
 
+/// Comments: add inline/block comment, reply, edit, resolve or delete.
+fn comment_step(c: &mut Core, rng: &mut Rng) -> String {
+    let ts: Vec<String> = c.doc.comments.iter().map(|t| t.id.clone()).collect();
+    match rng.below(6) {
+        0 => {
+            let (s, e) = c.ordered();
+            let id = c.add_comment(CommentTarget::Inline { start: s, end: e }, String::new(), "批注 <1>\n第二行".into(), 1_700_000_000);
+            format!("add_comment(inline {s:?}..{e:?}) -> {id:?}")
+        }
+        1 => {
+            let us = c.units();
+            let target = rng.pick(&us).id;
+            let id = c.add_comment(CommentTarget::Block(target), "作者".into(), "段落评论".into(), 1_700_000_001);
+            format!("add_comment(block {target:?}) -> {id:?}")
+        }
+        2 if !ts.is_empty() => {
+            let tid = rng.pick(&ts).clone();
+            let rid = c.add_reply(&tid, String::new(), "回复内容".into(), 1_700_000_002);
+            format!("add_reply({tid}) -> {rid:?}")
+        }
+        3 if !ts.is_empty() => {
+            let tid = rng.pick(&ts).clone();
+            if let Some(t) = c.doc.comments.iter().find(|t| t.id == tid)
+                && let Some(r) = t.replies.first()
+            {
+                let rid = r.id.clone();
+                c.edit_reply(&tid, &rid, "修改后\n内容".into(), 1_700_000_003);
+                return format!("edit_reply({tid}, {rid})");
+            }
+            format!("edit_reply({tid}, none)")
+        }
+        4 if !ts.is_empty() => {
+            let tid = rng.pick(&ts).clone();
+            let cur = c.doc.comments.iter().find(|t| t.id == tid).is_some_and(|t| t.resolved);
+            c.set_comment_resolved(&tid, !cur);
+            format!("set_comment_resolved({tid}, {})", !cur)
+        }
+        _ if !ts.is_empty() => {
+            let tid = rng.pick(&ts).clone();
+            if rng.chance(50)
+                && let Some(t) = c.doc.comments.iter().find(|t| t.id == tid)
+                && let Some(r) = t.replies.last()
+            {
+                let rid = r.id.clone();
+                c.delete_reply(&tid, &rid);
+                return format!("delete_reply({tid}, {rid})");
+            }
+            c.delete_comment(&tid);
+            format!("delete_comment({tid})")
+        }
+        _ => "comment(none)".into(),
+    }
+}
+
 // ------------------------------------------------------------------ invariants
 
 fn check_text(t: &RichText, at: &str) -> Result<(), String> {
@@ -500,6 +555,56 @@ fn check(c: &Core) -> Result<(), String> {
     }
     check_text(&c.doc.title, "title")?;
     check_blocks(&c.doc.blocks, None, &mut HashSet::new())?;
+    let mut thread_ids = HashSet::new();
+    for t in &c.doc.comments {
+        if !thread_ids.insert(t.id.as_str()) {
+            return Err(format!("duplicate comment thread id {:?}", t.id));
+        }
+        let mut reply_ids = HashSet::new();
+        for r in &t.replies {
+            if !reply_ids.insert(r.id.as_str()) {
+                return Err(format!("duplicate reply id {:?} in thread {:?}", r.id, t.id));
+            }
+        }
+    }
+    let mut comment_err: Option<String> = None;
+    for r in &c.doc.title.runs {
+        for cid in &r.marks.comment_ids {
+            if !thread_ids.contains(cid.as_str()) {
+                return Err(format!("title: dangling inline comment id {cid:?}"));
+            }
+        }
+    }
+    c.doc.for_each_block(|b| {
+        if comment_err.is_some() { return; }
+        let mut seen = HashSet::new();
+        for cid in &b.comment_ids {
+            if !seen.insert(cid.as_str()) {
+                comment_err = Some(format!("block {:?}: duplicate comment id {cid:?}", b.id));
+                return;
+            }
+            if !thread_ids.contains(cid.as_str()) {
+                comment_err = Some(format!("block {:?}: dangling comment id {cid:?}", b.id));
+                return;
+            }
+        }
+        for r in &b.text.runs {
+            let mut rseen = HashSet::new();
+            for cid in &r.marks.comment_ids {
+                if !rseen.insert(cid.as_str()) {
+                    comment_err = Some(format!("block {:?}: duplicate inline comment id {cid:?}", b.id));
+                    return;
+                }
+                if !thread_ids.contains(cid.as_str()) {
+                    comment_err = Some(format!("block {:?}: dangling inline comment id {cid:?}", b.id));
+                    return;
+                }
+            }
+        }
+    });
+    if let Some(err) = comment_err {
+        return Err(err);
+    }
     let us = c.units();
     if let Some(bs) = c.block_sel {
         // Block mode: the text selection is not shown; its ends are.

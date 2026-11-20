@@ -88,8 +88,7 @@ fn thumb_blocks(blocks: &[crate::model::Block], budget: &mut usize, depth: usize
             BlockKind::Image { src, width, height, .. } => {
                 let mut kind = b.kind.clone();
                 // Resolve missing dimensions once per cached thumbnail, not each frame.
-                let dimensions = crate::store::image_path(src).and_then(|p| image::ImageReader::open(p).ok())
-                    .and_then(|r| r.with_guessed_format().ok()).and_then(|r| r.into_dimensions().ok());
+                let dimensions = crate::store::image_path(src).and_then(|p| crate::editor::image::dimensions_from_path(&p));
                 let (iw, ih) = dimensions.map(|(w, h)| (w.max(1) as f32, h.max(1) as f32)).unwrap_or((690., 460.));
                 let w = width.unwrap_or_else(|| height.map(|h| h * iw / ih).unwrap_or(iw)).max(1.);
                 let h = height.unwrap_or(w * ih / iw).max(1.);

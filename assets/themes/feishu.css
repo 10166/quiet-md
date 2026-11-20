@@ -99,6 +99,9 @@
   --token-fill-turninto-active: #e0e9ff;
   --token-block-hover: #1456f01a;
   --token-block-selected: #1456f02e;
+  --token-comment-bg: #ffa53d2e;
+  --token-comment-bg-active: #ffa53d57;
+  --token-comment-underline: #de7802c7;
   --token-handle-active: #eff0f1;
   --token-size-cell: #f2f3f5;
   --token-size-cell-border: #eff0f1;

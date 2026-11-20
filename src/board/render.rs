@@ -676,12 +676,8 @@ fn image_of(fd: &FileData, long: f32, data_images: &mut HashMap<String, Option<A
 }
 
 fn decode_data_url(url: &str) -> Option<Arc<RenderImage>> {
-    use base64::Engine;
-    let (_, b64) = url.split_once(";base64,")?;
-    let bytes = base64::engine::general_purpose::STANDARD.decode(b64.trim()).ok()?;
-    let mut rgba = image::load_from_memory(&bytes).ok()?.into_rgba8();
-    for px in rgba.as_chunks_mut::<4>().0 { px.swap(0, 2); }
-    Some(Arc::new(RenderImage::new(vec![image::Frame::new(rgba)])))
+    let (_, bytes) = super::image::data_url_to_bytes(url)?;
+    crate::editor::image::decode_render_bytes(&bytes, 2048)
 }
 
 /// The crop editor's whole uncropped image as drawn under the cropped one
@@ -792,12 +788,8 @@ fn decode_source(fd: &FileData, cap: u32) -> Option<geom::Src> {
     let im = match fd.path.as_deref().and_then(crate::store::image_path).filter(|p| p.fs_exists()) {
         Some(p) => crate::editor::image::decode_rgba(&p, cap)?,
         None => {
-            use base64::Engine;
-            let (_, b64) = fd.data_url.as_deref()?.split_once(";base64,")?;
-            let bytes = base64::engine::general_purpose::STANDARD.decode(b64.trim()).ok()?;
-            let mut im = image::load_from_memory(&bytes).ok()?;
-            if im.width().max(im.height()) > cap { im = im.thumbnail(cap, cap); }
-            im.into_rgba8()
+            let (_, bytes) = super::image::data_url_to_bytes(fd.data_url.as_deref()?)?;
+            crate::editor::image::decode_rgba_bytes(&bytes, cap)?
         }
     };
     Some(geom::Src { w: im.width(), h: im.height(), px: im.into_raw() })

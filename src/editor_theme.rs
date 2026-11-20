@@ -40,7 +40,7 @@ tokens!(
     text, text_caption, text_placeholder, block_placeholder, text_disabled, text_code,
     link, link_hover, primary, primary_500, primary_fill_1, bg_body,
     bg_overlay, line_divider, line_border, fill_hover, fill_hover_strong, fill_pressed,
-    fill_turninto_active, selection, block_hover, block_selected, handle_active, size_cell,
+    fill_turninto_active, selection, block_hover, block_selected, comment_bg, comment_bg_active, comment_underline, handle_active, size_cell,
     size_cell_border, size_cell_active, size_cell_disabled, swatch_border, block_bg_area, todo_done,
     scrollbar_thumb, shadow, code_hover_ring, quote_bar, caret, pinned,
     table_header, table_line, table_bar_hover, table_bar_selected, danger_bar, danger_cell,

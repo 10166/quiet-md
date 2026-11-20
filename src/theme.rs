@@ -375,6 +375,10 @@ impl Theme {
     pub fn block_hover() -> Hsla { ca(craft::B500, 0.08) }
     /// Selected blocks.
     pub fn block_selected() -> Hsla { ca(craft::B500, 0.14) }
+    /// Inline / block comment highlight tint, active tint, and underline.
+    pub fn comment_bg() -> Hsla { ca(craft::old::O500, 0.16) }
+    pub fn comment_bg_active() -> Hsla { ca(craft::old::O500, 0.30) }
+    pub fn comment_underline() -> Hsla { ca(craft::old::O500, 0.78) }
     pub fn handle_active() -> Hsla { ca(craft::N1000, 0.06) }
     pub fn size_cell() -> Hsla { c(craft::N100) }
     pub fn size_cell_border() -> Hsla { c(craft::N300) }

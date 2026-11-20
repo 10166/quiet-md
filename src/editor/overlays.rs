@@ -20,7 +20,7 @@ const MENU_W: f32 = 247.;
 /// Table handle: 44.5 left of the grid, centred on the column-dot row 16.5 above it.
 const TABLE_HANDLE_DX: f32 = 44.5;
 const TABLE_HANDLE_DY: f32 = 16.5 + 13.;
-const TOOLBAR_W: f32 = 1. + 8. + 44. + 17. + 44. + 17. + 6. * 32. + 44. + 25. + 24. + 8. + 1.;
+const TOOLBAR_W: f32 = 1. + 8. + 44. + 17. + 44. + 17. + 6. * 32. + 44. + 32. + 25. + 24. + 8. + 1.;
 /// Callout hover bar: one 24px palette button in 10px padding, 1px border;
 /// it floats 9px above the callout, centred on it.
 const CALLOUT_BAR_W: f32 = 10. + 24. + 10. + 2.;
@@ -784,8 +784,16 @@ impl Editor {
             m = m.child(row("bm-color", "palette", crate::settings::text("颜色"), Some("›"), sub == Some(BlockSub::Color)).on_mouse_move(set_sub(Some(BlockSub::Color))));
         }
         let adding = matches!(sub, Some(BlockSub::Add(_)));
+        let commentable = !self.markdown && kind.takes_comment();
         m = m
             .child(separator_h().on_mouse_move(set_sub(None)))
+            .when(commentable, |d| {
+                d.child(
+                    row("bm-comment", "comment", crate::settings::tr("评论", "Comment"), Some(crate::shortcuts::hint("editor::AddComment", "⌘ + ⌥ + M")), false)
+                        .on_mouse_move(set_sub(None))
+                        .on_mouse_down(MouseButton::Left, act(BlockAct::Comment)),
+                )
+            })
             .child(row("bm-cut", "scissors", crate::settings::text("剪切"), None, false).on_mouse_move(set_sub(None)).on_mouse_down(MouseButton::Left, act(BlockAct::Cut)))
             .child(row("bm-copy", "copy", crate::settings::text("复制"), None, false).on_mouse_move(set_sub(None)).on_mouse_down(MouseButton::Left, act(BlockAct::Copy)))
             .child(row("bm-del", "trash-2", crate::settings::text("删除"), None, false).on_mouse_move(set_sub(None)).on_mouse_down(MouseButton::Left, act(BlockAct::Delete)))
@@ -860,14 +868,15 @@ impl Editor {
     /// Top of the 在下方添加 row inside the handle menu (mirrors its layout).
     fn block_menu_add_y(&self, block: BlockId) -> f32 {
         let Some(b) = self.core.block(block) else { return 0. };
-        // separators are 9 tall, rows 32; 剪切 / 复制 / 删除 sit between two.
-        let tail = 9. + 32. * 3. + 9.;
+        let comment = if !self.markdown && b.kind.takes_comment() { 32. } else { 0. };
+        // separators are 9 tall, rows 32; 评论 / 剪切 / 复制 / 删除 sit between two.
+        let tail = 9. + comment + 32. * 3. + 9.;
         if matches!(b.kind, BlockKind::Table(_)) {
             return MENU_PAD_Y + 32. + tail + 32. * 3. + 9.;
         }
         let shape = menus::MenuShape::of(&b.kind);
         let grid = if shape.turn_items().is_empty() { 0. } else { 4. + 24. * 2. + 12. + 4. + 9. };
-        let color = if shape == menus::MenuShape::Text { 32. } else { 0. };
+        let color = if shape == menus::MenuShape::Text && !self.markdown { 32. } else { 0. };
         MENU_PAD_Y + grid + 32. + color + tail
     }
 
@@ -1426,7 +1435,21 @@ impl Editor {
                     ),
             )
             .child(mark_btn("tb-code", "code", crate::settings::text("代码"), crate::shortcuts::hint("editor::InlineCode", "⌘ + Control + C"), Some(crate::settings::text("`代码`")), Mark::Code, |m| m.code))
-            .when(!self.markdown, |d| d.child(color_btn))
+            .when(!self.markdown, |d| {
+                d.child(color_btn).child(
+                    btn("tb-comment")
+                        .w(px(24.))
+                        .tip_above(crate::settings::tr("评论", "Comment"), Some(crate::shortcuts::hint("editor::AddComment", "⌘ + ⌥ + M")))
+                        .child(icon("comment", 18., Theme::icon()))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|e, _, window, cx| {
+                                cx.stop_propagation();
+                                e.start_comment_from_selection(window, cx);
+                            }),
+                        ),
+                )
+            })
             .child(div().mx(px(4.)).w(px(1.)).h(px(40.)).bg(Theme::line_border()))
             .child(
                 btn("tb-more")
@@ -1991,6 +2014,7 @@ impl Editor {
             .flex_col()
             .child(row("bm-indent", "indent-align", crate::settings::text("缩进"), Some("›"), sub == Some(BlockSub::Indent)).on_mouse_move(set_sub(Some(BlockSub::Indent))))
             .child(separator_h().on_mouse_move(set_sub(None)))
+            .when(!self.markdown, |d| d.child(plain("bm-comment", "comment", crate::settings::tr("评论", "Comment"), BlockAct::Comment)))
             .child(plain("bm-cut", "scissors", crate::settings::text("剪切"), BlockAct::Cut))
             .child(plain("bm-copy", "copy", crate::settings::text("复制"), BlockAct::Copy))
             .child(plain("bm-del", "trash-2", crate::settings::text("删除"), BlockAct::Delete))

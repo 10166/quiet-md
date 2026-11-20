@@ -68,7 +68,7 @@ fn inline_image(src: &str) -> Option<(Vec<u8>, &'static str)> {
         return None;
     }
     // The declared type only names the file; the bytes decide whether it is an
-    // image this app shows. SVG stays out, as it does everywhere else.
+    // image this app shows.
     let ext = sniff(&bytes).or(match mime {
         "image/png" => Some("png"),
         "image/jpeg" | "image/jpg" => Some("jpg"),
@@ -88,8 +88,18 @@ fn sniff(b: &[u8]) -> Option<&'static str> {
         [b'G', b'I', b'F', b'8', ..] => Some("gif"),
         [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Some("webp"),
         [b'B', b'M', ..] => Some("bmp"),
+        _ if looks_like_complete_svg(b) => Some("svg"),
         _ => None,
     }
+}
+
+fn looks_like_complete_svg(b: &[u8]) -> bool {
+    let b = b.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(b);
+    let Ok(s) = std::str::from_utf8(b) else { return false };
+    let t = s.trim();
+    let low = t.to_ascii_lowercase();
+    let starts = low.starts_with("<svg") || ((low.starts_with("<?xml") || low.starts_with("<!--") || low.starts_with("<!doctype")) && low.contains("<svg"));
+    starts && low.ends_with("</svg>")
 }
 
 /// FNV-1a, 64 bit: a short, stable name for the payload. A collision only
@@ -173,6 +183,19 @@ mod tests {
         let table = crate::model::Table { col_widths: vec![100.], header_rows: 0, header_col: false, rows: vec![vec![cell]] };
         let mut blocks = vec![Block::new(BlockKind::Table(table), Default::default())];
         assert_eq!(absorb(&mut blocks, &root), 1);
+        crate::vfs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn inline_svg_images_become_assets() {
+        let root = crate::vfs::temp_dir().join(format!("quiet-b64-svg-{}", uuid::Uuid::new_v4()));
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><circle cx="12" cy="12" r="10"/></svg>"#;
+        let uri = format!("data:image/svg+xml;base64,{}", base64::engine::general_purpose::STANDARD.encode(svg));
+        let mut blocks = vec![image_block(&uri)];
+        assert_eq!(absorb(&mut blocks, &root), 1);
+        let src = src_of(&blocks[0]);
+        assert!(src.starts_with(".assets/b64-") && src.ends_with(".svg"), "{src}");
+        assert_eq!(crate::vfs::read(root.join(src)).unwrap(), svg);
         crate::vfs::remove_dir_all(&root).unwrap();
     }
 }

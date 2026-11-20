@@ -92,6 +92,8 @@ pub struct TextField {
     pub wrap: bool,
     /// Enter and pasted newlines insert line breaks; Up/Down move by line.
     pub multiline: bool,
+    /// When `multiline` is true, Enter submits while Shift+Enter inserts a newline.
+    pub submit_on_enter: bool,
     pub mono: bool,
     /// Fonts by run (`TextSpec::font_runs`).
     pub font_runs: Option<crate::editor::text::FontRuns>,
@@ -140,6 +142,7 @@ impl TextField {
             align: Align::Left,
             wrap: false,
             multiline: false,
+            submit_on_enter: false,
             mono: false,
             font_runs: None,
             max_len: None,
@@ -353,7 +356,7 @@ impl TextField {
     }
 
     fn submit(&mut self, _: &Submit, _: &mut Window, cx: &mut Context<Self>) {
-        if self.multiline {
+        if self.multiline && !self.submit_on_enter {
             return self.replace(self.sel.clone(), "\n", cx);
         }
         cx.emit(TextFieldEvent::Submit);
@@ -591,6 +594,7 @@ impl Render for TextField {
             show_caret: focused && !self.hide_caret && self.sel.is_empty(),
             highlight: None,
             found: vec![],
+            comment_highlights: vec![],
             eq_counter: 0,
             button_edit: None,
             scroll: Some(self.scroll.clone()),

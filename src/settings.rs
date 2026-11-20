@@ -1422,7 +1422,7 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "本地上传" => "Upload",
         "推荐使用尺寸为 2,000 × 400 的图片，显示效果最佳" => "For best results, use a 2,000 × 400 image.",
         "新增分栏" => "Add column",
-        "图片格式仅支持 jpeg、jpg、png、gif、webp、bmp" => "Supported image formats: JPEG, JPG, PNG, GIF, WebP and BMP",
+        "图片格式仅支持 jpeg、jpg、png、gif、webp、bmp、svg" => "Supported image formats: JPEG, JPG, PNG, GIF, WebP, BMP and SVG",
         "识别图片宽高失败" => "Could not read image dimensions",
         "上传图片大小不能超过 20 MB" => "Images must be 20 MB or smaller",
         "文件不存在" => "File not found",

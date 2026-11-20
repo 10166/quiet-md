@@ -17,6 +17,10 @@ const REAL_FOLDERS: &str = "文档库改为真实文件夹，以标题命名，�
 /// Each version's notes: (version, [(中文, English)]). Only the running
 /// version's are shown; a version without notes shows nothing.
 const NOTES: &[(&str, &[(&str, &str)])] = &[
+    ("0.1.15", &[
+        ("文档评论：支持对选中文本（⌘⌥M）与整个段落添加评论、回复和标记已解决，宽屏右侧自动对齐显示浮动评论卡片，窄屏一键展开评论侧栏", "Document comments: comment on selected text (⌘⌥M) or whole blocks with replies and resolve status, floating margin cards aligned to paragraphs on wide screens, and a slide-out drawer on narrow screens"),
+        ("SVG 渲染支持：支持本地、远程与内联 SVG 图片高清矢量渲染（含灯箱缩放旋转、首页卡片与白板），支持 SVG 代码块实时预览与源码切换", "SVG rendering: crisp vector rendering for local, remote, and inline SVG images (including lightbox, Home cards, and boards), plus live preview and source toggle for SVG code blocks"),
+    ]),
     ("0.1.14", &[
         ("多维表格与本机文件夹：支持独立或页内嵌入数据表（公式、筛选、分组、关联与 CSV 导入导出），支持挂载本机文件夹", "Data tables and local folders: standalone or embedded tables with formulas, filters, grouping, links and CSV import/export, plus mounted local folders"),
         ("多端实时云同步：支持自托管同步服务端、离线续传、块级三路合并与可选端到端加密", "Multi-device cloud sync: self-hosted sync server, offline queue, block-level 3-way merge, and optional end-to-end encryption"),

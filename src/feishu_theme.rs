@@ -144,6 +144,9 @@ impl Theme {
     pub fn block_hover() -> Hsla { ta(20, 86, 240, 0.10) }
     /// `--ccmtoken-doc-block-bg-selected`: selected blocks' `.selected-mask` (radius 6).
     pub fn block_selected() -> Hsla { ta(20, 86, 240, 0.18) }
+    pub fn comment_bg() -> Hsla { ta(255, 165, 61, 0.18) }
+    pub fn comment_bg_active() -> Hsla { ta(255, 165, 61, 0.34) }
+    pub fn comment_underline() -> Hsla { ta(222, 120, 2, 0.78) }
     /// Handle while hovered / its menu is open (fill-hover over white, opaque).
     pub fn handle_active() -> Hsla { c(ud::N200) }
     /// Insert-size picker cells: `--bg-base` in a 2px `--N200` frame; picked

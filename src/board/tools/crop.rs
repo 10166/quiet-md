@@ -45,11 +45,9 @@ pub fn natural_size(me: &BoardView, e: &Element) -> Option<(f64, f64)> {
     if let Some(c) = i.crop { return Some((c.natural_width, c.natural_height)); }
     let f = me.files.get(i.file_id.as_deref()?)?;
     let bytes = if let Some(p) = f.path.as_deref().and_then(crate::store::image_path) { fdl_core::vfs::read(p).ok()? } else {
-        use base64::Engine;
-        let (_, b64) = f.data_url.as_deref()?.split_once(";base64,")?;
-        base64::engine::general_purpose::STANDARD.decode(b64.trim()).ok()?
+        super::super::image::data_url_to_bytes(f.data_url.as_deref()?)?.1
     };
-    let (w, h) = image::ImageReader::new(std::io::Cursor::new(&bytes)).with_guessed_format().ok()?.into_dimensions().ok()?;
+    let (w, h) = crate::editor::image::dimensions_from_bytes(&bytes)?;
     Some((w as f64, h as f64))
 }
 
