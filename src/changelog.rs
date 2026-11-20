@@ -18,6 +18,7 @@ const REAL_FOLDERS: &str = "文档库改为真实文件夹，以标题命名，�
 /// version's are shown; a version without notes shows nothing.
 const NOTES: &[(&str, &[(&str, &str)])] = &[
     ("0.1.14", &[
+        ("多维表格与本机文件夹：支持独立或页内嵌入数据表（公式、筛选、分组、关联与 CSV 导入导出），支持挂载本机文件夹", "Data tables and local folders: standalone or embedded tables with formulas, filters, grouping, links and CSV import/export, plus mounted local folders"),
         ("多端实时云同步：支持自托管同步服务端、离线续传、块级三路合并与可选端到端加密", "Multi-device cloud sync: self-hosted sync server, offline queue, block-level 3-way merge, and optional end-to-end encryption"),
         ("云同步支持空闲同步间隔、标签页导航、存储用量统计与全新管理后台界面", "Cloud sync adds idle sync intervals, tab navigation, storage usage stats, and a redesigned admin portal"),
         ("应用内自动更新切换至 10166/quiet-md GitHub Releases 通道", "In-app updates now use the 10166/quiet-md GitHub Releases channel"),
@@ -127,6 +128,8 @@ pub fn startup(existed: bool) {
 /// The card, while it has not been closed: this version's notes, and the
 /// move to real folders when it happened this launch.
 pub fn card(on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Option<AnyElement> {
+    // the site's live demo is not an update anyone installed
+    if cfg!(target_family = "wasm") { return None }
     let notes = notes().filter(|_| PENDING.load(Ordering::Relaxed));
     let moved = *MIGRATED.lock().unwrap();
     if notes.is_none() && moved.is_none() { return None }
