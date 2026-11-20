@@ -20,6 +20,8 @@ pub struct DataTablesUi {
     open: Option<BlockId>,
     /// A side being dragged: the block, where the press was, the width then, which side (+1 right, −1 left), the width now.
     resize: Option<(BlockId, f32, f32, f32, f32)>,
+    /// The page was swapped under a standalone file's full view (版本历史): open its table again.
+    reopen: bool,
 }
 
 /// The narrowest a table in a page can be dragged.
@@ -83,7 +85,10 @@ impl Editor {
         self.core.doc.for_each_block(|b| if let BlockKind::DataTable(t) = &b.kind { blocks.push((b.id, t.clone())) });
         if blocks.is_empty() && self.datatables.views.is_empty() { return; }
         self.datatables.views.retain(|id, _| blocks.iter().any(|b| b.0 == *id));
-        if self.datatables.open.is_some_and(|id| !self.datatables.views.contains_key(&id) && !blocks.iter().any(|b| b.0 == id)) { self.datatables.open = None; }
+        let lost = self.datatables.open.is_some_and(|id| !self.datatables.views.contains_key(&id) && !blocks.iter().any(|b| b.0 == id)) || std::mem::take(&mut self.datatables.reopen);
+        if lost { self.datatables.open = None; }
+        // a standalone file's page was replaced (a version previewed, or back): its table fills the pane again
+        if lost && self.table_file && let Some(&(id, _)) = blocks.first() { cx.defer_in(window, move |e, window, cx| e.open_table(id, window, cx)); }
         let root = crate::store::Store::root_dir();
         for (id, t) in blocks {
             if self.datatables.views.contains_key(&id) { continue; }
@@ -172,6 +177,13 @@ impl Editor {
     /// A table in the page holds the keyboard: the page's own shortcuts stand aside.
     pub(super) fn tables_focused(&self, window: &Window, cx: &App) -> bool {
         self.datatables.views.values().any(|v| v.0.focus_handle(cx).contains_focused(window, cx))
+    }
+
+    /// The page is about to be replaced by another copy of itself (a version previewed, or back to
+    /// now): its views go, so the next ones read the file the new page points at.
+    pub fn reset_tables(&mut self) {
+        self.datatables.views.clear();
+        if self.datatables.open.take().is_some() { self.datatables.reopen = true; }
     }
 
     /// A standalone table's file moved (its page was renamed).

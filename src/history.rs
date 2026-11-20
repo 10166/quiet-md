@@ -148,6 +148,7 @@ impl Workspace {
         }
         if let Some(ed) = &self.editor {
             ed.update(cx, |e, cx| {
+                if e.table_file { e.reset_tables(); }
                 e.receive_document(&Core::new(doc), cx);
                 e.set_read_only(true, cx);
                 e.set_preview(true, cx);
@@ -171,6 +172,7 @@ impl Workspace {
         let Some(p) = self.preview.take() else { return };
         if let Some(ed) = &self.editor {
             ed.update(cx, |e, cx| {
+                if e.table_file { e.reset_tables(); }
                 e.receive_document(&p.core, cx);
                 e.diff_marks = None;
                 e.set_preview(false, cx);
@@ -281,8 +283,13 @@ impl Workspace {
         }
     }
 
+    fn is_table(&self, id: &str) -> bool { self.entries.iter().any(|e| e.id == id && e.meta.kind == crate::store::DocKind::Table) }
+
     pub fn restore_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((id, name)) = self.history.as_ref().and_then(|h| h.selected.clone().map(|n| (h.id.clone(), n))) else { return };
+        // a 数据表 writes as it is edited: nothing of the present may be pending when its file is replaced
+        let table = self.is_table(&id);
+        if table { if let Some(ed) = self.editor.clone() { ed.update(cx, |e, cx| e.commit_tables(cx)); } crate::table::flush_all(cx); }
         let doc = match self.store.restore_version(&id, &name) {
             Ok(d) => d,
             Err(e) => return self.set_history_error(e.to_string(), cx),
@@ -295,8 +302,9 @@ impl Workspace {
             self.show_toast_kind(crate::editor_ui::ToastKind::Error, crate::settings::tr("恢复失败：当前版本未被改动。", "Restore failed; the current version was left alone."), cx);
             return;
         }
+        if table && let Some(p) = self.store.file_path(&id) { crate::table::reload(&p, cx); }
         if let Some(ed) = &self.editor {
-            ed.update(cx, |e, cx| e.receive_document(&Core::new(doc), cx));
+            ed.update(cx, |e, cx| { if e.table_file { e.reset_tables(); } e.receive_document(&Core::new(doc), cx) });
         }
         self.unsaved = false;
         self.status = crate::app::SaveStatus::Saved;
@@ -309,6 +317,22 @@ impl Workspace {
     pub fn version_as_copy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((id, name)) = self.history.as_ref().and_then(|h| h.selected.clone().map(|n| (h.id.clone(), n))) else { return };
         let meta = self.history.as_ref().and_then(|h| h.versions.iter().find(|v| v.name == name)).map(|v| (v.label.clone(), v.ms));
+        if self.is_table(&id) {
+            let (label, ms) = meta.unwrap_or_default();
+            let tag = label.unwrap_or_else(|| match ms { 0 => String::new(), ms => hhmm(ms / 1000) });
+            let base = self.entries.iter().find(|e| e.id == id).map(|e| crate::settings::display_title(&e.title).to_string()).unwrap_or_default();
+            let title = if tag.is_empty() { base } else { crate::localized_format!("{}（{}）", "{} ({})", base, tag) };
+            match self.store.copy_table_version(&id, &name, &title) {
+                Ok(new) => {
+                    self.entries = self.store.list();
+                    self.sort();
+                    self.close_history(cx);
+                    self.open(&new, window, cx);
+                }
+                Err(e) => self.set_history_error(e.to_string(), cx),
+            }
+            return;
+        }
         match self.store.version_document(&id, &name) {
             Ok(mut doc) => {
                 // Name the copy after *which* snapshot it is: a bare "副本" or
