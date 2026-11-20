@@ -85,6 +85,17 @@ pub fn block_text(root: &std::path::Path, r: &TableRef) -> String {
 #[cfg(target_family = "wasm")]
 pub fn block_text(_root: &std::path::Path, _r: &TableRef) -> String { String::new() }
 
+/// A 数据表 file as lines of text, a line per row (版本历史 counts changes on these).
+#[cfg(not(target_family = "wasm"))]
+pub fn diff_text(path: &std::path::Path) -> String {
+    let Ok(base) = sqlite::load(path) else { return String::new() };
+    let base = Doc::new(base).base;
+    let Some((t, v)) = base.tables.first().and_then(|t| Some((t, t.views.first()?))) else { return String::new() };
+    csv::export(&base, t, v, &query::run(&base, t, v).records).iter().map(|r| r.join("\t")).collect::<Vec<_>>().join("\n")
+}
+#[cfg(target_family = "wasm")]
+pub fn diff_text(_path: &std::path::Path) -> String { String::new() }
+
 /// A 数据表 block as a grid of text, header first (HTML 导出, printing).
 #[cfg(not(target_family = "wasm"))]
 pub fn block_grid(root: &std::path::Path, r: &TableRef) -> Vec<Vec<String>> {

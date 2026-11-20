@@ -144,7 +144,6 @@ impl Workspace {
         let starred = entry.is_some_and(|e| e.meta.starred > 0);
         let width = entry.map(|e| e.meta.width).unwrap_or_default();
         let refs_shown = !entry.is_some_and(|e| e.meta.refs_hidden);
-        let table_file = entry.is_some_and(|e| e.meta.kind == crate::store::DocKind::Table);
         // An open board isn't the page: no page width, find in its text or
         // editor shortcuts; a standalone board file has no Markdown or
         // references either
@@ -241,15 +240,14 @@ impl Workspace {
                     .on_hover(hover_sub(None))
                     .on_click(cx.listener(|w, _, window, cx| w.open_doc_info(window, cx))),
             )
-            // a 数据表 is written straight to its file, so no versions are kept for it: no entry
-            .when(!table_file, |d| d.child(
+            .child(
                 menu_item("dm-history", "restore", crate::settings::tr("版本历史", "Version history"), false, false)
                     .on_hover(hover_sub(None))
                     .on_click(cx.listener(|w, _, window, cx| {
                         w.close_doc_menu(cx);
                         if let Some(id) = w.current.clone() { w.open_history(&id, window, cx) }
                     })),
-            ))
+            )
             .child(divider())
             // 更多 and 删除 share the last group.
             .when(!board_file, |d| d.child(menu_item("dm-more", "ellipsis", crate::settings::text("更多"), true, sub == Some(DocSub::More)).on_hover(hover_sub(Some(DocSub::More)))))
