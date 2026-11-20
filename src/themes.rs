@@ -64,8 +64,9 @@ pub struct Prop {
     pub feishu: Def,
 }
 
-/// The system families generic CSS names resolve to.
-pub const SYSTEM: &str = crate::theme::UI_FONT;
+/// The system families generic CSS names resolve to (the platform's own, not
+/// the reader's 界面字体: the note's default must not follow the chrome's).
+pub const SYSTEM: &str = crate::theme::SYSTEM_FONT;
 #[cfg(not(any(target_os = "linux", target_family = "wasm")))]
 pub const SYSTEM_MONO: &str = ".AppleSystemUIFontMonospaced";
 #[cfg(any(target_os = "linux", target_family = "wasm"))]
@@ -311,6 +312,31 @@ pub fn active() -> &'static Style {
     if p.is_null() { &PLAIN } else { unsafe { &*p } }
 }
 pub fn color(i: usize) -> Option<Hsla> { active().tokens.get(i).copied().flatten().map(crate::theme::adapt) }
+
+/// 设置 › 文档字体: a family every piece of body text and every heading is
+/// drawn in, overriding the theme's `font-family` for them. `None` follows
+/// the theme. (Code keeps `pre.font`: a family that reads well as prose is
+/// rarely the one to read code in.)
+static DOC_FONT: RwLock<Option<&'static str>> = RwLock::new(None);
+
+pub fn set_doc_font(family: &str) {
+    let family = family.trim();
+    let mut cur = DOC_FONT.write().unwrap();
+    let same = match *cur { Some(f) => f.eq_ignore_ascii_case(family), None => family.is_empty() };
+    // Preferences are applied on every save: only a real change costs the leak.
+    if same { return }
+    *cur = if family.is_empty() { None } else { Some(&*Box::leak(family.to_string().into_boxed_str())) };
+}
+
+/// The family `key` (`page.font`, `title.font`, `h1.font` …) is drawn in: the
+/// reader's choice for the document's text, else the theme's.
+pub fn doc_font(key: &str) -> &'static str {
+    match *DOC_FONT.read().unwrap() {
+        // The note's own text; code keeps `pre.font`, which is the theme's.
+        Some(family) if key.ends_with(".font") && key != "pre.font" => family,
+        _ => active().font(key),
+    }
+}
 /// Bumped whenever what is drawn may change (the editor re-measures its rows).
 pub fn generation() -> u64 { GENERATION.load(Ordering::Relaxed) }
 /// Something every theme draws changed (light / dark).

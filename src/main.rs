@@ -58,6 +58,7 @@ mod settings;
 mod table;
 mod l10n;
 mod themes;
+mod fonts;
 mod shortcuts;
 #[allow(dead_code, unused_imports)]
 mod feishu_theme;
