@@ -63,7 +63,7 @@ impl CommentPanel {
     }
 }
 
-fn make_comment_field(placeholder: &'static str, initial: &str, cx: &mut Context<Workspace>) -> Entity<TextField> {
+fn make_comment_field(placeholder: &'static str, initial: &str, min_h: f32, max_h: f32, cx: &mut Context<Workspace>) -> Entity<TextField> {
     cx.new(|cx| {
         let mut f = TextField::new(placeholder, cx);
         f.wrap = true;
@@ -71,6 +71,9 @@ fn make_comment_field(placeholder: &'static str, initial: &str, cx: &mut Context
         f.submit_on_enter = true;
         f.size = 13.;
         f.line_height = 19.;
+        f.min_height = Some(min_h);
+        f.max_height = Some(max_h);
+        f.max_len = Some(10_000);
         if !initial.is_empty() {
             f.set_text(initial, cx);
         }
@@ -129,7 +132,7 @@ impl Workspace {
             self.comments = Some(CommentPanel::new());
         }
         if let (Some((target, quote, text, anchor_gen, stale)), Some(window)) = (migrated, window) {
-            let field = make_comment_field(crate::settings::tr("输入评论，Enter 发送", "Write a comment, Enter to post"), &text, cx);
+            let field = make_comment_field(crate::settings::tr("输入评论，Enter 发送", "Write a comment, Enter to post"), &text, 40., 128., cx);
             let subs = vec![cx.subscribe_in(&field, window, |w, _, ev: &TextFieldEvent, window, cx| match ev {
                 TextFieldEvent::Submit => w.submit_comment_draft(window, cx),
                 TextFieldEvent::Cancel => w.cancel_comment_draft(window, cx),
@@ -171,7 +174,7 @@ impl Workspace {
             .unwrap_or_default();
         self.open_comments(Some(window), cx);
         let anchor_gen = self.editor.as_ref().map_or(0, |ed| ed.read(cx).core.generation);
-        let field = make_comment_field(crate::settings::tr("输入评论，Enter 发送", "Write a comment, Enter to post"), &existing, cx);
+        let field = make_comment_field(crate::settings::tr("输入评论，Enter 发送", "Write a comment, Enter to post"), &existing, 40., 128., cx);
         let focus = field.focus_handle(cx);
         let subs = vec![cx.subscribe_in(&field, window, |w, _, ev: &TextFieldEvent, window, cx| match ev {
             TextFieldEvent::Submit => w.submit_comment_draft(window, cx),
@@ -318,7 +321,7 @@ impl Workspace {
     }
 
     fn start_comment_reply(&mut self, thread_id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let field = make_comment_field(crate::settings::tr("回复评论，Enter 发送", "Reply, Enter to post"), "", cx);
+        let field = make_comment_field(crate::settings::tr("回复评论，Enter 发送", "Reply, Enter to post"), "", 34., 110., cx);
         let focus = field.focus_handle(cx);
         let subs = vec![cx.subscribe_in(&field, window, |w, _, ev: &TextFieldEvent, window, cx| match ev {
             TextFieldEvent::Submit => w.submit_comment_reply(window, cx),
@@ -365,7 +368,7 @@ impl Workspace {
     }
 
     fn start_comment_edit(&mut self, thread_id: &str, reply_id: &str, body: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let field = make_comment_field(crate::settings::tr("编辑评论", "Edit comment"), body, cx);
+        let field = make_comment_field(crate::settings::tr("编辑评论", "Edit comment"), body, 34., 128., cx);
         let focus = field.focus_handle(cx);
         let subs = vec![cx.subscribe_in(&field, window, |w, _, ev: &TextFieldEvent, window, cx| match ev {
             TextFieldEvent::Submit => w.submit_comment_edit(window, cx),
@@ -650,14 +653,21 @@ impl Workspace {
                 })
                 .child(
                     div()
-                        .min_h(px(52.))
-                        .max_h(px(140.))
+                        .w_full()
+                        .min_w_0()
                         .px(px(8.))
                         .py(px(6.))
                         .rounded(px(6.))
                         .border_1()
                         .border_color(Theme::line_border())
                         .bg(crate::theme::raised(Theme::bg_body()))
+                        .overflow_hidden()
+                        .on_mouse_down(MouseButton::Left, cx.listener(|w, _, window, cx| {
+                            cx.stop_propagation();
+                            if let Some(d) = w.comments.as_ref().and_then(|p| p.draft.as_ref()) {
+                                window.focus(&d.field.focus_handle(cx), cx);
+                            }
+                        }))
                         .child(d.field.clone()),
                 )
                 .child(
@@ -738,13 +748,21 @@ impl Workspace {
                                 .pt(px(4.))
                                 .child(
                                     div()
-                                        .min_h(px(44.))
+                                        .w_full()
+                                        .min_w_0()
                                         .px(px(8.))
                                         .py(px(5.))
                                         .rounded(px(6.))
                                         .border_1()
                                         .border_color(Theme::primary_500())
                                         .bg(crate::theme::raised(Theme::bg_body()))
+                                        .overflow_hidden()
+                                        .on_mouse_down(MouseButton::Left, cx.listener(|w, _, window, cx| {
+                                            cx.stop_propagation();
+                                            if let Some(ed) = w.comments.as_ref().and_then(|p| p.editing.as_ref()) {
+                                                window.focus(&ed.field.focus_handle(cx), cx);
+                                            }
+                                        }))
                                         .child(ed_state.field.clone()),
                                 )
                                 .child(
@@ -791,6 +809,10 @@ impl Workspace {
                                             .when(!r.author.is_empty(), |d| {
                                                 d.child(
                                                     div()
+                                                        .min_w_0()
+                                                        .overflow_hidden()
+                                                        .whitespace_nowrap()
+                                                        .text_ellipsis()
                                                         .text_size(px(12.))
                                                         .font_weight(FontWeight::MEDIUM)
                                                         .text_color(Theme::text())
@@ -852,13 +874,16 @@ impl Workspace {
                             )
                             .child(
                                 div()
+                                    .w_full()
+                                    .min_w_0()
+                                    .overflow_hidden()
                                     .flex()
                                     .flex_col()
                                     .text_size(px(13.))
                                     .line_height(px(19.))
                                     .text_color(Theme::text())
                                     .children(lines.into_iter().map(|line| {
-                                        div().min_h(px(19.)).child(if line.is_empty() { " ".to_string() } else { line })
+                                        div().w_full().min_w_0().min_h(px(19.)).child(if line.is_empty() { " ".to_string() } else { line })
                                     })),
                             )
                             .into_any_element()
@@ -879,15 +904,21 @@ impl Workspace {
                             .gap(px(6.))
                             .child(
                                 div()
-                                    .min_h(px(44.))
-                                    .max_h(px(120.))
+                                    .w_full()
+                                    .min_w_0()
                                     .px(px(8.))
                                     .py(px(5.))
                                     .rounded(px(6.))
                                     .border_1()
                                     .border_color(Theme::line_border())
                                     .bg(crate::theme::raised(Theme::bg_body()))
-                                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                    .overflow_hidden()
+                                    .on_mouse_down(MouseButton::Left, cx.listener(|w, _, window, cx| {
+                                        cx.stop_propagation();
+                                        if let Some(rep) = w.comments.as_ref().and_then(|p| p.replying.as_ref()) {
+                                            window.focus(&rep.field.focus_handle(cx), cx);
+                                        }
+                                    }))
                                     .child(rep.field.clone()),
                             )
                             .child(

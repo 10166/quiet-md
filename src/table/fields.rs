@@ -81,7 +81,7 @@ impl FieldForm {
         let (title, ty, opts) = match &orig { Some(f) => (f.name.clone(), f.ty, f.opts.clone()), None => (String::new(), FieldType::Text, field::default_opts(FieldType::Text)) };
         let name = input("请输入字段标题", &title, window, cx);
         let formula = input("请输入公式", &opts.formula, window, cx);
-        formula.0.update(cx, |t, _| { t.multiline = true; t.wrap = true; t.mono = true; });
+        formula.0.update(cx, |t, _| { t.multiline = true; t.wrap = true; t.mono = true; t.min_height = Some(64.); t.max_height = Some(180.); });
         let prefix = input("编号前缀，例如 NO.", &opts.prefix, window, cx);
         let default = input("请输入默认值", if typed_default(ty) { &opts.default } else { "" }, window, cx);
         if orig.is_some() { name.0.update(cx, |t, cx| t.select_all_text(cx)); }
@@ -355,7 +355,7 @@ fn formula_blocks(f: &FieldForm, t: &Table, problem: &Option<String>, cx: &Conte
         cx.notify();
     };
     let focus = entity.clone();
-    let editor = div().id("tb-ff-formula").min_h(px(80.)).p(px(8.)).rounded(px(6.)).border_1().border_color(c(ud::N400)).bg(Theme::bg_body()).flex().items_start().cursor(CursorStyle::IBeam)
+    let editor = div().id("tb-ff-formula").w_full().min_w_0().overflow_hidden().p(px(8.)).rounded(px(6.)).border_1().border_color(c(ud::N400)).bg(Theme::bg_body()).flex().items_start().cursor(CursorStyle::IBeam)
         .child(entity)
         .on_click(cx.listener(move |_, _, window, cx| window.focus(&focus.focus_handle(cx), cx)));
     let status = match problem {

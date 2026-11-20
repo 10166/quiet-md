@@ -344,6 +344,7 @@ impl Editor {
             f.multiline = true;
             f.wrap = true;
             f.mono = true;
+            f.max_height = Some(320.);
             f.max_len = Some(10000);
             f.placeholder_color = theme::ta(0xbb, 0xbf, 0xc4, 1.);
             f

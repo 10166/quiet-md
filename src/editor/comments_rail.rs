@@ -106,7 +106,7 @@ pub(crate) fn layout_cards(items: &[(String, f32, f32)], active: Option<&str>, g
     order.into_iter().zip(ys).map(|(ix, y)| (items[ix].0.clone(), y)).collect()
 }
 
-fn make_rail_field(placeholder: &'static str, initial: &str, cx: &mut Context<Editor>) -> Entity<TextField> {
+fn make_rail_field(placeholder: &'static str, initial: &str, min_h: f32, max_h: f32, cx: &mut Context<Editor>) -> Entity<TextField> {
     cx.new(|cx| {
         let mut f = TextField::new(placeholder, cx);
         f.wrap = true;
@@ -114,6 +114,9 @@ fn make_rail_field(placeholder: &'static str, initial: &str, cx: &mut Context<Ed
         f.submit_on_enter = true;
         f.size = 13.;
         f.line_height = 19.;
+        f.min_height = Some(min_h);
+        f.max_height = Some(max_h);
+        f.max_len = Some(10_000);
         if !initial.is_empty() {
             f.set_text(initial, cx);
         }
@@ -229,7 +232,7 @@ impl Editor {
     pub(super) fn start_rail_draft(&mut self, target: CommentTarget, quote: String, window: &mut Window, cx: &mut Context<Self>) {
         // Keep any unsent text if the user already has a draft open and picks a new anchor.
         let existing = self.comment_rail.draft.as_ref().map(|d| d.field.read(cx).text.clone()).unwrap_or_default();
-        let field = make_rail_field(crate::settings::tr("输入评论，Enter 发送", "Write a comment, Enter to post"), &existing, cx);
+        let field = make_rail_field(crate::settings::tr("输入评论，Enter 发送", "Write a comment, Enter to post"), &existing, 38., 120., cx);
         let focus = field.focus_handle(cx);
         let subs = vec![cx.subscribe_in(&field, window, |e, _, ev: &TextFieldEvent, window, cx| match ev {
             TextFieldEvent::Submit => e.submit_rail_draft(window, cx),
@@ -296,7 +299,7 @@ impl Editor {
     }
 
     fn start_rail_reply(&mut self, thread_id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let field = make_rail_field(crate::settings::tr("回复评论，Enter 发送", "Reply, Enter to post"), "", cx);
+        let field = make_rail_field(crate::settings::tr("回复评论，Enter 发送", "Reply, Enter to post"), "", 32., 100., cx);
         let focus = field.focus_handle(cx);
         let subs = vec![cx.subscribe_in(&field, window, |e, _, ev: &TextFieldEvent, window, cx| match ev {
             TextFieldEvent::Submit => e.submit_rail_reply(window, cx),
@@ -330,7 +333,7 @@ impl Editor {
     }
 
     fn start_rail_edit(&mut self, thread_id: &str, reply_id: &str, body: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let field = make_rail_field(crate::settings::tr("编辑评论", "Edit comment"), body, cx);
+        let field = make_rail_field(crate::settings::tr("编辑评论", "Edit comment"), body, 32., 120., cx);
         let focus = field.focus_handle(cx);
         let subs = vec![cx.subscribe_in(&field, window, |e, _, ev: &TextFieldEvent, window, cx| match ev {
             TextFieldEvent::Submit => e.submit_rail_edit(window, cx),
@@ -555,6 +558,7 @@ impl Editor {
                         .border_color(if stale { Theme::danger() } else { Theme::comment_underline() })
                         .bg(Theme::bg_body())
                         .shadow(theme::shadow_panel())
+                        .overflow_hidden()
                         .flex()
                         .flex_col()
                         .gap(px(8.))
@@ -608,14 +612,21 @@ impl Editor {
                         })
                         .child(
                             div()
-                                .min_h(px(48.))
-                                .max_h(px(130.))
+                                .w_full()
+                                .min_w_0()
                                 .px(px(8.))
                                 .py(px(5.))
                                 .rounded(px(6.))
                                 .border_1()
                                 .border_color(Theme::line_border())
                                 .bg(crate::theme::raised(Theme::bg_body()))
+                                .overflow_hidden()
+                                .on_mouse_down(MouseButton::Left, cx.listener(|e, _, window, cx| {
+                                    cx.stop_propagation();
+                                    if let Some(d) = &e.comment_rail.draft {
+                                        window.focus(&d.field.focus_handle(cx), cx);
+                                    }
+                                }))
                                 .child(d.field.clone()),
                         )
                         .child(
@@ -683,13 +694,21 @@ impl Editor {
                             .pt(px(3.))
                             .child(
                                 div()
-                                    .min_h(px(40.))
+                                    .w_full()
+                                    .min_w_0()
                                     .px(px(7.))
                                     .py(px(4.))
                                     .rounded(px(6.))
                                     .border_1()
                                     .border_color(Theme::primary_500())
                                     .bg(crate::theme::raised(Theme::bg_body()))
+                                    .overflow_hidden()
+                                    .on_mouse_down(MouseButton::Left, cx.listener(|e, _, window, cx| {
+                                        cx.stop_propagation();
+                                        if let Some(ed) = &e.comment_rail.editing {
+                                            window.focus(&ed.field.focus_handle(cx), cx);
+                                        }
+                                    }))
                                     .child(ed_state.field.clone()),
                             )
                             .child(
@@ -735,7 +754,7 @@ impl Editor {
                                         .gap(px(5.))
                                         .min_w_0()
                                         .when(!r.author.is_empty(), |d| {
-                                            d.child(div().text_size(px(11.5)).font_weight(FontWeight::MEDIUM).text_color(Theme::text()).child(r.author.clone()))
+                                            d.child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(11.5)).font_weight(FontWeight::MEDIUM).text_color(Theme::text()).child(r.author.clone()))
                                         })
                                         .when(!when.is_empty(), |d| {
                                             d.child(div().text_size(px(10.5)).text_color(Theme::text_caption()).child(when))
@@ -787,13 +806,16 @@ impl Editor {
                         )
                         .child(
                             div()
+                                .w_full()
+                                .min_w_0()
+                                .overflow_hidden()
                                 .flex()
                                 .flex_col()
                                 .text_size(px(12.5))
                                 .line_height(px(18.))
                                 .text_color(Theme::text())
                                 .children(lines.into_iter().map(|line| {
-                                    div().min_h(px(18.)).child(if line.is_empty() { " ".to_string() } else { line })
+                                    div().w_full().min_w_0().min_h(px(18.)).child(if line.is_empty() { " ".to_string() } else { line })
                                 })),
                         )
                         .into_any_element()
@@ -814,14 +836,21 @@ impl Editor {
                         .gap(px(5.))
                         .child(
                             div()
-                                .min_h(px(40.))
-                                .max_h(px(110.))
+                                .w_full()
+                                .min_w_0()
                                 .px(px(7.))
                                 .py(px(4.))
                                 .rounded(px(6.))
                                 .border_1()
                                 .border_color(Theme::line_border())
                                 .bg(crate::theme::raised(Theme::bg_body()))
+                                .overflow_hidden()
+                                .on_mouse_down(MouseButton::Left, cx.listener(|e, _, window, cx| {
+                                    cx.stop_propagation();
+                                    if let Some(rep) = &e.comment_rail.replying {
+                                        window.focus(&rep.field.focus_handle(cx), cx);
+                                    }
+                                }))
                                 .child(rep.field.clone()),
                         )
                         .child(
@@ -859,6 +888,7 @@ impl Editor {
                 }
             });
 
+            let replies_max_h = (f32::from(self.pane_size().height) * 0.45).clamp(160., 360.);
             cards.push(
                 div()
                     .id(SharedString::from(format!("rcm-card-{ci}")))
@@ -873,6 +903,7 @@ impl Editor {
                     .border_color(if active { Theme::comment_underline() } else { Theme::line_border() })
                     .bg(Theme::bg_body())
                     .shadow(if active { theme::shadow_panel() } else { theme::shadow_button() })
+                    .overflow_hidden()
                     .cursor_pointer()
                     .on_mouse_down(MouseButton::Left, cx.listener(move |e, _, _, cx| {
                         cx.stop_propagation();
@@ -933,7 +964,17 @@ impl Editor {
                                 )
                             }),
                     )
-                    .children(reply_els)
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("rcm-replies-{ci}")))
+                            .w_full()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .max_h(px(replies_max_h))
+                            .overflow_y_scroll()
+                            .children(reply_els),
+                    )
                     .children(reply_area)
                     .into_any_element(),
             );

@@ -67,6 +67,7 @@ fn begin(v: &mut TableView, cell: CellId, window: &mut Window, cx: &mut Context<
     let Some((text, title, long)) = got else { return };
     input.update(cx, |t, cx| {
         t.multiline = long && !title;
+        t.max_height = (long && !title).then_some(240.);
         (t.size, t.line_height) = if title { (20., 28.) } else { (TEXT, 20.) };
         t.set_text(&text, cx);
     });
