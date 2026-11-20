@@ -555,6 +555,9 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
                             // a second click on the active cell opens its editor, as a double click does
                             if ev.click_count >= 2 || (was && !ev.modifiers.shift) { v.begin_edit(id, None, window, cx); }
                             else { v.drag = Some(Drag::Select); }
+                            // focus is set here (the grid, or the cell editor): the view's own track_focus must not take
+                            // it back as the press bubbles up (on Windows the editor lost its keys that way)
+                            window.prevent_default();
                             cx.notify();
                         }))
                         .on_mouse_down(MouseButton::Right, cx.listener(move |v, ev: &MouseDownEvent, window, cx| {
