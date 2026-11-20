@@ -17,6 +17,9 @@ const REAL_FOLDERS: &str = "文档库改为真实文件夹，以标题命名，�
 /// Each version's notes: (version, [(中文, English)]). Only the running
 /// version's are shown; a version without notes shows nothing.
 const NOTES: &[(&str, &[(&str, &str)])] = &[
+    ("0.1.17", &[
+        ("评论与多行输入框修复：超长评论、回复与公式输入支持内部滚动、自动跟随光标并严格裁剪边界，不再溢出遮挡底部按钮；宽屏浮动卡片长回复列表支持独立滚动", "Comments and multiline inputs: long comments, replies, and formula editors now scroll smoothly inside their bounds, keep the caret in view, and clip cleanly without overlapping buttons; long reply lists in floating margin cards scroll independently"),
+    ]),
     ("0.1.16", &[
         ("AI 与本地 MCP 服务：在「设置 › AI」中可一键启用仅监听本机的 MCP Streamable HTTP 服务，支持 AI Agent 安全检索和块级编辑文档，写入前自动留存版本快照并支持 ⌘Z 撤销", "AI & local MCP server: enable the loopback-only MCP Streamable HTTP server in Settings › AI so AI agents can search and safely edit notes block-by-block with automatic pre-edit Version History snapshots and ⌘Z undo"),
         ("云同步改进：自动识别设备主机名作为默认设备名称", "Cloud sync: improved automatic default device name detection"),
