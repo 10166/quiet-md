@@ -18,7 +18,12 @@ pub struct DataTablesUi {
     views: HashMap<BlockId, (Entity<TableView>, Subscription)>,
     /// The block shown over the whole pane.
     open: Option<BlockId>,
+    /// A side being dragged: the block, where the press was, the width then, which side (+1 right, −1 left), the width now.
+    resize: Option<(BlockId, f32, f32, f32, f32)>,
 }
+
+/// The narrowest a table in a page can be dragged.
+const MIN_W: f32 = 320.;
 
 impl R<'_> {
     pub(super) fn datatable_block(&self, b: &Block, t: &TableRef, cx: &mut Context<Editor>) -> AnyElement {
@@ -32,12 +37,39 @@ impl R<'_> {
         let covered = self.ed.datatables.open == Some(id);
         // the view is as tall as its rows (`TableView::render`); while it is full-pane, a gap of its height stays
         let h = view.read(cx).height;
+        // as wide as the text column, or dragged wider (into the side margins, evenly) or narrower, centred on it
+        let content = self.ed.content_width();
+        let (bl, br) = self.ed.bleed();
+        let max = content + 2. * bl.min(br);
+        let dragging = self.ed.datatables.resize.filter(|r| r.0 == id).map(|r| r.4);
+        let w = dragging.or(t.width).map(|w| w.clamp(MIN_W.min(content), max.max(content))).unwrap_or(content);
+        // a side to drag: a bar shows under the pointer and while dragged
+        let side = |dir: f32| { let g = if dir < 0. { "dt-side-l" } else { "dt-side-r" }; div().id(("datatable-side", (id.0 as usize) * 2 + (dir > 0.) as usize)).absolute().top_0().bottom_0().w(px(12.)).flex().justify_center()
+            .when(dir < 0., |d| d.left(px(-14.))).when(dir > 0., |d| d.right(px(-14.)))
+            .group(g).cursor(CursorStyle::ResizeLeftRight)
+            .child(div().w(px(3.)).h_full().rounded_full().when(dragging.is_some(), |d| d.bg(Theme::primary())).when(dragging.is_none(), |d| d.group_hover(g, |s| s.bg(Theme::primary()))))
+            .on_mouse_down(MouseButton::Left, cx.listener(move |e, ev: &MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                // a double click puts it back to the text column's width
+                if ev.click_count >= 2 { e.set_table_width(id, None, window, cx); return; }
+                e.datatables.resize = Some((id, f32::from(ev.position.x), w, dir, w));
+                cx.notify();
+            })) };
         frame()
+            .w(px(w)).ml(px((content - w) / 2.))
             // clicks inside belong to the table, not to the page's caret
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
             .when(covered, |d| d.h(px(h)))
-            .when(!covered, |d| d.child(view))
+            .when(!covered, |d| d.child(view).child(side(-1.)).child(side(1.)))
+            // the drag follows the pointer anywhere in the window and ends on release
+            .when(dragging.is_some(), |d| {
+                let (a, b) = (cx.weak_entity(), cx.weak_entity());
+                d.child(canvas(|_, _, _| {}, move |_, _, window, _| {
+                    window.on_mouse_event(move |ev: &MouseMoveEvent, phase, _, cx| if phase == DispatchPhase::Capture { let _ = a.update(cx, |e, cx| e.drag_table_width(f32::from(ev.position.x), (MIN_W.min(content), max.max(content)), cx)); });
+                    window.on_mouse_event(move |_: &MouseUpEvent, phase, window, cx| if phase == DispatchPhase::Capture { let _ = b.update(cx, |e, cx| e.end_table_width(content, window, cx)); });
+                }).absolute().size_full())
+            })
             .into_any_element()
     }
 }
@@ -65,12 +97,33 @@ impl Editor {
                 TableEvent::Shown => {
                     let Some(BlockKind::DataTable(old)) = e.core.block(id).map(|b| b.kind.clone()) else { return };
                     let (table, shown) = view.read(cx).shown(cx);
-                    let new = TableRef { src: old.src.clone(), table, view: shown, height: view.read(cx).height };
+                    let new = TableRef { src: old.src.clone(), table, view: shown, height: view.read(cx).height, width: old.width };
                     if !e.table_file && e.core.set_table_ref(id, new) { e.changed_preserving_viewport(window, cx); }
                 }
             });
             self.datatables.views.insert(id, (view, sub));
         }
+    }
+
+    fn drag_table_width(&mut self, x: f32, (lo, hi): (f32, f32), cx: &mut Context<Self>) {
+        let Some(r) = self.datatables.resize.as_mut() else { return };
+        // both sides move: the table stays centred on the text column
+        r.4 = (r.2 + 2. * r.3 * (x - r.1)).clamp(lo, hi);
+        cx.notify();
+    }
+
+    fn end_table_width(&mut self, content: f32, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((id, _, w0, _, w)) = self.datatables.resize.take() else { return };
+        if (w - w0).abs() < 1. { cx.notify(); return; }
+        // back within a few points of the column: the column's width again
+        self.set_table_width(id, ((w - content).abs() > 4.).then_some(w.round()), window, cx);
+    }
+
+    /// A 数据表 block's width (None: the text column's), as one undo step.
+    fn set_table_width(&mut self, id: BlockId, width: Option<f32>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(BlockKind::DataTable(old)) = self.core.block(id).map(|b| b.kind.clone()) else { return };
+        if self.core.set_table_ref(id, TableRef { width, ..old }) { self.changed(window, cx); }
+        cx.notify();
     }
 
     /// A standalone 数据表: its one table fills the pane at once.
@@ -102,6 +155,11 @@ impl Editor {
     pub fn close_open_table(&mut self, window: &mut Window, cx: &mut Context<Self>) { if !self.table_file { self.close_table(window, cx); } }
 
     pub fn table_open(&self) -> bool { self.datatables.open.is_some() }
+
+    /// Keep what the page's tables have in progress (a cell being edited): the page is being saved or left.
+    pub fn commit_tables(&mut self, cx: &mut Context<Self>) {
+        for (view, _) in self.datatables.views.values() { view.update(cx, |v, cx| v.commit_pending(cx)); }
+    }
 
     /// The open table belongs to the page (not a standalone file).
     pub fn table_block_open(&self) -> bool { self.datatables.open.is_some() && !self.table_file }

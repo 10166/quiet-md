@@ -404,6 +404,21 @@ impl TableView {
     pub(crate) fn undo(&mut self, cx: &mut Context<Self>) { self.edit(cx, |d| d.undo()); }
     pub(crate) fn redo(&mut self, cx: &mut Context<Self>) { self.edit(cx, |d| d.redo()); }
 
+    /// Keep a cell being edited and a name being typed, without a window at hand: the page is about
+    /// to be left or saved, and the view may be dropped with no focus change to commit them.
+    pub fn commit_pending(&mut self, cx: &mut Context<Self>) {
+        if let Some(cell) = self.editing.take() {
+            let text = self.input.read(cx).text.clone();
+            let tid = self.table;
+            self.edit(cx, |d| {
+                let Some(f) = d.base.table(tid).and_then(|t| t.field(cell.1)) else { return };
+                let v = field::parse(f, &text);
+                d.set_cells(tid, vec![(cell.0, cell.1, v)]);
+            });
+        }
+        self.finish_rename(true, cx);
+    }
+
     /// Finish what is in progress and write the file (the page is closing).
     pub fn finish(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.commit_edit(true, window, cx);
@@ -517,6 +532,13 @@ impl Render for TableView {
         let (Some(t), Some(v)) = (base.table(self.table), base.table(self.table).and_then(|t| t.view(self.view))) else {
             return root.into_any_element();
         };
+        // In a page the block is as tall as its rows (up to a cap): no scroll beyond what overflows the cap.
+        // A row added (and revealed) while the block was still the old height left the rows scrolled up,
+        // a blank under them, once the block grew.
+        if !self.full {
+            let rows = self.tops.last().copied().unwrap_or(0.) + ADD_ROW_H;
+            self.scroll.y = self.scroll.y.min((rows - rows.min(INLINE_MAX_ROWS_H)).max(0.));
+        }
         // one view, a 表格 (a file's old 看板 or other kinds show as one too)
         let main = grid::render(self, base, t, v, window, cx);
         let side = self.expanded.and_then(|r| t.record(r)).map(|r| record::render(self, base, t, v, r, window, cx));
