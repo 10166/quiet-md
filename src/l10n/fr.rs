@@ -504,6 +504,8 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("查找", "Rechercher"),
     ("替换为", "Remplacer par"),
     ("全部替换", "Tout remplacer"),
+    ("正则表达式", "Expression régulière"),
+    ("正则有误", "Regex invalide"),
     ("替换", "Remplacer"),
     ("请输入代码块名称", "Saisissez le nom du bloc de code"),
     ("输入图片描述", "Saisissez une légende"),
