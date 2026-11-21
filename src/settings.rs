@@ -1238,6 +1238,20 @@ impl Workspace {
                     .when(std::env::var_os("QUIET_MD_HOME").is_none(), |d| d.child(button("change-library", tr("更改…", "Change…")).on_click(cx.listener(|w, _, _, cx| w.pick_library(cx)))))).into_any_element(),
                 row(tr("回收站", "Trash"), Some(crate::localized_format!("删除的文档保留 {} 天后自动清除。", "Deleted documents are kept for {} days.", crate::store::TRASH_DAYS).into()),
                     button("open-trash", tr("打开", "Open")).on_click(cx.listener(|w, _, _, cx| w.show_view(View::Trash, cx)))).into_any_element(),
+                // #237: files no document (the Trash included) mentions.
+                row(tr("未使用资源", "Unused assets"), Some(tr("资源文件夹里没有任何文档（含回收站、版本历史和本机文件）引用的图片和文件。检查后确认才会移出。", "Images and files in the asset folder that no document mentions, including the Trash, version history and local files. Nothing is moved until you confirm.").into()),
+                    button("sweep-assets", tr("检查", "Check")).on_click(cx.listener(|w, _, window, cx| {
+                        let root = crate::store::Store::root_dir();
+                        let (live, outside) = w.sweep_inputs(window, cx);
+                        cx.spawn(async move |this, cx| {
+                            let sweep = cx.background_executor().spawn(async move { crate::store::Store::unused_assets_at(root, live, outside) }).await;
+                            let _ = this.update(cx, |w, cx| match sweep {
+                                Ok(files) if files.is_empty() => w.show_toast(crate::settings::text("没有未使用资源"), cx),
+                                Ok(files) => { w.confirm = Some(crate::app::Confirm::RemoveUnused(files)); cx.notify(); }
+                                Err(e) => w.sweep_failed(&e, cx),
+                            });
+                        }).detach();
+                    }))).into_any_element(),
                 row(tr("版本历史", "Version history"),
                     desc(tr("每篇文档保留的历史版本数（1–30 份）", "Snapshots kept for each document (1–30)")),
                     div().flex_none().flex().items_center().gap(px(12.))
@@ -1598,6 +1612,10 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "已彻底删除" => "Permanently deleted",
         "清空" => "Empty",
         "已清空回收站" => "Trash emptied",
+        "清理未使用资源" => "Remove unused assets",
+        "没有未使用资源" => "No unused assets",
+        "没有可清理的资源" => "Nothing to remove",
+        "移出" => "Move out",
         "确认清空回收站？" => "Empty the Trash?",
         "删除的内容将进入回收站，30 天后自动彻底删除" => "Deleted items will be moved to Trash and permanently deleted after 30 days.",
         "确认恢复？" => "Restore this document?",
