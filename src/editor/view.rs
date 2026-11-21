@@ -1306,6 +1306,14 @@ impl Editor {
 
     fn move_h(&mut self, right: bool, word: bool, extend: bool) {
         let s = self.core.sel;
+        // In a line that reads right to left the arrows follow the reading
+        // direction: → goes back towards the line's start, on its right.
+        let rtl = self.core.text_of(s.head.block).is_some_and(|t| {
+            let o = s.head.offset.min(t.text.len());
+            let start = t.text[..o].rfind('\n').map_or(0, |i| i + 1);
+            super::bidi::rtl_line(t.text[start..].split('\n').next().unwrap_or(""))
+        });
+        let right = right != rtl;
         if !extend && !s.is_collapsed() {
             let (a, b) = self.core.ordered();
             self.set_caret(if right { b } else { a }, false);
