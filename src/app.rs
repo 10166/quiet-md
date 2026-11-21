@@ -309,6 +309,9 @@ pub struct Workspace {
     sidebar_was_open: bool,
     /// The window width before that widening, until the window takes the new size.
     widen_from: Option<f32>,
+    /// Narrowing the window hid the sidebar (not the user): widening it until
+    /// the sidebar fits shows it again.
+    sidebar_auto_hidden: bool,
     pub folder_current: Option<String>,
     pub create_menu: Option<(Option<String>, Point<Pixels>)>,
     /// The header's 导入 menu: the folder it imports into, and where it hangs.
@@ -579,6 +582,7 @@ impl Workspace {
             sidebar_width,
             sidebar_was_open: false,
             widen_from: None,
+            sidebar_auto_hidden: false,
             sidebar_drag: false,
             folder_current: None,
             create_menu: None,
@@ -1752,11 +1756,16 @@ impl Render for Workspace {
         let vw = f32::from(vs.width);
         if self.widen_from.is_some_and(|w| (w - vw).abs() > 0.5) { self.widen_from = None; }
         // The web build's window is the page: never resized from here.
-        if self.sidebar_open && !window.is_fullscreen() && !cfg!(target_family = "wasm") {
+        // Opened by hand: no longer waiting to come back by itself.
+        if self.sidebar_open { self.sidebar_auto_hidden = false; }
+        if !window.is_fullscreen() && !cfg!(target_family = "wasm") {
             let need = DOC_MIN_W + self.sidebar_w(window);
-            if vw < need - 0.5 {
+            if self.sidebar_open && vw < need - 0.5 {
                 if !self.sidebar_was_open { window.resize(size(px(need), vs.height)); self.widen_from = Some(vw); }
-                else if self.widen_from.is_none() { self.sidebar_open = false; }
+                else if self.widen_from.is_none() { self.sidebar_open = false; self.sidebar_auto_hidden = true; }
+            } else if self.sidebar_auto_hidden && vw >= need - 0.5 {
+                self.sidebar_open = true;
+                self.sidebar_auto_hidden = false;
             }
         }
         self.sidebar_was_open = self.sidebar_open;
