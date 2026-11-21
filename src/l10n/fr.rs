@@ -1069,4 +1069,6 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("无法完成必需的更新：{}", "Impossible de terminer une mise à jour requise : {}"),
     ("正在下载必需的更新 {}… {:.0}%", "Téléchargement d’une mise à jour requise ({})… {:.0} %"),
     ("这个版本需要更新到 {} 或更高。暂时无法下载，联网后会自动重试。", "Cette version doit être mise à jour vers {} ou une version ultérieure. Le téléchargement reprendra automatiquement dès que vous serez en ligne."),
+    ("退格键回到标题", "Retour arrière revient au titre"),
+    ("在正文开头按退格键时回到标题，第一段文字并入标题。关闭后光标留在正文。", "Retour arrière au début du corps passe au titre et y joint le premier paragraphe. Désactivé, le curseur reste dans le corps."),
 ];
