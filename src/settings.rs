@@ -147,7 +147,9 @@ fn lang_for_locale(locale: &str) -> Option<Lang> {
     let base = parts.next()?.to_ascii_lowercase();
     if base.is_empty() { return None; }
     if base == "zh" {
-        let trad = parts.any(|p| matches!(p.to_ascii_lowercase().as_str(), "hant" | "tw" | "hk" | "mo"));
+        // A script subtag decides (zh-Hans-HK is Simplified); otherwise the region does.
+        let rest: Vec<String> = parts.map(str::to_ascii_lowercase).collect();
+        let trad = rest.iter().find(|p| *p == "hans" || *p == "hant").map_or_else(|| rest.iter().any(|p| matches!(p.as_str(), "tw" | "hk" | "mo")), |s| s == "hant");
         return Some(if trad { Lang::ZhTw } else { Lang::Zh });
     }
     Lang::ALL.into_iter().find(|l| l.code() == base)
@@ -1980,10 +1982,17 @@ mod preference_tests {
         for tag in ["zh-TW", "zh_TW.UTF-8", "zh-Hant", "zh-Hant-TW", "zh-Hant-HK", "zh-HK", "zh-MO"] {
             assert_eq!(lang_for_locale(tag), Some(Lang::ZhTw), "{tag}");
         }
-        for tag in ["zh", "zh-CN", "zh_CN.UTF-8", "zh-Hans", "zh-Hans-CN", "zh-SG"] {
+        for tag in ["zh", "zh-CN", "zh_CN.UTF-8", "zh-Hans", "zh-Hans-CN", "zh-SG", "zh-Hans-HK"] {
             assert_eq!(lang_for_locale(tag), Some(Lang::Zh), "{tag}");
         }
         assert_eq!(lang_for_locale("fr_FR.UTF-8"), Some(Lang::Fr));
         assert_eq!(lang_for_locale("C.UTF-8"), None);
+    }
+
+    /// `lang()` reads the stored discriminant back by its position in `ALL`.
+    #[test]
+    fn languages_are_listed_in_declaration_order() {
+        use super::Lang;
+        for (i, l) in Lang::ALL.into_iter().enumerate() { assert_eq!(l as usize, i, "{l:?}"); }
     }
 }
