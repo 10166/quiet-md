@@ -370,6 +370,8 @@ pub struct Workspace {
     pub shortcuts: bool,
     pub(crate) focus: FocusHandle,
     pub(crate) save_task: Option<Task<()>>,
+    /// Writes 最近打开 and 阅读位置 once switching documents stops (#324).
+    view_state_task: Option<Task<()>>,
     /// When the oldest edit not yet on disk was made: a save waits for a
     /// pause in typing, but never longer than `SAVE_MAX_DELAY` after it.
     dirty_since: Option<Instant>,
@@ -470,6 +472,7 @@ impl Workspace {
             // go through `save_before` and ask when the save fails.
             cx.on_app_quit(|this, cx| {
                 crate::quick_note::persist(cx);
+                this.flush_view_state();
                 if !this.store.file_task_busy() && !this.flush(cx) && let Some(ed) = &this.editor
                     && let Err(error) = this.store.recover_later(&ed.read(cx).core.doc) {
                     crate::logging::write(&format!("Could not preserve unsaved document: {error:#}"));
@@ -480,7 +483,7 @@ impl Workspace {
         let this = cx.weak_entity();
         window.on_window_should_close(cx, move |_, cx| {
             crate::quick_note::persist(cx);
-            this.update(cx, |w, cx| { w.cancel_shortcut_recording(cx); w.save_before(cx, |_, window, _| window.remove_window()) }).unwrap_or(true)
+            this.update(cx, |w, cx| { w.cancel_shortcut_recording(cx); w.flush_view_state(); w.save_before(cx, |_, window, _| window.remove_window()) }).unwrap_or(true)
         });
         if !quick { crate::settings::watch_themes(cx); }
         // A file written into the library from outside (a model writing a
@@ -607,6 +610,7 @@ impl Workspace {
             export_md: None,
             focus: cx.focus_handle(),
             save_task: None,
+            view_state_task: None,
             dirty_since: None,
             unsaved: false,
             after_save: None,
@@ -785,6 +789,7 @@ impl Workspace {
             && let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
                 e.meta.opened = m.opened;
             }
+        self.schedule_view_state(cx);
         if let Some(previous) = &self.current
             && self.document_peers(previous, window, cx).is_empty() { self.store.forget_loaded(previous); }
         self.editor = Some(editor);
@@ -1076,7 +1081,22 @@ impl Workspace {
     fn remember_scroll(&mut self, cx: &mut Context<Self>) {
         let (Some(id), Some(editor)) = (self.current.clone(), self.editor.clone()) else { return };
         let top = editor.read(cx).scroll_top();
-        let _ = self.store.remember_scroll(&id, top);
+        self.store.remember_scroll(&id, top);
+        self.schedule_view_state(cx);
+    }
+
+    /// 最近打开 and 阅读位置 go to disk once documents stop changing for a
+    /// moment: each write syncs fully, which made quick switching stall (#324).
+    pub(crate) fn schedule_view_state(&mut self, cx: &mut Context<Self>) {
+        self.view_state_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(600)).await;
+            let _ = this.update(cx, |w, _| w.flush_view_state());
+        }));
+    }
+
+    pub(crate) fn flush_view_state(&mut self) {
+        self.view_state_task = None;
+        if let Err(e) = self.store.flush_view_state() { crate::logging::write(&format!("Could not save the reading position: {e:#}")); }
     }
 
     pub(crate) fn sync_document(&mut self, window: &Window, cx: &mut Context<Self>) {
