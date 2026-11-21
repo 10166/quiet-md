@@ -24,7 +24,7 @@ const MARKDOWN_EXTS: [&str; 4] = ["md", "markdown", "mark", "txt"];
 
 /// What the header's 导入 menu picks.
 #[derive(Clone, Copy)]
-pub(crate) enum ImportKind { Markdown, Folder, DocxXml }
+pub(crate) enum ImportKind { Markdown, Folder, DocxXml, Csv }
 
 /// 导入文件夹 refuses folders with more documents than this.
 pub(crate) const IMPORT_FOLDER_LIMIT: usize = 2000;
@@ -123,7 +123,7 @@ fn save_path(name: &str, cx: &mut App) -> impl std::future::Future<Output = Opti
 /// scripted answer.
 fn open_paths(cx: &mut App) -> impl std::future::Future<Output = Option<Vec<PathBuf>>> + use<> {
     let picked = crate::devtools::take_pick();
-    let extensions = Some(MARKDOWN_EXTS.iter().chain(&["xml"]).map(|e| SharedString::from(*e)).collect());
+    let extensions = Some(MARKDOWN_EXTS.iter().chain(&["xml", "csv", "tsv"]).map(|e| SharedString::from(*e)).collect());
     let prompt = picked.is_none().then(|| cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: Some(crate::settings::text("导入").into()), extensions }));
     async move {
         match prompt {
@@ -131,6 +131,19 @@ fn open_paths(cx: &mut App) -> impl std::future::Future<Output = Option<Vec<Path
             None => picked,
         }
     }
+}
+
+/// A CSV or TSV file as a new 数据表 file named after it: the first row
+/// names the columns, each column's type is guessed from its cells.
+pub(crate) fn import_csv(store: &mut crate::store::Store, path: &Path, parent: Option<&str>) -> anyhow::Result<String> {
+    let bytes = crate::store::read_bounded(path, IMPORT_FILE_LIMIT)?;
+    let text = String::from_utf8_lossy(&bytes);
+    let text = text.trim_start_matches('\u{feff}');
+    let name = path.file_stem().and_then(|s| s.to_str()).filter(|s| !s.trim().is_empty()).unwrap_or(crate::settings::text("未命名数据表"));
+    let mut base = crate::table::Base::default();
+    let t = crate::table::csv::import(&mut base, name, text);
+    base.tables.push(t);
+    store.create_table_in(name, &base, parent)
 }
 
 /// The page title as a file name.
@@ -403,6 +416,7 @@ impl Workspace {
                     _ if crate::local_files::is_markdown_path(p) => import_markdown(&mut writer, p, None, parent.as_deref()),
                     e if MARKDOWN_EXTS.contains(&e) => markdown_document(p).map_err(anyhow::Error::from).and_then(|doc| writer.create_from_in(&doc, parent.as_deref())),
                     "xml" => writer.import_into(p, parent.as_deref()),
+                    "csv" | "tsv" => import_csv(&mut writer, p, parent.as_deref()),
                     _ => Err(anyhow::anyhow!("文件格式不支持")),
                 };
                 match made { Ok(id) => last = Some(id), Err(_) => failed = true }
@@ -439,6 +453,7 @@ impl Workspace {
             ImportKind::Markdown => (false, &["md", "markdown", "mdown"]),
             ImportKind::Folder => (true, &[]),
             ImportKind::DocxXml => (false, &["xml"]),
+            ImportKind::Csv => (false, &["csv", "tsv"]),
         };
         let options = PathPromptOptions {
             files: !folders, directories: folders, multiple: !folders, prompt: Some(crate::settings::text("导入").into()),
@@ -468,11 +483,12 @@ impl Workspace {
             row(id, glyph, label).on_click(cx.listener(move |w, _, window, cx| w.open_import_kind(kind, parent.clone(), window, cx)))
         };
         Some(deferred(anchored().anchor(Anchor::TopRight).position(pos).snap_to_window_with_margin(px(8.)).child(
-            crate::ui::popover().id("import-items").occlude().w(px(210.)).py(px(crate::ui::MENU_PAD_Y))
+            crate::ui::popover().id("import-items").occlude().min_w(px(210.)).py(px(crate::ui::MENU_PAD_Y))
                 .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.import_menu = None; cx.notify(); }))
                 .child(item("import-md", "doc-md", crate::settings::tr("导入 Markdown 文件…", "Import Markdown Files…"), ImportKind::Markdown))
                 .child(item("import-folder", "folder", crate::settings::tr("导入文件夹…", "Import Folder…"), ImportKind::Folder))
-                .child(item("import-xml", "doc", crate::settings::tr("导入 DocxXML…", "Import DocxXML…"), ImportKind::DocxXml)),
+                .child(item("import-xml", "doc", crate::settings::tr("导入 DocxXML…", "Import DocxXML…"), ImportKind::DocxXml))
+                .child(item("import-csv", "datatable", crate::settings::tr("从 CSV 新建数据表…", "New Data Table from CSV…"), ImportKind::Csv)),
         )).with_priority(3).into_any_element())
     }
 
@@ -721,6 +737,31 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::{BlockKind, markdown_document, percent_decode};
+
+    #[test]
+    fn importing_many_small_notes_preserves_the_tree() {
+        let tmp = fdl_core::vfs::temp_dir().join(format!("quiet-many-notes-{}", uuid::Uuid::new_v4()));
+        let source = tmp.join("input");
+        for n in 0..600 {
+            let dir = source.join(format!("dir-{}", n % 253));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(format!("note-{n}.md")), format!("body {n}")).unwrap();
+        }
+        let mut store = crate::store::Store::open_at(tmp.join("library")).unwrap();
+        let tree = super::scan_folder(&source, 0).unwrap();
+        let mut failed = 0;
+        store.batch(|s| super::import_tree(s, &tree, None, &mut failed)).unwrap().unwrap();
+        assert_eq!(failed, 0);
+        let entries = store.list();
+        for n in 0..600 {
+            let title = format!("note-{n}");
+            let entry = entries.iter().find(|e| e.title == title).unwrap();
+            let path = store.file_path(&entry.id).unwrap();
+            assert!(path.ends_with(std::path::Path::new(&format!("dir-{}", n % 253)).join(format!("{title}.md"))));
+            assert_eq!(std::fs::read_to_string(path).unwrap().trim(), format!("body {n}"));
+        }
+        std::fs::remove_dir_all(tmp).unwrap();
+    }
 
     #[test]
     fn imports_markdown_file() {

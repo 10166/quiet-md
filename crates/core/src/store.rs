@@ -99,6 +99,9 @@ pub enum DocKind {
     Doc,
     /// 画板: a `.excalidraw` file (Excalidraw's own JSON).
     Board,
+    /// 数据表: a `.sqlite` file (`table::sqlite`). Read and written by the
+    /// table itself; the store only knows it as a page holding one 数据表 block.
+    Table,
 }
 
 impl DocKind {
@@ -109,20 +112,26 @@ impl DocKind {
         match self {
             DocKind::Doc => if markdown { "md" } else { "xml" },
             DocKind::Board => "excalidraw",
+            DocKind::Table => "sqlite",
         }
     }
 
-    /// A library file's kind and whether it is Markdown, by its name; `None`:
-    /// not a library file (older builds skip `.excalidraw` the same way).
+    /// A library file's kind and whether it is Markdown, by its name, in any
+    /// case; Markdown by every extension 打开文件… takes. `None`: not a
+    /// library file (older builds skip `.excalidraw` the same way).
     pub fn of_name(name: &str) -> Option<(DocKind, bool)> {
-        match name.rsplit_once('.')?.1 {
+        match name.rsplit_once('.').filter(|(s, _)| !s.is_empty())?.1.to_ascii_lowercase().as_str() {
             "xml" => Some((DocKind::Doc, false)),
-            "md" => Some((DocKind::Doc, true)),
+            "md" | "markdown" | "mdown" => Some((DocKind::Doc, true)),
             "excalidraw" => Some((DocKind::Board, false)),
+            "sqlite" => Some((DocKind::Table, false)),
             _ => None,
         }
     }
 }
+
+/// A 数据表 file, by its name.
+fn table_file(p: &Path) -> bool { p.file_name().and_then(|n| n.to_str()).and_then(DocKind::of_name).is_some_and(|k| k.0 == DocKind::Table) }
 
 fn catalogue_closed_default() -> bool { true }
 
@@ -224,6 +233,14 @@ pub struct Settings {
     /// Main window size, remembered like the quick note window's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_size: Option<[f32; 2]>,
+    /// Main window position and the display it was on, so reopening returns
+    /// to the same spot. The origin is in that display's top-left coordinates,
+    /// and the display is named by its UUID — the one identifier that survives
+    /// a restart; a display that is gone makes the window re-centre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_origin: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_display: Option<String>,
     /// 阅读位置: the list offset each document was left at, so switching back
     /// returns to the same place. Kept out of `index.json`: it is window
     /// state, not document metadata.
@@ -320,7 +337,7 @@ struct Parsed { title: String, icon: Option<String>, body: std::sync::Arc<str>, 
 /// are this machine's mtimes, so it lives in the cache folder, not in the
 /// (possibly synced) library. Bump `PARSED_CACHE` when what `list` takes from
 /// a file changes; a release discards it anyway.
-const PARSED_CACHE: u32 = 1;
+const PARSED_CACHE: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct ParsedCache { version: String, docs: HashMap<PathBuf, CachedDoc> }
@@ -371,6 +388,8 @@ pub const ASSETS: &str = ".assets";
 
 #[path = "folders.rs"]
 mod folders;
+#[path = "mounts.rs"]
+mod mounts;
 
 #[derive(Serialize, Deserialize)]
 struct FormatMarker {
@@ -434,6 +453,10 @@ struct Local {
     quick_note_size: Option<[f32; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     window_size: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    window_origin: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    window_display: Option<String>,
 }
 
 /// `library.json`: where the library is when it isn't the default.
@@ -626,8 +649,11 @@ fn derive_tree(index: &mut HashMap<String, Meta>) {
     }
 }
 
-/// A doc file's extension in the library.
-fn ext_of(m: &Meta) -> &'static str { m.kind.ext(m.markdown) }
+/// A doc file's extension in the library: the one it has (`.markdown`, `.MD` …), else its kind's.
+fn ext_of(m: &Meta) -> &str {
+    let name = base_name(&m.rel);
+    match name.rsplit_once('.') { Some((_, e)) if DocKind::of_name(name) == Some((m.kind, m.markdown)) => e, _ => m.kind.ext(m.markdown) }
+}
 
 impl Store {
     /// `QUIET_MD_HOME`, else the folder picked at first launch (`library.json`
@@ -894,6 +920,7 @@ impl Store {
             let local = store.read_local();
             store.index = store.from_disk(&disk, &local);
             store.foreign = foreign_of(&disk);
+            store.refresh_mounts();
             store.load_parsed();
         }
         if let Ok(entries) = crate::vfs::read_dir(store.recovery_dir()) {
@@ -988,7 +1015,8 @@ impl Store {
     fn local_state(&self) -> Local {
         let mut local = self.read_local();
         local.opened = self.index.iter().filter(|(_, m)| m.opened > 0).map(|(k, m)| (k.clone(), m.opened)).collect();
-        local.files = self.index.iter().filter(|(_, m)| m.local()).map(|(k, m)| (k.clone(), m.clone())).collect();
+        // What is in an opened folder is read from disk, only the folder is kept.
+        local.files = self.index.iter().filter(|(_, m)| m.local() && m.parent.is_none()).map(|(k, m)| (k.clone(), m.clone())).collect();
         local
     }
 
@@ -1030,7 +1058,7 @@ impl Store {
     pub fn folder_dir(&self, id: Option<&str>) -> Option<PathBuf> {
         match id {
             None => Some(self.root.clone()),
-            Some(id) => self.index.get(id).filter(|m| m.folder.is_some()).map(|m| if self.flat { self.root.clone() } else { self.abs(&m.rel) }),
+            Some(id) => self.index.get(id).filter(|m| m.folder.is_some()).map(|m| match &m.path { Some(p) => PathBuf::from(p), None if self.flat => self.root.clone(), None => self.abs(&m.rel) }),
         }
     }
 
@@ -1087,6 +1115,7 @@ impl Store {
     /// `text` (a file's contents) as a document.
     fn parse_doc(&self, id: &str, text: &str) -> Result<Document> {
         if self.kind(id) == DocKind::Board { return crate::whiteboard::parse_file(text, &self.markdown_title(id)); }
+        if self.kind(id) == DocKind::Table { return Ok(crate::table::file_doc(&self.markdown_title(id), &self.index[id].rel)); }
         if !self.is_markdown(id) {
             let mut doc = docxml::parse(text)?;
             if text.contains("href=") { self.links_to_ids(&self.doc_dir(id), &mut doc); }
@@ -1106,6 +1135,7 @@ impl Store {
     /// it: (source, path relative to its folder).
     fn serialize_with_copies(&self, id: &str, doc: &Document, disk: Option<&str>) -> (String, Vec<(PathBuf, String)>) {
         if self.kind(id) == DocKind::Board { return (crate::whiteboard::write_file(doc), vec![]); }
+        if self.kind(id) == DocKind::Table { return (String::new(), vec![]); }
         if !self.is_markdown(id) {
             if !self.flat && !doc.doc_links().is_empty() {
                 let mut doc = doc.clone();
@@ -1148,6 +1178,7 @@ impl Store {
             let local = self.read_local();
             self.index = self.from_disk(&disk, &local);
             self.foreign = foreign_of(&disk);
+            self.carry_mounts(&before);
             self.reclaim_open(before);
         }
         if let Some(trash) = reread(&self.trash_index_file()) { self.trash = trash; }
@@ -1304,9 +1335,12 @@ impl Store {
             let parsed = match self.parsed.get(&id).filter(|c| stamp == Some((c.0, c.1))) {
                 Some(c) => c.2.clone(),
                 None => {
-                    let Ok(text) = crate::vfs::read_to_string(&p) else { continue };
-                    let doc = self.parse_doc(&id, &text).unwrap_or_default();
-                    let parsed = Parsed { title: doc.title.text.clone(), icon: doc.icon.clone(), body: doc.plain_text().into(), reminders: doc.reminders(), links: doc.doc_links() };
+                    // a 数据表 is not text: its words come from the file's cells
+                    let table = table_file(&p);
+                    let Ok(text) = (if table { Ok(String::new()) } else { crate::vfs::read_to_string(&p) }) else { continue };
+                    let doc = if table { Document::default() } else { self.parse_doc(&id, &text).unwrap_or_default() };
+                    let body = if table { crate::table::block_text(&self.root, &crate::table::TableRef::new(p.strip_prefix(&self.root).map(|r| r.to_string_lossy().into_owned()).unwrap_or_default())) } else { doc.plain_text() };
+                    let parsed = Parsed { title: doc.title.text.clone(), icon: doc.icon.clone(), body: body.into(), reminders: doc.reminders(), links: doc.doc_links() };
                     if let Some((t, len)) = stamp { self.parsed.insert(id.clone(), (t, len, parsed.clone())); }
                     parsed
                 }
@@ -1410,6 +1444,14 @@ impl Store {
             let name = title.replace(['/', '\\', ':'], "_");
             let name = name.trim().trim_start_matches('.');
             if name.is_empty() { return Ok(()); }
+            if m.folder.is_some() {
+                // A folder in (or opened as) 本机文件: renamed on disk, with what is in it.
+                let new = old.with_file_name(name);
+                if new == old || new.fs_try_exists()? { return Ok(()); }
+                crate::vfs::rename(&old, &new)?;
+                self.repath(&old, &new);
+                return Ok(());
+            }
             let ext = old.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "md".into());
             let new = old.with_file_name(format!("{name}.{ext}"));
             if new == old || new.fs_try_exists()? { return Ok(()); }
@@ -1444,7 +1486,7 @@ impl Store {
             Ok(lock) => Some(lock),
             Err(e) => { self.warnings.push(format!("无法锁定文档库：{e}")); None }
         };
-        if self.flat { return self.list_flat(_lock.is_some()); }
+        if self.flat { self.refresh_mounts(); return self.list_flat(_lock.is_some()); }
         let found = layout::scan(&self.root);
         let mut disk = self.to_disk();
         let mut keys: HashSet<String> = found.dirs.iter().map(|d| format!("{d}/")).collect();
@@ -1462,10 +1504,13 @@ impl Store {
         }
         if dirty {
             let local = self.local_state();
-            self.index = self.from_disk(&disk, &local);
+            let fresh = self.from_disk(&disk, &local);
+            let before = std::mem::replace(&mut self.index, fresh);
+            self.carry_mounts(&before);
             // Paths changed: links parsed before may point elsewhere now.
             self.parsed.clear();
         }
+        self.refresh_mounts();
         let pending: HashSet<&str> = found.pending.iter().map(String::as_str).collect();
         let mut out = vec![];
         let mut reparsed = false;
@@ -1487,9 +1532,12 @@ impl Store {
             let parsed = match self.parsed.get(&id).filter(|c| stamp == Some((c.0, c.1))) {
                 Some(c) => c.2.clone(),
                 None => {
-                    let Ok(text) = crate::vfs::read_to_string(&p) else { continue };
-                    let doc = self.parse_doc(&id, &text).unwrap_or_default();
-                    let parsed = Parsed { title: doc.title.text.clone(), icon: doc.icon.clone(), body: doc.plain_text().into(), reminders: doc.reminders(), links: doc.doc_links() };
+                    // a 数据表 is not text: its words come from the file's cells
+                    let table = table_file(&p);
+                    let Ok(text) = (if table { Ok(String::new()) } else { crate::vfs::read_to_string(&p) }) else { continue };
+                    let doc = if table { Document::default() } else { self.parse_doc(&id, &text).unwrap_or_default() };
+                    let body = if table { crate::table::block_text(&self.root, &crate::table::TableRef::new(p.strip_prefix(&self.root).map(|r| r.to_string_lossy().into_owned()).unwrap_or_default())) } else { doc.plain_text() };
+                    let parsed = Parsed { title: doc.title.text.clone(), icon: doc.icon.clone(), body: body.into(), reminders: doc.reminders(), links: doc.doc_links() };
                     if let Some((t, len)) = stamp { self.parsed.insert(id.clone(), (t, len, parsed.clone())); reparsed = true; }
                     parsed
                 }
@@ -1542,6 +1590,8 @@ impl Store {
 
     fn read_doc_text(&self, id: &str) -> Result<String> {
         let p = self.path(id);
+        // a 数据表 is not text: the table reads its own file
+        if self.kind(id) == DocKind::Table { anyhow::ensure!(p.fs_exists(), "数据表文件已不在原处，可能已被移动或删除"); return Ok(String::new()); }
         match crate::vfs::read_to_string(&p) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && layout::placeholder(&p).is_some_and(|ph| ph.fs_exists()) => {
                 if let Some(ph) = layout::placeholder(&p) { layout::download(&ph); }
@@ -1564,12 +1614,30 @@ impl Store {
         Ok(doc)
     }
 
+    /// Accept an external revision only when the caller has a clean editor.
+    pub fn refresh_markdown(&self, id: &str) -> Result<Option<Document>> {
+        if !self.is_markdown(id) { return Ok(None) }
+        let disk = self.read_doc_text(id)?;
+        if self.loaded.borrow().get(id).is_none_or(|base| base == &disk) { return Ok(None) }
+        let doc = self.parse_doc(id, &disk)?;
+        self.loaded.borrow_mut().insert(id.into(), disk);
+        Ok(Some(doc))
+    }
+
     /// Release a closed editor's conflict-detection baseline, after its last window saved.
     pub fn forget_loaded(&self, id: &str) { self.loaded.borrow_mut().remove(id); }
 
     pub fn save(&mut self, id: &str, doc: &Document) -> Result<Meta> {
         let _lock = self.begin_write()?;
         self.save_now(id, doc)
+    }
+
+    /// A live Markdown editor writes its current body even after an external save.
+    pub fn save_editor(&mut self, id: &str, doc: &Document) -> Result<Meta> {
+        let _lock = self.begin_write()?;
+        if !self.is_markdown(id) { return self.save_now(id, doc) }
+        let disk = self.read_doc_text(id)?;
+        self.write_doc_against(id, doc, Some(disk), true)
     }
 
     /// `save` for callers that already hold the write lock. A new id becomes a
@@ -1592,9 +1660,24 @@ impl Store {
     }
 
     fn write_doc(&mut self, id: &str, doc: &Document) -> Result<Meta> {
+        // A 数据表 writes its own file as it is edited; saving its page only follows the title.
+        if self.kind(id) == DocKind::Table {
+            let title = doc.title.text.trim().to_string();
+            if !title.is_empty() && title != self.markdown_title(id) && let Err(e) = self.follow_title(id, &title) { self.warnings.push(format!("未能按标题重命名文件：{e}")); }
+            let t = now();
+            let m = self.index.get_mut(id).ok_or_else(|| anyhow::anyhow!("文档不存在"))?;
+            m.modified = t;
+            let m = m.clone();
+            self.save_index()?;
+            return Ok(m);
+        }
         let disk = if self.is_markdown(id) || self.loaded.borrow().contains_key(id) { crate::vfs::read_to_string(self.path(id)).ok() } else { None };
+        self.write_doc_against(id, doc, disk, false)
+    }
+
+    fn write_doc_against(&mut self, id: &str, doc: &Document, disk: Option<String>, overwrite: bool) -> Result<Meta> {
         let (xml, copies) = self.serialize_with_copies(id, doc, disk.as_deref());
-        if let Some(previous) = self.loaded.borrow().get(id) {
+        if !overwrite && let Some(previous) = self.loaded.borrow().get(id) {
             let disk = disk.as_deref().ok_or_else(|| anyhow::anyhow!("文档文件已不在原处，可能已被移动或删除"))?;
             let message = if self.index.get(id).is_some_and(Meta::local) { "文件已在别处被修改，未覆盖磁盘内容。请另存副本或重新打开文件" } else { "文档已被另一个实例修改，未覆盖磁盘内容。请另存副本或重新载入磁盘版本" };
             anyhow::ensure!(disk == previous || disk == xml, "{message}");
@@ -1628,7 +1711,6 @@ impl Store {
                 }
             }
         }
-        self.loaded.borrow_mut().insert(id.to_string(), if same { disk.unwrap_or(xml) } else { xml });
         let title = doc.title.text.trim().to_string();
         let named = self.named_by_file(id);
         let changed = if named { title != self.markdown_title(id) } else { true };
@@ -1640,6 +1722,7 @@ impl Store {
         m.modified = t;
         let m = m.clone();
         self.save_index()?;
+        self.loaded.borrow_mut().insert(id.to_string(), if same { disk.unwrap_or(xml) } else { xml });
         Ok(m)
     }
 
@@ -1655,6 +1738,7 @@ impl Store {
     /// `create_from` into folder `parent` (`None`: the top), as its last
     /// child; the file is written there, never moved there afterwards.
     pub fn create_from_in(&mut self, doc: &Document, parent: Option<&str>) -> Result<String> {
+        if let Some(p) = parent.filter(|p| self.is_mounted(p)) { return self.create_in_mount(p, &doc.title.text, "xml", docxml::serialize(doc).as_bytes()); }
         let id = uuid::Uuid::new_v4().to_string();
         let lock = self.begin_write()?;
         self.validate_folder(None, parent)?;
@@ -1672,6 +1756,10 @@ impl Store {
 
     /// `create_markdown` into folder `parent`, like `create_from_in`.
     pub fn create_markdown_in(&mut self, doc: &Document, front: &str, parent: Option<&str>) -> Result<String> {
+        if let Some(p) = parent.filter(|p| self.is_mounted(p)) {
+            let base = self.mount_dir_of(p);
+            return self.create_in_mount(p, &doc.title.text, "md", format!("{front}{}", crate::markdown::write_file(doc, "", base.as_deref())).as_bytes());
+        }
         let id = uuid::Uuid::new_v4().to_string();
         let lock = self.begin_write()?;
         self.validate_folder(None, parent)?;
@@ -1696,6 +1784,7 @@ impl Store {
     /// A new 画板 in folder `parent`: a `.excalidraw` file named `title`, holding
     /// `board`. Only in the folder layout (the old one is migrated on open).
     pub fn create_board_in(&mut self, title: &str, board: &crate::whiteboard::Board, parent: Option<&str>) -> Result<String> {
+        if let Some(p) = parent.filter(|p| self.is_mounted(p)) { return self.create_in_mount(p, title, DocKind::Board.ext(false), board.file_json().as_bytes()); }
         anyhow::ensure!(!self.flat, "旧格式的文档库不能新建画板");
         let id = uuid::Uuid::new_v4().to_string();
         let lock = self.begin_write()?;
@@ -1710,6 +1799,60 @@ impl Store {
         self.record_file_change(&id, None);
         drop(lock);
         self.place_new(&id, parent)?;
+        Ok(id)
+    }
+
+    /// A new 数据表 in folder `parent`: a `.sqlite` file named `title`, holding
+    /// `base` (`Base::blank_named`, or an imported CSV). Only in the folder layout.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn create_table_in(&mut self, title: &str, base: &crate::table::Base, parent: Option<&str>) -> Result<String> {
+        anyhow::ensure!(!self.flat, "旧格式的文档库不能新建数据表");
+        let id = uuid::Uuid::new_v4().to_string();
+        let lock = self.begin_write()?;
+        self.validate_folder(None, parent)?;
+        let t = now();
+        let dir = self.folder_rel(parent);
+        let rel = join_rel(&dir, &self.free_name(&dir, &file_name_for(title), Some(DocKind::Table.ext(false)), None));
+        self.index.insert(id.clone(), Meta { created: t, modified: t, opened: t, rel, ..Default::default() });
+        derive_tree(&mut self.index);
+        if let Err(e) = crate::table::sqlite::create(&self.path(&id), base).and_then(|_| self.save_index()) { self.index.remove(&id); return Err(e); }
+        drop(lock);
+        self.place_new(&id, parent)?;
+        Ok(id)
+    }
+
+    /// 创建副本 of a 数据表: its file copied under `title`, beside nothing in particular (the caller places it).
+    #[cfg(not(target_family = "wasm"))]
+    pub fn copy_table(&mut self, src: &str, title: &str) -> Result<String> {
+        anyhow::ensure!(!self.flat && self.kind(src) == DocKind::Table, "不是数据表");
+        let id = uuid::Uuid::new_v4().to_string();
+        let lock = self.begin_write()?;
+        let t = now();
+        let rel = self.free_name("", &file_name_for(title), Some(DocKind::Table.ext(false)), None);
+        let from = self.path(src);
+        self.index.insert(id.clone(), Meta { created: t, modified: t, opened: t, rel, ..Default::default() });
+        derive_tree(&mut self.index);
+        if let Err(e) = crate::vfs::copy(&from, self.path(&id)).map_err(anyhow::Error::from).and_then(|_| self.save_index()) { self.index.remove(&id); return Err(e); }
+        drop(lock);
+        Ok(id)
+    }
+
+    /// 另存副本 of a 数据表's version: the snapshot's file as a new 数据表 named `title`, beside the original.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn copy_table_version(&mut self, src: &str, name: &str, title: &str) -> Result<String> {
+        anyhow::ensure!(!self.flat && self.kind(src) == DocKind::Table, "不是数据表");
+        let bytes = crate::versions::read_bytes(&self.history_base(), src, name, false)?;
+        let parent = self.index.get(src).and_then(|m| m.parent.clone());
+        let id = uuid::Uuid::new_v4().to_string();
+        let lock = self.begin_write()?;
+        let t = now();
+        let dir = self.folder_rel(parent.as_deref());
+        let rel = join_rel(&dir, &self.free_name(&dir, &file_name_for(title), Some(DocKind::Table.ext(false)), None));
+        self.index.insert(id.clone(), Meta { created: t, modified: t, opened: t, rel, ..Default::default() });
+        derive_tree(&mut self.index);
+        if let Err(e) = write_atomic(&self.path(&id), &bytes).and_then(|_| self.save_index()) { self.index.remove(&id); return Err(e); }
+        drop(lock);
+        self.place_new(&id, parent.as_deref())?;
         Ok(id)
     }
 
@@ -1753,6 +1896,12 @@ impl Store {
             self.save_local(&self.local_state())?;
             return Ok(id);
         }
+        self.refresh_mounts();
+        if let Some(id) = self.mounted_at(&path) {
+            self.index.get_mut(&id).unwrap().opened = now();
+            self.save_local(&self.local_state())?;
+            return Ok(id);
+        }
         let key = path.to_string_lossy().into_owned();
         let t = now();
         if let Some((id, m)) = self.index.iter_mut().find(|(_, m)| m.path.as_deref() == Some(key.as_str())) {
@@ -1786,8 +1935,9 @@ impl Store {
         let _lock = self.begin_write()?;
         // 本机文件: only taken off the list; the file is the user's.
         if self.index.get(id).is_some_and(Meta::local) {
-            self.index.remove(id);
+            if self.index[id].parent.is_some() { self.forget_mounted(id); } else { self.index.remove(id); }
             self.loaded.borrow_mut().remove(id);
+            self.carry_mounts(&HashMap::new());
             return self.save_index();
         }
         if !self.index.contains_key(id) && self.trash.contains_key(id) { return Ok(()); }
@@ -2053,7 +2203,11 @@ impl Store {
     }
 
     fn index_has(&self, id: &str) -> bool {
-        self.index.get(id).is_some_and(|m| if m.folder.is_some() { self.flat || self.abs(&m.rel).fs_is_dir() } else { self.path(id).fs_exists() })
+        let Some(m) = self.index.get(id) else { return false };
+        if m.folder.is_some() { return self.flat || self.abs(&m.rel).fs_is_dir() }
+        #[cfg(test)]
+        crate::store::DISK_LOOKUPS.with(|n| n.set(n.get() + 1));
+        self.path(id).fs_exists()
     }
 
     /// 彻底删除 a page from the 回收站, with the pages that went with it.
@@ -2116,10 +2270,37 @@ impl Store {
 
     pub fn delete_version(&self, id: &str, name: &str) -> Result<()> { crate::versions::remove(&self.history_base(), id, name, false) }
 
-    /// Parse a snapshot into a document, for 另存副本.
+    /// Parse a snapshot into a document, for 另存副本. A 数据表's is its page
+    /// showing the snapshot file itself (which opens read-only, being history).
     pub fn version_document(&self, id: &str, name: &str) -> Result<Document> {
+        if self.kind(id) == DocKind::Table {
+            let p = crate::versions::path(&self.history_base(), id, name, false)?;
+            anyhow::ensure!(p.fs_exists(), "历史版本已不存在");
+            let rel = p.strip_prefix(&self.root).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+            return Ok(crate::table::file_doc(&self.markdown_title(id), &rel));
+        }
         let text = self.version_text(id, name)?;
         self.parse_doc(id, &text)
+    }
+
+    /// A 数据表's file kept as a version: `force` is 保存当前版本 (no interval;
+    /// the same file as the newest version still adds nothing).
+    #[cfg(not(target_family = "wasm"))]
+    pub fn snapshot_table(&self, id: &str, force: bool) -> Result<bool> {
+        anyhow::ensure!(self.kind(id) == DocKind::Table, "不是数据表");
+        let bytes = crate::vfs::read(self.path(id))?;
+        let before = self.versions(id).first().map(|v| v.name.clone());
+        crate::versions::snapshot_bytes(&self.history_base(), id, "sqlite", &bytes, crate::time::now_ms(), self.settings().history_limit(), force)?;
+        Ok(self.versions(id).first().map(|v| v.name.clone()) != before)
+    }
+
+    /// The text a version's changes are counted on: a 数据表's rows as lines.
+    fn version_body(&self, id: &str, name: Option<&str>) -> Result<String> {
+        if self.kind(id) == DocKind::Table {
+            let p = match name { Some(n) => crate::versions::path(&self.history_base(), id, n, false)?, None => self.path(id) };
+            return Ok(crate::table::diff_text(&p));
+        }
+        match name { Some(n) => self.version_text(id, n), None => Ok(crate::vfs::read_to_string(self.path(id))?) }
     }
 
     /// Diff a snapshot against a baseline. `None` is the document on disk
@@ -2127,11 +2308,11 @@ impl Store {
     /// so `-` is always "only in the earlier version". The unchanged lines
     /// are kept, so the same list doubles as a read-only preview.
     pub fn version_diff(&self, id: &str, name: &str, baseline: Option<&str>) -> Result<Vec<crate::diff::Line>> {
-        let a = self.version_text(id, name)?;
+        let a = self.version_body(id, Some(name))?;
         let a_ms = crate::versions::stamp(name).unwrap_or(0);
         let (b, b_ms) = match baseline {
-            Some(other) => (self.version_text(id, other)?, crate::versions::stamp(other).unwrap_or(0)),
-            None => (crate::vfs::read_to_string(self.path(id))?, u64::MAX),
+            Some(other) => (self.version_body(id, Some(other))?, crate::versions::stamp(other).unwrap_or(0)),
+            None => (self.version_body(id, None)?, u64::MAX),
         };
         let (old, new) = if a_ms <= b_ms { (a.as_str(), b.as_str()) } else { (b.as_str(), a.as_str()) };
         Ok(crate::diff::diff(old, new, self.is_markdown(id)))
@@ -2145,6 +2326,13 @@ impl Store {
     /// Restore never loses the present: the current on-disk text becomes a
     /// snapshot first, then the chosen version is parsed for `save` to write.
     pub fn restore_version(&self, id: &str, name: &str) -> Result<Document> {
+        // a 数据表: its file now kept as a version, then the version's file put in its place
+        if self.kind(id) == DocKind::Table {
+            let bytes = crate::versions::read_bytes(&self.history_base(), id, name, false)?;
+            let _ = self.snapshot_table(id, true);
+            write_atomic(&self.path(id), &bytes)?;
+            return Ok(crate::table::file_doc(&self.markdown_title(id), &self.index[id].rel));
+        }
         let text = self.version_text(id, name)?;
         let current = crate::vfs::read_to_string(self.path(id)).unwrap_or_default();
         let ext = if self.is_markdown(id) { "md" } else { "xml" };
@@ -2156,6 +2344,7 @@ impl Store {
     /// `false` means the text matched the newest snapshot, so nothing was
     /// written — the caller can say so instead of silently doing nothing.
     pub fn save_version_now(&self, id: &str) -> Result<bool> {
+        if self.kind(id) == DocKind::Table { return self.snapshot_table(id, true); }
         let text = crate::vfs::read_to_string(self.path(id))?;
         let ext = if self.is_markdown(id) { "md" } else { "xml" };
         let before = self.versions(id).len();
@@ -2167,6 +2356,8 @@ impl Store {
         if self.flat { return reread(&self.internal().join("settings.json")).unwrap_or_default(); }
         let mut s: Settings = reread(&self.internal().join("settings.json")).unwrap_or_default();
         let local = self.read_local();
+        s.window_origin = local.window_origin;
+        s.window_display = local.window_display;
         s.window_size = local.window_size;
         s.quick_note_size = local.quick_note_size;
         s
@@ -2175,9 +2366,11 @@ impl Store {
     pub fn save_settings(&self, s: &Settings) -> Result<()> {
         if self.flat { return write_atomic(&self.internal().join("settings.json"), &serde_json::to_vec_pretty(s)?); }
         let mut local = self.read_local();
+        local.window_origin = s.window_origin;
+        local.window_display.clone_from(&s.window_display);
         (local.window_size, local.quick_note_size) = (s.window_size, s.quick_note_size);
         self.save_local(&local)?;
-        let shared = Settings { window_size: None, quick_note_size: None, ..s.clone() };
+        let shared = Settings { window_origin: None, window_display: None, window_size: None, quick_note_size: None, ..s.clone() };
         crate::vfs::create_dir_all(self.internal())?;
         write_atomic(&self.internal().join("settings.json"), &serde_json::to_vec_pretty(&shared)?)
     }
@@ -2263,6 +2456,14 @@ impl Store {
 }
 
 #[cfg(test)]
+thread_local! {
+    /// Disk existence checks performed by `index_has`; compiled only in tests,
+    /// to keep imports O(N) instead of O(N × library) (#216). Per thread:
+    /// tests run in parallel and each counts only its own lookups.
+    pub(crate) static DISK_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -2293,6 +2494,23 @@ mod tests {
 
     fn doc(title: &str) -> Document {
         Document { title: crate::model::RichText::plain(title), ..Default::default() }
+    }
+
+    /// #216: importing N files must stay O(N) disk checks — the per-file
+    /// drop used to stat every entry of the library through `move_in_tree`.
+    #[test]
+    fn importing_files_does_not_walk_the_library() {
+        let lib = Lib::new("import-walk");
+        let mut store = lib.open();
+        let folder = store.create_folder("imported", None).unwrap();
+        for _ in 0..30 { store.create_from(&doc("background")).unwrap(); }
+        DISK_LOOKUPS.with(|n| n.set(0));
+        for _ in 0..10 {
+            let id = store.create_from(&doc("page")).unwrap();
+            store.set_parent(&id, Some(&folder)).unwrap();
+        }
+        let looked = DISK_LOOKUPS.with(|n| n.get());
+        assert!(looked <= 20, "10 imports made {looked} disk checks, not O(N)");
     }
 
     fn doc_with(title: &str, body: &str) -> Document {
@@ -2562,6 +2780,25 @@ mod tests {
     }
 
     #[test]
+    fn markdown_editor_uses_the_last_saved_body() {
+        let lib = Lib::new("markdown-external-save");
+        let mut s = lib.open();
+        let file = lib.0.join("note.md");
+        crate::vfs::write(&file, "original\n").unwrap();
+        let id = s.open_local(&file).unwrap();
+        let mut editor = s.load_for_edit(&id, false).unwrap();
+        editor.blocks = vec![crate::model::Block::text("from the editor")];
+        crate::vfs::write(&file, "from another app\n").unwrap();
+        s.save_editor(&id, &editor).unwrap();
+        assert_eq!(crate::vfs::read_to_string(&file).unwrap(), "from the editor\n");
+        assert!(s.refresh_markdown(&id).unwrap().is_none());
+        crate::vfs::write(&file, "saved after the editor\n").unwrap();
+        let refreshed = s.refresh_markdown(&id).unwrap().unwrap();
+        assert_eq!(refreshed.blocks[0].text.text, "saved after the editor");
+        assert!(s.refresh_markdown(&id).unwrap().is_none());
+    }
+
+    #[test]
     fn local_files_are_edited_in_place_and_never_trashed() {
         let lib = Lib::new("local");
         let dir = lib.0.join("outside");
@@ -2594,6 +2831,82 @@ mod tests {
         s.delete(&id, None).unwrap();
         assert!(renamed.fs_is_file());
         assert!(s.list().iter().all(|e| e.id != id));
+        assert!(s.list_trash().is_empty());
+    }
+
+    /// 本机文件夹: a folder opened where it is lists what is in it, keeps
+    /// the ids across launches, follows the Finder, and its notes are made,
+    /// renamed and moved on disk; forgetting it leaves every file alone.
+    #[test]
+    fn folders_open_where_they_are() {
+        let lib = Lib::new("mount-lib");
+        let away = Lib::new("mount-away");
+        let vault = away.0.join("Vault");
+        crate::vfs::create_dir_all(vault.join("日记/2026")).unwrap();
+        crate::vfs::write(vault.join("首页.md"), "# 首页\n").unwrap();
+        crate::vfs::write(vault.join("日记/2026/一月.markdown"), "冷\n").unwrap();
+        crate::vfs::write(vault.join("图.png"), "").unwrap();
+        crate::vfs::create_dir_all(vault.join(".obsidian")).unwrap();
+        crate::vfs::write(vault.join(".obsidian/app.md"), "x").unwrap();
+        let mut s = lib.open();
+        let root = s.mount(&vault).unwrap();
+        assert_eq!(s.mount(&vault).unwrap(), root, "opened once");
+        let list = s.list();
+        let by = |list: &[Entry], t: &str| list.iter().find(|e| e.title == t).cloned().unwrap_or_else(|| panic!("{t} not in {:?}", list.iter().map(|e| &e.title).collect::<Vec<_>>()));
+        let r = by(&list, "Vault");
+        assert!(r.meta.folder.is_some() && r.meta.parent.is_none() && r.meta.mounted());
+        let jan = by(&list, "一月");
+        assert!(jan.meta.markdown && jan.meta.mounted());
+        assert_eq!(folders_of(&list, &jan.id), ["Vault", "日记", "2026"]);
+        assert_eq!(list.iter().filter(|e| e.meta.mounted()).count(), 5, "the folder, 日记, 2026, 首页, 一月");
+        assert_eq!(s.mount(&vault.join("日记")).unwrap(), by(&list, "日记").id, "a folder inside is that entry");
+        assert_eq!(s.open_local(&vault.join("首页.md")).unwrap(), by(&list, "首页").id, "and so is a file");
+        // A write re-reads the index from disk: the folder's entries stay.
+        let note = s.create_from(&doc("库里")).unwrap();
+        s.rename(&note, "库里的").unwrap();
+        assert!(s.is_mounted(&jan.id));
+        // Ids follow paths, across launches.
+        drop(s);
+        let mut s = lib.open();
+        let list = s.list();
+        assert_eq!(by(&list, "一月").id, jan.id);
+        // The Finder: new folders and files show, removed ones go.
+        crate::vfs::create_dir_all(vault.join("新夹")).unwrap();
+        crate::vfs::write(vault.join("新夹/新.md"), "x\n").unwrap();
+        crate::vfs::remove_file(vault.join("首页.md")).unwrap();
+        let list = s.list();
+        assert_eq!(folders_of(&list, &by(&list, "新").id), ["Vault", "新夹"]);
+        assert!(list.iter().all(|e| e.title != "首页"));
+        // Made, renamed and moved on disk; an id stays through a rename.
+        let diary = by(&list, "日记").id;
+        let made = s.create_markdown_in(&doc("周记"), "", Some(&diary)).unwrap();
+        assert!(vault.join("日记/周记.md").fs_is_file());
+        let sub = s.create_folder("草稿", Some(&diary)).unwrap();
+        assert!(vault.join("日记/草稿").fs_is_dir());
+        s.rename(&made, "周报").unwrap();
+        assert!(vault.join("日记/周报.md").fs_is_file() && !vault.join("日记/周记.md").fs_exists());
+        s.set_parent(&made, Some(&sub)).unwrap();
+        assert!(vault.join("日记/草稿/周报.md").fs_is_file());
+        s.rename(&diary, "随笔").unwrap();
+        assert!(vault.join("随笔/草稿/周报.md").fs_is_file());
+        let list = s.list();
+        assert_eq!(folders_of(&list, &made), ["Vault", "随笔", "草稿"]);
+        assert_eq!(by(&list, "周报").id, made);
+        assert!(s.load(&made).is_ok());
+        // Between the library and an opened folder only copies go.
+        assert!(s.set_parent(&made, None).is_err());
+        assert!(s.set_parent(&note, Some(&sub)).is_err());
+        // Inside the library, or around it: not opened.
+        assert!(s.mount(&lib.0).is_err());
+        assert!(s.mount(&away.0).is_ok_and(|outer| outer != root), "an outer folder takes the inner one in");
+        let list = s.list();
+        assert!(list.iter().find(|e| e.id == root).is_some_and(|e| e.meta.parent.is_some()), "the inner folder is in it, same id");
+        assert_eq!(folders_of(&list, &made)[1..], ["Vault", "随笔", "草稿"]);
+        // Forgotten: off the list, every file where it was.
+        let outer = list.iter().find(|e| e.meta.mounted() && e.meta.parent.is_none()).unwrap().id.clone();
+        s.delete(&outer, None).unwrap();
+        assert!(s.list().iter().all(|e| !e.meta.mounted()));
+        assert!(vault.join("随笔/草稿/周报.md").fs_is_file() && !vault.join("日记").fs_exists());
         assert!(s.list_trash().is_empty());
     }
 
@@ -3298,6 +3611,31 @@ mod tests {
         assert!(!a2.meta.pinned, "attached information is lost, nothing else");
         assert_eq!(folders_of(&list, &b2.id), ["夹"]);
         assert_eq!(targets(b2), std::slice::from_ref(&a2.id));
+    }
+
+    /// Markdown by any name 打开文件… takes (`.markdown`, `.mdown`, `.MD`)
+    /// shows too, and keeps its extension when the title renames it.
+    #[test]
+    fn markdown_by_any_extension() {
+        let lib = Lib::new("exts");
+        let mut s = lib.open();
+        for name in ["夹/长.markdown", "短.mdown", "大写.MD", "文.XML.txt", "无名/.markdown"] {
+            std::fs::create_dir_all(lib.0.join(name).parent().unwrap()).unwrap();
+            std::fs::write(lib.0.join(name), "# x\n").unwrap();
+        }
+        std::fs::write(lib.0.join(".云端.markdown.icloud"), "").unwrap();
+        let list = s.list();
+        let mut titles: Vec<_> = list.iter().filter(|e| e.meta.folder.is_none()).map(|e| (e.title.as_str(), e.meta.markdown)).collect();
+        titles.sort();
+        assert_eq!(titles, [("云端", true), ("大写", true), ("短", true), ("长", true)]);
+        let long = list.iter().find(|e| e.title == "长").unwrap().id.clone();
+        assert_eq!(folders_of(&list, &long), ["夹"]);
+        s.rename(&long, "更长").unwrap();
+        assert!(lib.0.join("夹/更长.markdown").is_file() && !lib.0.join("夹/长.markdown").exists());
+        let upper = list.iter().find(|e| e.title == "大写").unwrap().id.clone();
+        s.rename(&upper, "小写").unwrap();
+        let names: Vec<String> = std::fs::read_dir(&lib.0).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert!(names.iter().any(|n| n == "小写.MD"), "{names:?}");
     }
 
     /// A folder deleted first takes what is in it along; deleting those

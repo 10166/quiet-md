@@ -56,8 +56,30 @@ const STARRED_COLS: [Col; 4] = [Col::Modified, Col::Created, Col::Visited, Col::
 
 /// Bounded document trees retain formatting without retaining a whole long document.
 type EquationNumbers = HashMap<crate::model::BlockId, u32>;
-struct ThumbContent { blocks: Vec<crate::model::Block>, eqnos: EquationNumbers, has_subpages: bool }
+/// `tables`: the 数据表 files the page shows (their rows drawn in the card), saved apart from the page.
+struct ThumbContent { blocks: Vec<crate::model::Block>, eqnos: EquationNumbers, has_subpages: bool, tables: Vec<String> }
 type Thumb = Rc<ThumbContent>;
+
+/// The files of the 数据表 blocks in `blocks`, at any depth.
+fn table_srcs(blocks: &[crate::model::Block], out: &mut Vec<String>) {
+    for b in blocks {
+        match &b.kind {
+            BlockKind::DataTable(t) => out.push(t.src.clone()),
+            BlockKind::Table(t) => for cell in t.rows.iter().flatten() { table_srcs(&cell.blocks, out) },
+            _ => {}
+        }
+        table_srcs(&b.children, out);
+    }
+}
+
+/// When the files in `srcs` (relative to the library) last changed, as one number.
+fn tables_time(srcs: &[String]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = rustc_hash::FxHasher::default();
+    let root = crate::store::Store::root_dir();
+    for s in srcs { std::fs::metadata(root.join(s)).and_then(|m| m.modified()).ok().hash(&mut h); }
+    h.finish()
+}
 
 fn has_subpage_list(blocks: &[crate::model::Block]) -> bool {
     blocks.iter().any(|b| match &b.kind {
@@ -99,6 +121,16 @@ fn thumb_blocks(blocks: &[crate::model::Block], budget: &mut usize, depth: usize
                 kind
             }
             BlockKind::Raw { tag, .. } => BlockKind::Raw { tag: tag.clone(), xml: String::new() },
+            // a 数据表 (a table file's card, or one in a page): its first rows and columns as a table, header first
+            BlockKind::DataTable(r) => {
+                let grid = fdl_core::table::block_grid(&crate::store::Store::root_dir(), r);
+                let (nr, nc) = (grid.len().min(9), grid.first().map_or(0, |h| h.len().min(5)));
+                if nr == 0 || nc == 0 { BlockKind::Table(crate::model::Table { col_widths: vec![], header_rows: 0, header_col: false, rows: vec![] }) } else {
+                    let cell = |s: &str| crate::model::TableCell { blocks: vec![crate::model::Block::text(s)], ..crate::model::TableCell::empty() };
+                    let rows = grid.iter().take(nr).map(|row| (0..nc).map(|c| cell(row.get(c).map_or("", |s| s.as_str()))).collect()).collect();
+                    BlockKind::Table(crate::model::Table { col_widths: vec![crate::model::Table::DEFAULT_WIDTH * 1.4; nc], header_rows: 1, header_col: false, rows })
+                }
+            }
             kind => kind.clone(),
         };
         let text = b.text.slice(0..end);
@@ -453,7 +485,8 @@ impl Workspace {
 
     /// One level of the tree as 主页 shows it (a folder's page uses it too).
     pub(crate) fn level_entries(&self, parent: Option<&str>) -> Vec<Entry> {
-        self.sorted_entries(self.entries.iter().filter(|e| e.meta.parent.as_deref() == parent).cloned().collect())
+        // Folders under 本机文件 aren't the library's: not on its top level.
+        self.sorted_entries(self.entries.iter().filter(|e| e.meta.parent.as_deref() == parent && !(parent.is_none() && e.meta.mounted())).cloned().collect())
     }
 
     pub(crate) fn prepare_manual_order(&mut self, cx: &mut Context<Self>) -> bool {
@@ -488,6 +521,13 @@ impl Workspace {
         let mut stamp = rustc_hash::FxHasher::default();
         e.meta.modified.hash(&mut stamp);
         crate::settings::feishu().hash(&mut stamp);
+        // a 数据表's rows live in its file, saved apart from the index: its time is the card's too
+        let file_time = (e.meta.kind == crate::store::DocKind::Table).then(|| self.store.file_path(&e.id).and_then(|p| std::fs::metadata(p).ok()?.modified().ok())).flatten();
+        file_time.hash(&mut stamp);
+        // and a page's embedded tables: a row changed there redraws the card
+        let cached_tables = self.home.thumbs.borrow().get(&e.id).map(|(_, t, _)| tables_time(&t.tables)).unwrap_or(0);
+        let mut page_stamp = stamp.clone();
+        cached_tables.hash(&mut stamp);
         let base_stamp = stamp.finish();
         // If the preview contains no sibling subpages, modified + settings uniquely
         // identifies it without rebuilding the whole tree on every frame.
@@ -499,8 +539,11 @@ impl Workspace {
         let children: Vec<&Entry> = tree.children(e.meta.parent.as_deref()).iter().copied().filter(|p| p.id != e.id).collect();
         let mut full_stamp = rustc_hash::FxHasher::default();
         e.meta.modified.hash(&mut full_stamp);
+        file_time.hash(&mut full_stamp);
         crate::settings::feishu().hash(&mut full_stamp);
         for child in &children { (&child.id, &child.title, &child.icon).hash(&mut full_stamp); }
+        let mut children_stamp = full_stamp.clone();
+        cached_tables.hash(&mut full_stamp);
         let full_stamp = full_stamp.finish();
         if let Some((m, t, used)) = self.home.thumbs.borrow_mut().get_mut(&e.id)
             && *m == full_stamp { *used = web_time::Instant::now(); return t.clone(); }
@@ -518,16 +561,21 @@ impl Workspace {
         }
         let mut budget = 32;
         let mut eqnos = HashMap::new();
-        let loaded = self.store.load(&e.id).map(|doc| {
-            let numbers = crate::editor::equation_numbers(&doc);
+        let doc = self.store.load(&e.id);
+        let loaded = doc.as_ref().map(|doc| {
+            let numbers = crate::editor::equation_numbers(doc);
             thumb_blocks(&doc.blocks, &mut budget, 0, &numbers, &mut eqnos)
         });
         let read = loaded.is_ok();
         let mut blocks = loaded.unwrap_or_default();
         let has_subpages = has_subpage_list(&blocks);
         if has_subpages { subpages(&mut blocks, &children, &mut budget); }
-        let stamp = if has_subpages { full_stamp } else { base_stamp };
-        let t: Thumb = Rc::new(ThumbContent { blocks, eqnos, has_subpages });
+        let mut tables = vec![];
+        if let Ok(doc) = &doc { table_srcs(&doc.blocks, &mut tables); }
+        // stamped with the tables just found, so the next frame finds it
+        let tt = tables_time(&tables);
+        let stamp = if has_subpages { tt.hash(&mut children_stamp); children_stamp.finish() } else { tt.hash(&mut page_stamp); page_stamp.finish() };
+        let t: Thumb = Rc::new(ThumbContent { blocks, eqnos, has_subpages, tables });
         // A failed read (mid-write by another process, still in iCloud) is not
         // remembered: the card would stay blank until the document changes.
         if !read { return t; }
@@ -709,7 +757,9 @@ impl Workspace {
                 .child(text_btn("home-batch-exit", "x", crate::settings::text("退出"), true).ml(px(8.))
                     .tip(crate::settings::text("退出批量操作"), None)
                     .on_click(cx.listener(|w, _, _, cx| { w.batch = None; w.row_menu = None; cx.notify(); })))
-        } else { toolbar
+        } else { // Menu state at render: the popover's outside-press handler clears it on mouse-down, before a click
+            // would fire, so toggle on mouse-down from this snapshot.
+            let sort_open = self.home.sort_menu; toolbar
             .child(tab("home-tab-recent", crate::settings::text("我的文档"), HomeTab::Recent))
             .child(tab("home-tab-star", crate::settings::text("收藏"), HomeTab::Starred))
             .child(div().flex_1())
@@ -721,7 +771,7 @@ impl Workspace {
                     .hover(|s| s.bg(Theme::fill_hover())).when(self.home.sort_menu, |d| d.bg(Theme::fill_hover_strong()))
                     .child(icon("sort-down", 14., Theme::icon())).child(crate::settings::label(self.home.sort.label()))
                     .child(self.home.track("home-sort"))
-                    .on_click(cx.listener(|w, _, _, cx| { w.home.sort_menu = !w.home.sort_menu; cx.notify(); })),
+                    .on_mouse_down(MouseButton::Left, cx.listener(move |w, _, _, cx| { cx.stop_propagation(); w.home.sort_menu = !sort_open; cx.notify(); })),
             )
             .child(self.view_switch(cx).ml(px(16.))
             ) };
@@ -770,6 +820,7 @@ impl Workspace {
             );
         for c in &cols {
             let sorted = !matches!(self.home.sort, HomeSort::Title | HomeSort::Manual) && *c == sort;
+            let sort_open = self.home.sort_menu;
             header = header.child(
                 col_cell().pl(px(20.)).child(
                     div()
@@ -790,8 +841,9 @@ impl Workspace {
                         .when(sorted, |d| {
                             d.child(icon("sort-down", 12., Theme::icon()))
                                 .cursor_pointer()
-                                .on_click(cx.listener(|w, _, _, cx| {
-                                    w.home.sort_menu = !w.home.sort_menu;
+                                .on_mouse_down(MouseButton::Left, cx.listener(move |w, _, _, cx| {
+                                    cx.stop_propagation();
+                                    w.home.sort_menu = !sort_open;
                                     cx.notify();
                                 }))
                         }),
@@ -877,14 +929,17 @@ impl Workspace {
             }).collect()
         }))
         // The last row's own 16 plus 32 more: 48 below the cards at the end,
-        // clear of the window's rounded corner.
+        // clear of the window's rounded corner. (32: GPUI 0.2's uniform_list
+        // counted its padding twice, and the cards end where that put them.)
         // The top padding sits inside the list's clip, so a folder's papers can
-        // rise above the first row without being cut off. (28 and 32: GPUI
-        // 0.2's uniform_list counted its padding twice, and the cards sit and
-        // end where that put them.)
-        .flex_1().min_h_0().pt(px(28.)).pb(px(32.)).track_scroll(grid_scroll);
+        // rise above the first row without being cut off — and that clip line is
+        // where a row scrolling out of sight stops. It used to sit 4pt higher,
+        // the list lifted into the tab row above it, so a scrolling row drew over
+        // 我的文档 / 收藏 and the buttons beside them (#238). 28 under that lift is
+        // 24 without it: the cards stay exactly where they were.
+        .flex_1().min_h_0().pt(px(24.)).pb(px(32.)).track_scroll(grid_scroll);
         let scroll = grid_scroll.0.borrow().base_handle.clone();
-        div().relative().flex_1().min_h_0().mt(px(-4.)).flex().flex_col()
+        div().relative().flex_1().min_h_0().flex().flex_col()
             .on_mouse_move(cx.listener(|w, ev: &MouseMoveEvent, _, cx| w.track_home_press(ev, cx)))
             .child(grid).child(self.home.grid_scrollbar.render(&scroll)).into_any_element()
     }
@@ -989,7 +1044,7 @@ impl Workspace {
         };
         if self.home.sort_menu
             && let Some(b) = self.home.anchor("home-sort") {
-                let mut menu = popover().id("sort-menu").occlude().w(px(200.)).py(px(crate::ui::MENU_PAD_Y))
+                let mut menu = popover().id("sort-menu").occlude().min_w(px(200.)).py(px(crate::ui::MENU_PAD_Y))
                     .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.home.sort_menu = false; cx.notify(); }));
                 for (index, order) in [HomeSort::Manual, HomeSort::Visited, HomeSort::Modified, HomeSort::Created, HomeSort::Title].into_iter().enumerate() {
                     let g = SharedString::from(format!("home-order-{index}"));

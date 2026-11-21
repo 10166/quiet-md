@@ -31,6 +31,7 @@ impl Store {
     }
 
     pub fn create_folder(&mut self, title: &str, parent: Option<&str>) -> Result<String> {
+        if let Some(p) = parent.filter(|p| self.is_mounted(p)) { return self.create_folder_in_mount(p, title); }
         let _lock = self.begin_write()?;
         self.validate_folder(None, parent)?;
         let id = uuid::Uuid::new_v4().to_string();
@@ -81,6 +82,12 @@ impl Store {
 
     /// Persist one drop atomically; neither document content nor timestamps change.
     pub fn move_in_tree(&mut self, id: &str, parent: Option<&str>, before: Option<&str>) -> Result<()> {
+        // 本机文件夹: moves stay among them, on disk.
+        match (self.is_mounted(id), parent.is_some_and(|p| self.is_mounted(p))) {
+            (true, true) => return self.move_in_mount(id, parent.unwrap()),
+            (false, false) => {}
+            _ => anyhow::bail!("本机文件夹和文档库之间只能复制，不能移动"),
+        }
         let _lock = self.begin_write()?;
         anyhow::ensure!(self.index_has(id), "文档或文件夹不存在");
         self.validate_folder(Some(id), parent)?;
@@ -88,7 +95,10 @@ impl Store {
             anyhow::ensure!(self.index.get(anchor).is_some_and(|m| m.parent.as_deref() == parent) && self.index_has(anchor), "目标位置已改变，请重试");
             if anchor == id { return Ok(()); }
         }
-        let mut siblings: Vec<String> = self.index.iter().filter(|(k, m)| m.parent.as_deref() == parent && self.index_has(k)).map(|(k, _)| k.clone()).collect();
+        // Siblings straight from the index: a disk check per entry made an
+        // import of N files walk the whole library N times (#216); entries
+        // whose file vanished stay unlisted in `list` either way.
+        let mut siblings: Vec<String> = self.index.iter().filter(|(_, m)| m.parent.as_deref() == parent).map(|(k, _)| k.clone()).collect();
         // The sidebar's order (`Meta::place`, ties by id), so the numbers written
         // here match the order the drop was made in.
         siblings.sort_by(|ka, kb| (self.index[ka].place(), ka).cmp(&(self.index[kb].place(), kb)));

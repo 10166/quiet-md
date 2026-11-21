@@ -174,6 +174,8 @@ impl Writer<'_> {
                 }
                 None => bd.plain_text().lines().map(escape).collect::<Vec<_>>().join("<br>"),
             },
+            // A 数据表: the shown view as a Markdown table.
+            BlockKind::DataTable(t) => crate::table::block_markdown(&self.opts.library_root.map(Path::to_path_buf).unwrap_or_else(crate::store::Store::root_dir), t),
             BlockKind::File(f) => self.file_link(f).map(|url| format!("[{}]({url})", escape(&f.name))).unwrap_or_else(|| escape(&f.name)),
             BlockKind::SubPageList => {
                 self.opts.sub_pages.iter().map(|t| format!("- {}", escape(&crate::model::display_title(t)))).collect::<Vec<_>>().join("\n")
@@ -360,9 +362,16 @@ pub fn wiki_images(blocks: &mut [Block], page_dir: &Path, root: Option<&Path>) {
         let found = [Some(page_dir), attachments.as_deref(), vault].into_iter().flatten().map(|d| d.join(p)).find(|p| p.fs_is_file());
         found.or_else(|| {
             let v = vault?;
+            let key = p.file_name()?.to_string_lossy().to_lowercase();
             let names = by_name.get_or_insert_with(|| vault_names(v));
-            let names: &Names = names;
-            match names.get(&p.file_name()?.to_string_lossy().to_lowercase())?.as_slice() { [one] => Some(one.clone()), _ => None }
+            // A name the folders a person sees have nothing for is looked for
+            // in the hidden ones (#227); one they do have stays decided by
+            // them, so a copy in `.cache` cannot make it ambiguous.
+            match names.get(&key).map(Vec::as_slice) {
+                Some([one]) => Some(one.clone()),
+                Some(_) => None,
+                None => match hidden_names(v).get(&key)?.as_slice() { [one] => Some(one.clone()), _ => None },
+            }
         })
     });
 }
@@ -397,24 +406,50 @@ fn vault_names(vault: &Path) -> std::sync::Arc<Names> {
     static LAST: std::sync::Mutex<Option<(PathBuf, web_time::Instant, std::sync::Arc<Names>)>> = std::sync::Mutex::new(None);
     let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((v, t, n)) = &*last && v == vault && t.elapsed().as_secs() < 60 { return n.clone(); }
-    let n = std::sync::Arc::new(walk_names(vault));
+    let n = std::sync::Arc::new(walk_names(vault, false));
     *last = Some((vault.to_path_buf(), web_time::Instant::now(), n.clone()));
     n
 }
 
-fn walk_names(vault: &Path) -> Names {
-    let (mut out, mut stack, mut seen) = (Names::new(), vec![vault.to_path_buf()], 0);
-    while let Some(d) = stack.pop() {
+/// The same index for the folders the walk above does not go into (#227): a
+/// vault may keep every picture in `.attachments` and configure nothing, and
+/// `![[name.png]]` still means that file. Asked only for a name the visible
+/// folders have nothing for — never to decide one they do have — so a copy in
+/// `.cache` or `.stversions` cannot turn a picture that resolved into an
+/// ambiguous one. Its own 50 000-entry cap. Kept a minute, like the walk above.
+fn hidden_names(vault: &Path) -> std::sync::Arc<Names> {
+    static LAST: std::sync::Mutex<Option<(PathBuf, web_time::Instant, std::sync::Arc<Names>)>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((v, t, n)) = &*last && v == vault && t.elapsed().as_secs() < 60 { return n.clone(); }
+    let n = std::sync::Arc::new(walk_names(vault, true));
+    *last = Some((vault.to_path_buf(), web_time::Instant::now(), n.clone()));
+    n
+}
+
+/// Folders that hold an app's own files, never a vault's attachments: the
+/// editor's configuration and local trash, a repository's, this app's library.
+const INTERNAL_FOLDERS: [&str; 5] = [".obsidian", ".trash", ".git", ".quiet", ".assets"];
+
+/// `vault` by name. `hidden`: go into the dot-folders the first pass skips,
+/// an app's own ones aside. A file whose own name starts with `.` is not a
+/// picture anyone wrote, in either pass.
+fn walk_names(vault: &Path, hidden: bool) -> Names {
+    // `inside`: this folder sits below a hidden one, so what it holds is that
+    // folder's content and is walked whatever its own name.
+    let (mut out, mut stack, mut seen) = (Names::new(), vec![(vault.to_path_buf(), false)], 0);
+    while let Some((d, inside)) = stack.pop() {
         let Ok(rd) = crate::vfs::read_dir(&d) else { continue };
         for e in rd.flatten() {
             seen += 1;
             if seen > 50_000 { return out; }
             let name = e.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') { continue; }
-            match e.file_type() {
-                Ok(t) if t.fs_is_dir() => stack.push(e.path()),
-                Ok(t) if t.fs_is_file() => out.entry(name.to_lowercase()).or_default().push(e.path()),
-                _ => {}
+            let dotted = name.starts_with('.');
+            let Ok(kind) = e.file_type() else { continue };
+            if kind.fs_is_dir() {
+                let enter = inside || if dotted { hidden && !INTERNAL_FOLDERS.contains(&name.to_ascii_lowercase().as_str()) } else { !hidden };
+                if enter { stack.push((e.path(), inside || dotted)); }
+            } else if kind.fs_is_file() && !dotted {
+                out.entry(name.to_lowercase()).or_default().push(e.path());
             }
         }
     }
@@ -693,7 +728,7 @@ fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) ->
             strike: m.strike,
             underline: m.underline,
             code: m.code,
-            link: file_link.or_else(|| m.link.clone().filter(|url| crate::paste::link_ok(url))),
+            link: file_link.or_else(|| m.link.clone().filter(|url| crate::paste::link_ok(url) || crate::paste::relative_link(url) || url.starts_with("quiet-wiki:"))),
             math: m.inline.as_ref().and_then(Inline::equation).is_some(),
         };
         match runs.last_mut() {
@@ -704,6 +739,12 @@ fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) ->
     let mut out = String::new();
     for (m, s) in runs {
         if s.is_empty() {
+            continue;
+        }
+        if let Some(raw) = m.link.as_deref().and_then(|l| l.strip_prefix("quiet-wiki:")) {
+            let (target, label) = raw.split_once('|').unwrap_or((raw, raw));
+            if s == label { out.push_str(&format!("[[{raw}]]")); }
+            else { out.push_str(&format!("[[{target}|{s}]]")); }
             continue;
         }
         // Emphasis markers must hug the text: keep outer spaces outside.
@@ -722,7 +763,16 @@ fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) ->
             let tick = if body.contains('`') { "``" } else { "`" };
             format!("{tick}{body}{tick}")
         } else {
-            escape(body)
+            static EMBED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r"!\[\[[^\[\]\r\n]+\]\]|!\[[^\[\]\r\n]*\]\([^()\r\n]+\)").unwrap());
+            let mut escaped = String::new();
+            let mut end = 0;
+            for span in EMBED.find_iter(body) {
+                escaped.push_str(&escape(&body[end..span.start()]));
+                escaped.push_str(span.as_str());
+                end = span.end();
+            }
+            escaped.push_str(&escape(&body[end..]));
+            escaped
         };
         if m.underline {
             x = format!("<u>{x}</u>");
@@ -870,6 +920,20 @@ mod tests {
         out
     }
 
+    /// An `<img>` line is a picture like `![](…)`: relative paths resolve
+    /// beside the file, and saving keeps the tag as written.
+    #[test]
+    fn html_images() {
+        let src = "a\n\n<img src=\"img/a%20b.png\" width=\"240\">\n\n<img src=\"https://file.oss/image.png\" alt=\"\" width=\"auto\" height=\"auto\" >\n";
+        let base = Path::new(if cfg!(windows) { "C:/notes" } else { "/notes" });
+        let imgs: Vec<_> = parse_file(src, "t", Some(base)).blocks.into_iter().filter_map(|b| match b.kind {
+            BlockKind::Image { src, width, .. } => Some((PathBuf::from(src), width)),
+            _ => None,
+        }).collect();
+        assert_eq!(imgs, [(base.join("img").join("a b.png"), Some(240.)), (PathBuf::from("https://file.oss/image.png"), None)]);
+        assert_eq!(preserved(src, |_| {}), src);
+    }
+
     /// Only what changed is rewritten: other blocks keep their own syntax
     /// and the blank lines around them.
     #[test]
@@ -976,6 +1040,37 @@ mod tests {
         let mut blocks = crate::paste::markdown_to_blocks("![[att.png]]\n", crate::paste::Off { file: true, ..Default::default() });
         wiki_images(&mut blocks, &notes, None);
         assert!(matches!(&blocks[0].kind, BlockKind::Image { src, .. } if Path::new(src) == root.join("files/att.png")), "{blocks:?}");
+        let _ = crate::vfs::remove_dir_all(&root);
+    }
+
+    /// A vault may keep its pictures in a hidden folder (`.attachments`) and
+    /// configure nothing, so the walk has to go on into it — #227. A name the
+    /// folders a person sees already have keeps resolving to theirs, and the
+    /// library's own folders are still not the vault's.
+    #[test]
+    fn wiki_embeds_reach_pictures_in_a_hidden_attachment_folder() {
+        let root = crate::vfs::temp_dir().join(format!("fdl-hidden-{}", uuid::Uuid::new_v4()));
+        let notes = root.join("notes");
+        for d in ["notes", ".obsidian", ".attachments/sub", "normal", ".cache", ".backups", ".quiet", ".git"] {
+            crate::vfs::create_dir_all(root.join(d)).unwrap();
+        }
+        for f in [".attachments/hidden.png", ".attachments/sub/deep.png", "normal/visible.png", ".cache/visible.png",
+            ".cache/twice.png", ".backups/twice.png", ".quiet/quiet.png", ".git/ignored.png", ".obsidian/app.png"] {
+            crate::vfs::write(root.join(f), b"png").unwrap();
+        }
+        let src = "![[hidden.png]]\n\n![[deep.png]]\n\n![[visible.png]]\n\n![[twice.png]]\n\n![[quiet.png]]\n\n![[ignored.png]]\n\n![[app.png]]\n";
+        let mut doc = parse_file(src, "page", Some(&notes));
+        wiki_images(&mut doc.blocks, &notes, None);
+        let pics: Vec<PathBuf> = doc.blocks.iter().filter_map(|b| match &b.kind {
+            BlockKind::Image { src, .. } => Some(PathBuf::from(src)),
+            _ => None,
+        }).collect();
+        // `visible.png` is the visible one, though `.cache` has another; `twice.png`
+        // is only in hidden folders, in two of them, so it is as unresolved as a
+        // name nobody has.
+        assert_eq!(pics, vec![root.join(".attachments/hidden.png"), root.join(".attachments/sub/deep.png"), root.join("normal/visible.png")]);
+        let texts: Vec<&str> = doc.blocks.iter().map(|b| b.text.text.as_str()).filter(|t| !t.is_empty()).collect();
+        assert_eq!(texts, vec!["![[twice.png]]", "![[quiet.png]]", "![[ignored.png]]", "![[app.png]]"]);
         let _ = crate::vfs::remove_dir_all(&root);
     }
 }

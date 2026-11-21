@@ -28,6 +28,7 @@ pub enum EditorEvent {
     Catalogue(bool),
     /// A 子页面列表 item or an @文档 link was clicked.
     OpenDoc(String),
+    OpenRelative(String),
     /// A 反向引用 line: that document, scrolled to its nth block.
     OpenDocAt(String, usize),
     /// The reference list's close button.
@@ -236,6 +237,9 @@ pub struct Editor {
     pub(super) img: super::image::ImageUi,
     pub(super) cd: super::countdown::CdUi,
     pub(super) boards: super::board::BoardUi,
+    pub(super) datatables: super::datatable::DataTablesUi,
+    /// A standalone 数据表 (`.sqlite`): its table fills the pane.
+    pub table_file: bool,
     pub(super) btn: super::button::BtnUi,
     pub(super) rm: super::reminder::RmUi,
     pub(super) file: super::file::FileUi,
@@ -483,6 +487,8 @@ impl Editor {
             restore_top: None,
             cd,
             boards: Default::default(),
+            datatables: Default::default(),
+            table_file: false,
             btn,
             rm,
             _subs: subs,
@@ -522,6 +528,29 @@ impl Editor {
                 }
             }
         }));
+    }
+
+    /// Markdown parsing allocates fresh block ids. Prefer the same paragraph
+    /// near its old position, then fall back to that position in the new file.
+    pub fn receive_markdown(&mut self, next: &Core, cx: &mut Context<Self>) {
+        let old_units = self.core.units();
+        let new_units = next.units();
+        let remap = |pos: Pos| {
+            if pos.block == TITLE { return pos }
+            let ix = old_units.iter().position(|u| u.id == pos.block).unwrap_or(0);
+            let text = self.core.text_of(pos.block);
+            let block = text.and_then(|t| new_units.iter().enumerate()
+                .filter(|(_, u)| u.id != TITLE && next.text_of(u.id).is_some_and(|v| v.text == t.text))
+                .min_by_key(|(j, _)| j.abs_diff(ix)).map(|(_, u)| u))
+                .or_else(|| new_units.get(ix)).or_else(|| new_units.last());
+            Pos::new(block.map_or(TITLE, |u| u.id), pos.offset)
+        };
+        let head = remap(self.core.sel.head);
+        let anchor = if self.core.sel.is_collapsed() { head } else { remap(self.core.sel.anchor) };
+        let scope = |p: Pos| new_units.iter().find(|u| u.id == p.block).and_then(|u| u.scope);
+        self.core.sel = if scope(anchor) == scope(head) { Selection { anchor, head } } else { Selection::caret(head) };
+        self.restore_top = self.scroll_top();
+        self.receive_document(next, cx);
     }
 
     /// Call after every command: emits Changed, keeps menus consistent,
@@ -960,6 +989,14 @@ impl Editor {
                 self.core.sel = Selection::caret(Pos::new(p, 0));
                 self.changed(window, cx);
                 return self.open_board(nid, window, cx);
+            }
+            // an empty 数据表 in a file of its own, shown in the page
+            SlashKind::DataTable => {
+                let Some(src) = new_table_file() else { return };
+                let nid = self.core.insert_block(Block::new(BlockKind::DataTable(crate::table::TableRef::new(src)), RichText::default()));
+                let p = self.core.ensure_paragraph_after(nid);
+                self.core.sel = Selection::caret(Pos::new(p, 0));
+                return self.changed(window, cx);
             }
             SlashKind::Table => {
                 let (rows, cols) = size.unwrap_or((3, 3));
@@ -1942,6 +1979,12 @@ impl Editor {
             }
             (None, None) => return,
         };
+        // A macOS file copy (including WeChat) can contain only native file
+        // references. GPUI returns these before looking for bitmap data.
+        let file_refs = item.as_ref().and_then(|item| item.entries().iter().find_map(|entry| match entry {
+            ClipboardEntry::ExternalPaths(files) => Some(files.paths()),
+            _ => None,
+        }));
         if self.core.in_block_mode() {
             // Paste after the selected blocks.
             if let Some(last) = self.core.block_sel_ids().last().copied() {
@@ -2002,8 +2045,32 @@ impl Editor {
                 blocks.push(Block::text(""));
                 self.core.paste_blocks(blocks);
             }
-        } else if let Some(s) = text.filter(|s| !s.is_empty()) {
-            self.core.paste_markdown(&s);
+        } else {
+            let files = if !rich_target {
+                None
+            } else if let Some(paths) = file_refs.filter(|paths| !paths.is_empty()) {
+                paths.iter().all(|p| super::image::is_local_image_file(p)).then(|| paths.to_vec())
+            } else {
+                text.as_deref().and_then(|s| {
+                    s.lines().map(str::trim).filter(|line| !line.is_empty())
+                        .map(super::image::local_image_path).collect::<Option<Vec<_>>>()
+                }).filter(|paths| !paths.is_empty())
+            };
+            if let Some(files) = files {
+                let mut blocks = Vec::new();
+                for file in files {
+                    match super::image::image_block_from_file(&file) {
+                        Ok(b) => blocks.push(b),
+                        Err(msg) => self.toast(msg, cx),
+                    }
+                }
+                if !blocks.is_empty() {
+                    blocks.push(Block::text(""));
+                    self.core.paste_blocks(blocks);
+                }
+            } else if let Some(s) = text.filter(|s| !s.is_empty()) {
+                self.core.paste_markdown(&s);
+            }
         }
         if let Some(msg) = self.core.notice.take() {
             self.toast(msg, cx);
@@ -2834,7 +2901,7 @@ fn guard<A: Action, F: Fn(&mut Editor, &A, &mut Window, &mut Context<Editor>) + 
     f: F,
 ) -> impl Fn(&A, &mut Window, &mut App) + 'static {
     cx.listener(move |e, a: &A, w, cx| {
-        if e.cd.dialog.is_none() {
+        if e.cd.dialog.is_none() && !e.tables_focused(w, cx) {
             f(e, a, w, cx)
         } else {
             cx.propagate()
@@ -2843,3 +2910,14 @@ fn guard<A: Action, F: Fn(&mut Editor, &A, &mut Window, &mut Context<Editor>) + 
 }
 
 impl Editor { pub(crate) fn refresh_theme(&mut self) { self.items_key = None; self.menu = None; } }
+
+/// A blank `.sqlite` in the library's assets for a new 数据表 block; its path relative to the library.
+#[cfg(not(target_family = "wasm"))]
+fn new_table_file() -> Option<String> {
+    let name = format!("{}.sqlite", uuid::Uuid::new_v4());
+    let path = crate::store::Store::assets_dir().join(&name);
+    crate::table::sqlite::create(&path, &crate::table::blank_base()).ok()?;
+    path.strip_prefix(crate::store::Store::root_dir()).ok().map(|r| r.to_string_lossy().replace('\\', "/"))
+}
+#[cfg(target_family = "wasm")]
+fn new_table_file() -> Option<String> { None }
