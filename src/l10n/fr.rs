@@ -1060,4 +1060,6 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("无法读取文档库，未清理：{}", "Impossible de lire la bibliothèque ; rien n’a été retiré : {}"),
     ("已移出 {} 个未使用资源", "{} ressources inutilisées retirées"),
     ("{} 个文件（{}）将移到文档库的 .quiet/removed-assets 文件夹，{} 天后自动删除；在此之前可以从那里拖回 .assets。", "{} fichiers ({}) seront déplacés dans .quiet/removed-assets dans la bibliothèque, puis supprimés après {} jours ; d’ici là, vous pouvez les faire glisser à nouveau dans .assets."),
+    ("退格键回到标题", "Retour arrière revient au titre"),
+    ("在正文开头按退格键时回到标题，第一段文字并入标题。关闭后光标留在正文。", "Retour arrière au début du corps passe au titre et y joint le premier paragraphe. Désactivé, le curseur reste dans le corps."),
 ];

@@ -1684,6 +1684,7 @@ impl Editor {
         } else if self.core.in_block_mode() {
             self.core.delete_selected_blocks();
         } else {
+            self.core.backspace_to_title = crate::settings::prefs().backspace_to_title;
             self.core.backspace();
         }
         self.toolbar_hidden = true;
@@ -1718,6 +1719,7 @@ impl Editor {
         if self.core.in_block_mode() {
             self.core.delete_selected_blocks();
         } else {
+            self.core.backspace_to_title = crate::settings::prefs().backspace_to_title;
             self.core.delete_word_back();
         }
         self.changed(window, cx);
@@ -1758,6 +1760,7 @@ impl Editor {
         if self.core.in_block_mode() {
             self.core.delete_selected_blocks();
         } else {
+            self.core.backspace_to_title = crate::settings::prefs().backspace_to_title;
             self.core.delete_to_start();
         }
         self.changed(window, cx);

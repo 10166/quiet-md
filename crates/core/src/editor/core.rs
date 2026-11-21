@@ -437,6 +437,9 @@ pub struct Core {
     path_misses: Cell<(u32, u32)>,
     /// A message for the view to toast (e.g. 当前位置不支持粘贴表格).
     pub notice: Option<&'static str>,
+    /// Backspace at the start of the body merges the first paragraph into the
+    /// title and moves the caret there (设置 › 退格键回到标题).
+    pub backspace_to_title: bool,
 }
 
 impl Core {
@@ -460,6 +463,7 @@ impl Core {
             path_hits: Cell::new(u32::MAX),
             path_misses: Cell::new((0, 1)),
             notice: None,
+            backspace_to_title: false,
         }
     }
 
@@ -1382,9 +1386,10 @@ impl Core {
             self.delete_atomic(p.block);
             return;
         }
-        // A plain paragraph opening the body never merges into the title and
-        // the caret stays in the body (an empty one goes when text follows).
-        if matches!(block.kind, BlockKind::Text) && !self.parent_is_text_block(p.block) && !self.first_in_quote(p.block) {
+        // Unless 退格键回到标题 is on, a plain paragraph opening the body never
+        // merges into the title and the caret stays in the body (an empty one
+        // goes when text follows).
+        if !self.backspace_to_title && matches!(block.kind, BlockKind::Text) && !self.parent_is_text_block(p.block) && !self.first_in_quote(p.block) {
             let us = self.units();
             if let Some(i) = self.unit_index(&us, p.block)
                 && i > 0
@@ -3710,6 +3715,13 @@ mod tests {
             assert_eq!(xml(&c), "<title>T</title>\n<p>a</p>\n", "{src}");
             assert_ne!(c.sel.head.block, TITLE);
         }
+        // 退格键回到标题 brings the old merge back.
+        let mut c = doc("<title>T</title><p>a</p>");
+        c.backspace_to_title = true;
+        c.sel = Selection::caret(Pos::new(id(&c, 1), 0));
+        c.backspace();
+        assert_eq!(c.doc.title.text, "Ta");
+        assert_eq!(c.sel.head, Pos::new(TITLE, 1));
         // Delete at the end of the title still pulls the body up.
         let mut c = doc("<title>T</title><p>a</p><p>b</p>");
         c.sel = Selection::caret(Pos::new(TITLE, 1));
