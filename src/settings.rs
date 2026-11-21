@@ -603,13 +603,16 @@ pub(crate) fn button(id: impl Into<ElementId>, label: &'static str) -> Stateful<
 
 // ---- theme preview
 
-/// Preview scale against the real document. Its frame clips to a rectangle
-/// (GPUI masks have no radius), so the page is rounded inside the frame.
-const PAGE_S: f32 = 0.78;
+/// Preview scale against the real document. GPUI clips to rectangles (its
+/// masks have no radius), so the page rounds its own bottom corners to the
+/// group's (`SAMPLE_RADIUS`) instead of being clipped.
+const PAGE_S: f32 = 0.9;
+/// The settings group's radius (12) inside its 1px border.
+const SAMPLE_RADIUS: f32 = 11.;
 
-/// 外观's sample page: a short document with most of what a theme styles
-/// (headings, inline styles, lists, a task, quote, callout, table, divider,
-/// highlighted code), at scale `s`, in two columns so it reads at a glance.
+/// 外观's sample page: a document with most of what a theme styles (headings,
+/// long paragraphs with bold and italics, mixed Chinese and Latin text, lists,
+/// a task, quote, callout, table, divider, highlighted code), at scale `s`.
 fn sample_page(t: &themes::Theme, s: f32) -> Div {
     let st = t.style;
     let sc = |v: f32| px((v * s).max(0.5));
@@ -638,6 +641,22 @@ fn sample_page(t: &themes::Theme, s: f32) -> Div {
         .child(tr("详见", "see "))
         // The full stop rides with the link, so it never wraps alone.
         .child(div().flex().child(div().text_color(link).when(st.flag("a.underline"), |d| d.underline()).child(tr("写作基础", "Writing basics"))).child(tr("。", ".")));
+    // Long paragraphs wrap as one text (pieces in a flex row would break only
+    // between pieces); `strong` and `em` are spans of it.
+    let strong_c = st.color("strong.color").unwrap_or(text);
+    let prose = |t: &'static str, strong: &'static str, em: &'static str| {
+        let mut marks = vec![];
+        if let Some(i) = t.find(strong).filter(|_| !strong.is_empty()) { marks.push((i..i + strong.len(), HighlightStyle { font_weight: Some(FontWeight(st.num("strong.weight"))), color: Some(strong_c), ..Default::default() })); }
+        if let Some(i) = t.find(em).filter(|_| !em.is_empty()) { marks.push((i..i + em.len(), HighlightStyle { font_style: Some(FontStyle::Italic), ..Default::default() })); }
+        marks.sort_by_key(|m| m.0.start);
+        p(div()).child(StyledText::new(t).with_highlights(marks))
+    };
+    let long = prose(tr("好的阅读字体让长文不累眼：字距匀称，标点端正，笔画在小字号下依然清楚。正文用文档字体排版，标题跟着一起变；代码块仍然用主题的等宽字体，不受影响。写得久了你会发现，安静的页面最适合思考，也最适合把一件事慢慢想清楚。",
+        "A good reading face keeps long text easy on the eyes: even spacing, upright punctuation, strokes that stay clear at small sizes. Body text uses the document font and headings follow; code blocks keep the theme's monospace face. Write for a while and you'll find a quiet page is the best place to think a thing through."),
+        tr("文档字体", "document font"), tr("代码块仍然用主题的等宽字体", "code blocks keep the theme's monospace face"));
+    let mixed = prose(tr("笔记存成 Markdown（.md）和 DocxXML 文件，同步交给 iCloud、Git 或 Syncthing。中文与 English 混排时，引号写作“这样”，书名写作《瓦尔登湖》（Walden, 1854），数字 0123456789 也排得整齐。",
+        "Notes are stored as Markdown (.md) and DocxXML files; syncing is left to iCloud, Git or Syncthing. Mixed text keeps its own punctuation — “quotes”, (parentheses), Walden (1854) — and the figures 0123456789 line up."),
+        "", tr("Walden, 1854", "Walden"));
     let indent = sc(st.num("list.indent")).max(px(10.));
     let marker = |m: Div| div().flex_none().w(indent).flex().justify_center().child(m);
     let bullet_c = st.color("bullet.color").unwrap_or(text);
@@ -689,18 +708,19 @@ fn sample_page(t: &themes::Theme, s: f32) -> Div {
         .child(code_line("2", vec![tok("cd ", syn("function")), tok("~/Documents ", text), tok("&& ", syn("keyword")), tok("tar ", syn("function")), tok("-czf ", syn("attr")), tok("\"Quiet.tar.gz\" ", syn("string")), tok("Quiet.md", text)]))
         .child(code_line("3", vec![tok("echo ", syn("function")), tok("\"done\"", syn("string"))]));
     // One column, like a page: a centred text column (the theme's width, scaled,
-    // up to 760 so a wide frame isn't mostly margin) whose bottom fades into
+    // up to 880 so a wide frame isn't mostly margin) whose bottom fades into
     // the paper. Blocks come in the order the 开始指南 itself uses.
     let paper = st.color("page.bg").unwrap_or_else(|| st.token("bg_body"));
     // Its own bottom corners too: nothing clips it to the page's radius.
-    let fade = div().absolute().left_0().right_0().bottom_0().h(px(56.)).rounded_b(px(7.)).bg(linear_gradient(180., linear_color_stop(paper.opacity(0.), 0.), linear_color_stop(paper, 1.)));
+    let fade = div().absolute().left_0().right_0().bottom_0().h(px(56.)).rounded_b(px(SAMPLE_RADIUS)).bg(linear_gradient(180., linear_color_stop(paper.opacity(0.), 0.), linear_color_stop(paper, 1.)));
     // items_start: a column stretched to the frame would shrink its blocks to fit.
-    div().relative().size_full().flex().justify_center().items_start().bg(paper).font_family(font).text_color(text).overflow_hidden()
+    div().relative().size_full().flex().justify_center().items_start().bg(paper).rounded_b(px(SAMPLE_RADIUS)).font_family(font).text_color(text).overflow_hidden()
         // min_w_0: the column follows the frame, not its widest unbreakable line.
-        .child(div().w_full().min_w_0().overflow_hidden().max_w((sc(st.num("page.width")) * 1.35).min(px(760.))).px(px(32.)).pt(px(22.)).flex().flex_col().gap(gap)
+        .child(div().w_full().min_w_0().overflow_hidden().max_w((sc(st.num("page.width")) * 1.5).min(px(880.))).px(px(40.)).pt(px(28.)).flex().flex_col().gap(gap)
             .child(div().text_size(sc(st.num("title.size"))).line_height(sc(st.num("title.size") * 1.25)).font_weight(FontWeight(st.num("title.weight")))
                 .font_family(SharedString::from(themes::doc_font_in(st, "title.font"))).text_color(st.color("title.color").unwrap_or(text)).child(tr("开始指南", "Getting started")))
             .child(para)
+            .child(long)
             .child(callout)
             .child(heading(1, tr("五分钟上手", "Five minutes")))
             .child(div().flex().flex_col().child(task(true, tr("打开这份指南", "Open this guide"))).child(task(false, crate::shortcuts::keys(tr("按 ⌘ N 新建一篇文档", "Press ⌘ N for a new document")))))
@@ -708,6 +728,8 @@ fn sample_page(t: &themes::Theme, s: f32) -> Div {
             .child(div().flex().flex_col().child(bullet(tr("斜杠菜单：输入 / 插入任意内容块", "Slash menu: type / to insert any block"))).child(bullet(tr("Markdown：# 加空格变标题", "Markdown: # and a space make a heading"))))
             .child(div().flex().flex_col().child(number("1.", tr("先读「写作基础」", "Read Writing basics first"))).child(number("2.", tr("再看「内容块」", "Then Content blocks"))))
             .child(quote)
+            .child(heading(2, tr("中英混排", "Mixed scripts")))
+            .child(mixed)
             .child(heading(3, tr("最常用的快捷键", "Shortcuts to know")))
             .child(table)
             .child(div().w_full().py(px(2.)).child(hr))
@@ -1315,9 +1337,9 @@ impl Workspace {
             }));
         // One group, top to bottom: the choice, how it looks, its stylesheet.
         // The preview is a page of the theme on a quiet band, like a sheet on a desk.
-        let shown = { let list = themes::themes(); list.iter().find(|t| t.id == current).or_else(|| list.first()).map(|t| sample_page(t, PAGE_S).rounded(px(7.))) };
-        let sample = div().w_full().px(px(16.)).py(px(16.)).flex().justify_center().bg(Theme::fill_hover())
-            .child(div().w_full().h(px(360.)).rounded(px(8.)).overflow_hidden().border_1().border_color(Theme::line_border()).shadow(theme::shadow_button()).children(shown));
+        // The page itself, the group's last row: no frame around it.
+        let shown = { let list = themes::themes(); list.iter().find(|t| t.id == current).or_else(|| list.first()).map(|t| sample_page(t, PAGE_S)) };
+        let sample = div().w_full().h(px(640.)).children(shown);
         div().w_full().flex().flex_col().gap(px(28.))
             .child(div().w_full().flex().flex_col().gap(px(8.))
                 .child(group(None, vec![

@@ -1101,4 +1101,9 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("正在下载中文手写字体…", "Téléchargement de la police manuscrite…"),
     ("中文手写字体已就绪", "Police manuscrite prête"),
     ("手写字体下载失败，暂用系统字体", "Impossible de télécharger la police manuscrite ; police système utilisée"),
+    ("好的阅读字体让长文不累眼：字距匀称，标点端正，笔画在小字号下依然清楚。正文用文档字体排版，标题跟着一起变；代码块仍然用主题的等宽字体，不受影响。写得久了你会发现，安静的页面最适合思考，也最适合把一件事慢慢想清楚。", "Une bonne police de lecture ménage les yeux sur un long texte : espacement régulier, ponctuation droite, traits nets même en petit corps. Le texte utilise la police du document et les titres suivent ; les blocs de code gardent la police à chasse fixe du thème. À la longue, on découvre qu’une page calme est le meilleur endroit pour réfléchir."),
+    ("代码块仍然用主题的等宽字体", "les blocs de code gardent la police à chasse fixe du thème"),
+    ("笔记存成 Markdown（.md）和 DocxXML 文件，同步交给 iCloud、Git 或 Syncthing。中文与 English 混排时，引号写作“这样”，书名写作《瓦尔登湖》（Walden, 1854），数字 0123456789 也排得整齐。", "Les notes sont enregistrées en fichiers Markdown (.md) et DocxXML ; la synchronisation est laissée à iCloud, Git ou Syncthing. Le texte mêlé garde sa ponctuation — « guillemets », (parenthèses), Walden (1854) — et les chiffres 0123456789 s’alignent."),
+    ("中英混排", "Écritures mêlées"),
+    ("Walden, 1854", "Walden"),
 ];

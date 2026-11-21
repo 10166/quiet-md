@@ -1015,4 +1015,9 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("正在下载中文手写字体…", "Descargando la fuente manuscrita…"),
     ("中文手写字体已就绪", "Fuente manuscrita lista"),
     ("手写字体下载失败，暂用系统字体", "No se pudo descargar la fuente manuscrita; se usa la del sistema"),
+    ("好的阅读字体让长文不累眼：字距匀称，标点端正，笔画在小字号下依然清楚。正文用文档字体排版，标题跟着一起变；代码块仍然用主题的等宽字体，不受影响。写得久了你会发现，安静的页面最适合思考，也最适合把一件事慢慢想清楚。", "Una buena fuente de lectura cuida la vista en textos largos: espaciado parejo, puntuación recta y trazos nítidos incluso en tamaños pequeños. El cuerpo usa la fuente del documento y los títulos la siguen; los bloques de código conservan la fuente monoespaciada del tema. Con el tiempo descubrirás que una página tranquila es el mejor lugar para pensar."),
+    ("代码块仍然用主题的等宽字体", "los bloques de código conservan la fuente monoespaciada del tema"),
+    ("笔记存成 Markdown（.md）和 DocxXML 文件，同步交给 iCloud、Git 或 Syncthing。中文与 English 混排时，引号写作“这样”，书名写作《瓦尔登湖》（Walden, 1854），数字 0123456789 也排得整齐。", "Las notas se guardan como archivos Markdown (.md) y DocxXML; la sincronización queda en manos de iCloud, Git o Syncthing. El texto mixto conserva su puntuación —«comillas», (paréntesis), Walden (1854)— y las cifras 0123456789 quedan alineadas."),
+    ("中英混排", "Escrituras mezcladas"),
+    ("Walden, 1854", "Walden"),
 ];
