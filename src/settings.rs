@@ -1059,6 +1059,7 @@ impl Workspace {
 
     fn general_page(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = prefs();
+        let new_key = crate::shortcuts::hint("workspace::NewDoc", "⌘N");
         // 打开链接: which browser a clicked link (and 网页搜索) opens in. The
         // list is what this Mac has, so the row is only there when there is a
         // choice to make.
@@ -1094,7 +1095,8 @@ impl Workspace {
                     switch("pref-update", p.auto_update).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.auto_update = !p.auto_update, cx)))).into_any_element(),
                 row(tr("退格键回到标题", "Backspace returns to title"), desc(tr("在正文开头按退格键时回到标题，第一段文字并入标题。关闭后光标留在正文。", "Backspace at the start of the body moves to the title, joining the first paragraph to it. When off the caret stays in the body.")),
                     switch("pref-backspace-title", p.backspace_to_title).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.backspace_to_title = !p.backspace_to_title, cx)))).into_any_element(),
-                row(tr("快捷新建默认类型", "Quick new (⌘N)"), desc(tr("⌘N 新建时创建的类型；「记住上次」沿用你上次从新建菜单选的类型。", "What ⌘N creates; “Last used” repeats the type you last picked from the New menu.")), {
+                // The key as bound (Ctrl+N off macOS, or the user's own), in every language's text.
+                row(tr("快捷新建默认类型", "Quick new (⌘N)").replace("⌘N", new_key), Some(tr("⌘N 新建时创建的类型；「记住上次」沿用你上次从新建菜单选的类型。", "What ⌘N creates; “Last used” repeats the type you last picked from the New menu.").replace("⌘N", new_key).into()), {
                     let sel = match p.new_default.as_str() { "doc" => 1, "markdown" => 2, _ => 0 };
                     self.select("quick-new", vec![tr("记住上次", "Last used"), tr("文档", "Document"), "Markdown"], sel,
                         |w, i, cx| w.set_pref(|p| p.new_default = ["", "doc", "markdown"][i].into(), cx), cx)
