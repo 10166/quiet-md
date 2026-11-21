@@ -243,8 +243,6 @@ pub struct Editor {
     pub(super) btn: super::button::BtnUi,
     pub(super) rm: super::reminder::RmUi,
     pub(super) file: super::file::FileUi,
-    /// Folded code blocks (view state only).
-    pub(super) code_folded: std::collections::HashSet<BlockId>,
     /// Numbers of auto-numbered headings, refreshed each frame.
     pub(super) heading_orders: rustc_hash::FxHashMap<BlockId, String>,
     /// (rows, cols) under the pointer in the "+" panel's table / column size picker.
@@ -471,7 +469,6 @@ impl Editor {
             captions: HashMap::new(),
             img: super::image::ImageUi::new(cx),
             file: super::file::FileUi::new(),
-            code_folded: Default::default(),
             heading_orders: Default::default(),
             size_pick: (0, 0),
             modified,
@@ -565,6 +562,9 @@ impl Editor {
         self.core.pending_marks = None;
         self.core.generation = generation.wrapping_add(1);
         self.core.fix_selection();
+        // A caret kept inside code folded meanwhile would open it again.
+        let at = self.core.sel.head.block;
+        if self.core.block(at).is_some_and(|b| b.folded && matches!(b.kind, crate::model::BlockKind::Code { .. })) { self.core.select_block(at); }
         self.core.break_coalescing();
         self.marked = None;
         self.menu = None;
@@ -587,6 +587,10 @@ impl Editor {
     fn changed_with_scroll(&mut self, intent: ScrollIntent, window: &mut Window, cx: &mut Context<Self>) {
         let reveal = intent == ScrollIntent::RevealCaret;
         if reveal { self.core.reveal_caret(); }
+        // A folded code block opens once the caret is inside it.
+        if reveal && !self.core.in_block_mode() && self.core.set_code_folded(self.core.sel.head.block, false) {
+            self.keep_read_only_fold();
+        }
         if self.core.dirty {
             // The rows move under the caret: an old row end no longer applies.
             self.caret_row_end = None;
@@ -595,10 +599,6 @@ impl Editor {
             self.hide_link_card(cx);
             cx.emit(EditorEvent::Changed);
             self.refresh_find(false, cx);
-        }
-        // A folded code block opens once the caret is inside it.
-        if reveal && !self.core.in_block_mode() {
-            self.code_folded.remove(&self.core.sel.head.block);
         }
         self.sync_slash();
         self.sync_mention();

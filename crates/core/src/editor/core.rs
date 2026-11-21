@@ -378,13 +378,16 @@ fn keep_outside_history(now: &Document, restored: &mut Document) {
     now.for_each_block(|b| {
         folded.insert(b.id, b.folded);
     });
-    // Blocks in table cells never fold.
+    // Of the blocks in table cells only code blocks fold.
     fn walk(blocks: &mut [Block], folded: &HashMap<BlockId, bool>) {
         for b in blocks {
             if let Some(f) = folded.get(&b.id) {
                 b.folded = *f;
             }
             walk(&mut b.children, folded);
+            if let BlockKind::Table(t) = &mut b.kind {
+                t.rows.iter_mut().flatten().for_each(|cell| walk(&mut cell.blocks, folded));
+            }
         }
     }
     walk(&mut restored.blocks, &folded);
@@ -439,7 +442,9 @@ pub struct Core {
 impl Core {
     pub fn new(doc: Document) -> Self {
         let first = units(&doc).get(1).map(|u| u.id).unwrap_or(TITLE);
-        let start = if doc.title.is_empty() { TITLE } else { first };
+        // Not inside a folded code block: the caret there would open it.
+        let hidden = find_path(&doc.blocks, first).and_then(|p| block_at(&doc.blocks, &p)).is_some_and(|b| b.folded && matches!(b.kind, BlockKind::Code { .. }));
+        let start = if doc.title.is_empty() || hidden { TITLE } else { first };
         Core {
             doc,
             sel: Selection::caret(Pos::new(start, 0)),
@@ -1825,9 +1830,11 @@ impl Core {
                 if let BlockKind::Code { .. } = k {
                     b.text = RichText::plain(b.text.plain_text());
                 }
-                // A folded heading hides its section, any other fold just the children: drop the fold
-                // rather than hide or reveal the blocks below.
-                if matches!(b.kind, BlockKind::Heading { .. }) != matches!(k, BlockKind::Heading { .. }) {
+                // A folded heading hides its section, a code block its code, any other fold just the
+                // children: drop the fold rather than hide or reveal something else.
+                if matches!(b.kind, BlockKind::Heading { .. }) != matches!(k, BlockKind::Heading { .. })
+                    || matches!(b.kind, BlockKind::Code { .. }) != matches!(k, BlockKind::Code { .. })
+                {
                     b.folded = false;
                 }
                 // Headings, lists and text can all hold children, so the
@@ -1897,6 +1904,23 @@ impl Core {
             b.folded = !b.folded;
         }
         self.fix_selection_after_fold(id);
+    }
+
+    /// Folds or opens a code block (saved like any fold, outside the edit
+    /// history). A caret inside the code it hides leaves for the block itself.
+    /// Returns whether anything changed.
+    pub fn set_code_folded(&mut self, id: BlockId, folded: bool) -> bool {
+        let Some(b) = self.block_mut(id) else { return false };
+        if !matches!(b.kind, BlockKind::Code { .. }) || b.folded == folded {
+            return false;
+        }
+        b.folded = folded;
+        self.generation += 1;
+        self.dirty = true;
+        if folded && self.block_sel.is_none() && (self.sel.head.block == id || self.sel.anchor.block == id) {
+            self.select_block(id);
+        }
+        true
     }
 
     /// The last block a folded heading hides (itself when nothing is hidden),
@@ -3428,6 +3452,27 @@ mod tests {
             assert!(c.undo());
             assert_eq!(c.doc.title.text, title);
         }
+    }
+
+    /// A code block's fold is saved with the document, outside the edit history.
+    #[test]
+    fn code_folds_are_saved_not_undone() {
+        let mut c = doc("<title>T</title><p>a</p><pre lang=\"plaintext\"><code>x</code></pre>");
+        let code = id(&c, 2);
+        c.sel = Selection::caret(Pos::new(code, 1));
+        c.checkpoint(EditKind::Other);
+        c.insert_text("y");
+        assert!(c.set_code_folded(code, true));
+        assert!(!c.set_code_folded(code, true));
+        assert_eq!(c.block_sel_ids(), vec![code], "the caret leaves the hidden code");
+        assert!(xml(&c).contains("<pre lang=\"plaintext\" folded=\"true\"><code>xy</code></pre>"), "{}", xml(&c));
+        assert!(c.undo());
+        assert!(xml(&c).contains("<pre lang=\"plaintext\" folded=\"true\"><code>x</code></pre>"), "{}", xml(&c));
+        assert!(!c.set_code_folded(id(&c, 1), true), "only code blocks");
+        c.turn_into(&[code], BlockKind::Text);
+        assert!(!c.block(code).unwrap().folded, "{}", xml(&c));
+        let c = doc("<title>T</title><pre lang=\"plaintext\" folded=\"true\"><code>x</code></pre>");
+        assert_eq!(c.sel.head.block, TITLE, "opening never starts inside folded code");
     }
 
     #[test]
