@@ -298,8 +298,11 @@ pub struct Workspace {
     pub sidebar_width: f32,
     /// The resize handle is being dragged.
     pub sidebar_drag: bool,
-    /// The window's minimum width as last given to it (`DOC_MIN_W` plus the sidebar).
-    min_w: f32,
+    /// The sidebar was open at the last render: opening it in a narrow window
+    /// widens the window, narrowing the window below it hides it again.
+    sidebar_was_open: bool,
+    /// The window width before that widening, until the window takes the new size.
+    widen_from: Option<f32>,
     pub folder_current: Option<String>,
     pub create_menu: Option<(Option<String>, Point<Pixels>)>,
     /// The header's 导入 menu: the folder it imports into, and where it hangs.
@@ -560,7 +563,8 @@ impl Workspace {
             search_sel: None,
             sidebar_open: !quick,
             sidebar_width,
-            min_w: 0.,
+            sidebar_was_open: false,
+            widen_from: None,
             sidebar_drag: false,
             folder_current: None,
             create_menu: None,
@@ -1427,7 +1431,7 @@ impl Workspace {
 
     /// 主页's search box, centred on the pane but never over what sits on
     /// either side of it: the title (and, with the sidebar hidden, the
-    /// traffic lights and 展开侧栏) on the left, + on the right. Below a
+    /// traffic lights and 展开侧栏) on the left, … 导入 + on the right. Below a
     /// usable width it is None and the caller shows a search icon instead.
     pub(crate) fn header_search(&self, window: &Window, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let main = f32::from(window.viewport_size().width) - if self.sidebar_open { self.sidebar_w(window) } else { 0. };
@@ -1436,8 +1440,8 @@ impl Workspace {
         // page_header's left inset (26 with the sidebar, else the traffic
         // lights plus the 4 + 28 + 12 of 展开侧栏), then 16 clear of the title.
         let left = if self.sidebar_open { 26. } else { theme::TRAFFIC_LIGHTS_W + 44. + if cfg!(target_os = "windows") { 32. } else { 0. } } + title_w + 16.;
-        // + is 32 wide with an 8pt inset; 16 clear of it.
-        let right = HEADER_ACTIONS_H + crate::ui::header_right_inset() + 16.;
+        // … 导入 + are 32 wide each, then the right inset; 16 clear of them.
+        let right = 3. * HEADER_ACTIONS_H + crate::ui::header_right_inset() + 16.;
         let half = (main / 2. - left).min(main / 2. - right);
         let width = (main - 320.).min(2. * half).min(360.);
         if width < 120. { return None }
@@ -1695,8 +1699,8 @@ impl Workspace {
 
 /// Header and action group share an 8px top/right inset.
 pub const HEADER_H: f32 = 48.;
-/// The narrowest the main pane (document, Home, settings) gets: the window's
-/// minimum width is this plus the open sidebar.
+/// The narrowest the main pane (document, Home, settings) gets and the
+/// window's minimum width: a narrower window hides the sidebar.
 pub const DOC_MIN_W: f32 = 480.;
 pub(crate) const HEADER_ACTIONS_H: f32 = 32.;
 
@@ -1712,15 +1716,21 @@ impl Render for Workspace {
         crate::theme::set_fullscreen(window.is_fullscreen());
         self.native_sidebar.sync(if self.sidebar_open && !crate::theme::fullscreen() { self.sidebar_w(window) } else { 0. }, window);
         // The pane keeps its minimum beside the sidebar: opening the sidebar in
-        // a narrow window widens the window rather than squeezing the note.
-        let min_w = DOC_MIN_W + if self.sidebar_open { self.sidebar_w(window) } else { 0. };
-        if min_w != self.min_w {
-            self.min_w = min_w;
-            window.set_window_min_size(size(px(min_w), px(480.)));
-            let vs = window.viewport_size();
-            // The web build's window is the page: never resized from here.
-            if f32::from(vs.width) < min_w - 0.5 && !window.is_fullscreen() && !cfg!(target_family = "wasm") { window.resize(size(px(min_w), vs.height)); }
+        // a narrow window widens the window rather than squeezing the note, and
+        // narrowing the window below that (half-screen snapping) hides the
+        // sidebar instead of being refused. The window's own minimum is DOC_MIN_W.
+        let vs = window.viewport_size();
+        let vw = f32::from(vs.width);
+        if self.widen_from.is_some_and(|w| (w - vw).abs() > 0.5) { self.widen_from = None; }
+        // The web build's window is the page: never resized from here.
+        if self.sidebar_open && !window.is_fullscreen() && !cfg!(target_family = "wasm") {
+            let need = DOC_MIN_W + self.sidebar_w(window);
+            if vw < need - 0.5 {
+                if !self.sidebar_was_open { window.resize(size(px(need), vs.height)); self.widen_from = Some(vw); }
+                else if self.widen_from.is_none() { self.sidebar_open = false; }
+            }
         }
+        self.sidebar_was_open = self.sidebar_open;
         let sidebar = if self.sidebar_open { Some(if matches!(self.view, View::Settings | View::Trash) { self.render_settings_sidebar(window, cx) } else { self.render_sidebar(window, cx) }) } else { None };
         let row_menu = self.render_row_menu(window, cx);
         let resize = self.sidebar_open.then(|| self.render_resize_handle(window, cx));
