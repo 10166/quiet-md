@@ -85,7 +85,7 @@ On first launch, Quiet.md looks for your Obsidian, Logseq, iA Writer and Typora 
 - **Quick notes**: on macOS, a global shortcut (`⌥ Space` by default) opens a small note window over any app.
 - **Your look**: four built-in styles — Craft, Feishu, Notion and Obsidian — each with a dark variant, or your own CSS ([docs/THEMES.md](docs/THEMES.md)). Choose the interface and document fonts.
 - **Your keys**: press `⌘ /` to see every shortcut, and rebind any of them. On Windows and Linux, Ctrl stands in for ⌘ and Alt for ⌥.
-- **Your language**: English, Simplified Chinese, Traditional Chinese, Japanese, Korean, Spanish, French and Arabic.
+- **Your language**: English, Simplified Chinese, Traditional Chinese, Japanese, Korean, Spanish, French, Arabic and Turkish.
 - **Housekeeping**: Settings › Documents finds images and files no note uses any more and moves them out once you confirm.
 - **Updates**: new versions install from inside the app after their signature is verified. Automatic checks can be turned off.
 

@@ -85,7 +85,7 @@ En el primer inicio, Quiet.md busca tus bibliotecas de Obsidian, Logseq, iA Writ
 - **Notas rápidas**: en macOS, un atajo global (`⌥ Espacio` por defecto) abre una pequeña ventana de nota sobre cualquier app.
 - **Tu aspecto**: cuatro estilos integrados —Craft, Feishu, Notion y Obsidian—, cada uno con variante oscura, o tu propio CSS ([docs/THEMES.md](docs/THEMES.md)). Elige la fuente de la interfaz y la de los documentos.
 - **Tus teclas**: pulsa `⌘ /` para ver todos los atajos y reasignar cualquiera. En Windows y Linux, Ctrl sustituye a ⌘ y Alt a ⌥.
-- **Tu idioma**: inglés, chino simplificado, chino tradicional, japonés, coreano, español, francés y árabe.
+- **Tu idioma**: inglés, chino simplificado, chino tradicional, japonés, coreano, español, francés, árabe y turco.
 - **Limpieza**: Ajustes › Biblioteca encuentra las imágenes y archivos que ya no usa ninguna nota y los retira cuando lo confirmas.
 - **Actualizaciones**: las versiones nuevas se instalan desde la propia app tras verificar su firma. Las comprobaciones automáticas se pueden desactivar.
 
