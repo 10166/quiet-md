@@ -27,14 +27,14 @@ pub(crate) fn set_base(feishu: bool) { FEISHU.store(feishu, Ordering::Relaxed); 
 /// 界面语言, in the order Settings lists them. Chinese strings are the keys:
 /// other languages look them up in `l10n` and fall back to English.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Lang { Zh, ZhTw, En, Ja, Ko, Fr, Es, Ar }
+pub enum Lang { Zh, ZhTw, En, Ja, Ko, Fr, Es, Ar, Tr }
 
 impl Lang {
-    pub const ALL: [Lang; 8] = [Lang::Zh, Lang::ZhTw, Lang::En, Lang::Ja, Lang::Ko, Lang::Fr, Lang::Es, Lang::Ar];
+    pub const ALL: [Lang; 9] = [Lang::Zh, Lang::ZhTw, Lang::En, Lang::Ja, Lang::Ko, Lang::Fr, Lang::Es, Lang::Ar, Lang::Tr];
     /// The `language` preference value.
-    pub fn code(self) -> &'static str { match self { Lang::Zh => "zh", Lang::ZhTw => "zh-TW", Lang::En => "en", Lang::Ja => "ja", Lang::Ko => "ko", Lang::Fr => "fr", Lang::Es => "es", Lang::Ar => "ar" } }
+    pub fn code(self) -> &'static str { match self { Lang::Zh => "zh", Lang::ZhTw => "zh-TW", Lang::En => "en", Lang::Ja => "ja", Lang::Ko => "ko", Lang::Fr => "fr", Lang::Es => "es", Lang::Ar => "ar", Lang::Tr => "tr" } }
     /// The language's own name, as Settings lists it.
-    pub fn name(self) -> &'static str { match self { Lang::Zh => "简体中文", Lang::ZhTw => "繁體中文", Lang::En => "English", Lang::Ja => "日本語", Lang::Ko => "한국어", Lang::Fr => "Français", Lang::Es => "Español", Lang::Ar => "العربية" } }
+    pub fn name(self) -> &'static str { match self { Lang::Zh => "简体中文", Lang::ZhTw => "繁體中文", Lang::En => "English", Lang::Ja => "日本語", Lang::Ko => "한국어", Lang::Fr => "Français", Lang::Es => "Español", Lang::Ar => "العربية", Lang::Tr => "Türkçe" } }
 }
 
 pub fn lang() -> Lang { Lang::ALL.get(LANG.load(Ordering::Relaxed) as usize).copied().unwrap_or(Lang::En) }
@@ -2220,6 +2220,7 @@ mod preference_tests {
             (r#"{"english":true,"language":"zh-Hant"}"#, Lang::ZhTw),
             (r#"{"english":true,"language":"ko"}"#, Lang::Ko),
             (r#"{"english":true,"language":"ar"}"#, Lang::Ar),
+            (r#"{"english":true,"language":"tr"}"#, Lang::Tr),
             (r#"{"english":true,"language":"xx"}"#, Lang::En),
         ] {
             let saved: Preferences = serde_json::from_str(json).unwrap();
@@ -2245,6 +2246,7 @@ mod preference_tests {
             assert_eq!(lang_for_locale(tag), Some(Lang::Zh), "{tag}");
         }
         assert_eq!(lang_for_locale("fr_FR.UTF-8"), Some(Lang::Fr));
+        assert_eq!(lang_for_locale("tr-TR"), Some(Lang::Tr));
         assert_eq!(lang_for_locale("C.UTF-8"), None);
     }
 
