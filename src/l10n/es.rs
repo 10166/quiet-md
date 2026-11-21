@@ -980,4 +980,5 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("无法读取文档库，未清理：{}", "No se pudo leer la biblioteca; no se retiró nada: {}"),
     ("已移出 {} 个未使用资源", "Se retiraron {} recursos sin usar"),
     ("{} 个文件（{}）将移到文档库的 .quiet/removed-assets 文件夹，{} 天后自动删除；在此之前可以从那里拖回 .assets。", "{} archivos ({}) se moverán a .quiet/removed-assets dentro de la biblioteca y se eliminarán después de {} días; hasta entonces puedes arrastrarlos de vuelta a .assets."),
+    ("此版本不支持数据表", "Esta versión no admite tablas de datos"),
 ];
