@@ -26,14 +26,14 @@ pub(crate) fn set_base(feishu: bool) { FEISHU.store(feishu, Ordering::Relaxed); 
 /// 界面语言, in the order Settings lists them. Chinese strings are the keys:
 /// other languages look them up in `l10n` and fall back to English.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Lang { Zh, En, Ja, Ko, Fr, Es, Ar }
+pub enum Lang { Zh, ZhTw, En, Ja, Ko, Fr, Es, Ar }
 
 impl Lang {
-    pub const ALL: [Lang; 7] = [Lang::Zh, Lang::En, Lang::Ja, Lang::Ko, Lang::Fr, Lang::Es, Lang::Ar];
+    pub const ALL: [Lang; 8] = [Lang::Zh, Lang::ZhTw, Lang::En, Lang::Ja, Lang::Ko, Lang::Fr, Lang::Es, Lang::Ar];
     /// The `language` preference value.
-    pub fn code(self) -> &'static str { match self { Lang::Zh => "zh", Lang::En => "en", Lang::Ja => "ja", Lang::Ko => "ko", Lang::Fr => "fr", Lang::Es => "es", Lang::Ar => "ar" } }
+    pub fn code(self) -> &'static str { match self { Lang::Zh => "zh", Lang::ZhTw => "zh-TW", Lang::En => "en", Lang::Ja => "ja", Lang::Ko => "ko", Lang::Fr => "fr", Lang::Es => "es", Lang::Ar => "ar" } }
     /// The language's own name, as Settings lists it.
-    pub fn name(self) -> &'static str { match self { Lang::Zh => "简体中文", Lang::En => "English", Lang::Ja => "日本語", Lang::Ko => "한국어", Lang::Fr => "Français", Lang::Es => "Español", Lang::Ar => "العربية" } }
+    pub fn name(self) -> &'static str { match self { Lang::Zh => "简体中文", Lang::ZhTw => "繁體中文", Lang::En => "English", Lang::Ja => "日本語", Lang::Ko => "한국어", Lang::Fr => "Français", Lang::Es => "Español", Lang::Ar => "العربية" } }
 }
 
 pub fn lang() -> Lang { Lang::ALL.get(LANG.load(Ordering::Relaxed) as usize).copied().unwrap_or(Lang::En) }
@@ -141,12 +141,21 @@ pub fn migrate_later() {
 /// Whether to ask about the move now: never put off, or a week since.
 pub fn migrate_ask_due() -> bool { unix_now().saturating_sub(prefs().migrate_later) >= MIGRATE_ASK_EVERY }
 
+/// Map a BCP 47 / POSIX locale tag to a supported interface language.
+fn lang_for_locale(locale: &str) -> Option<Lang> {
+    let mut parts = locale.split(['.', '@']).next().unwrap_or("").split(['-', '_']);
+    let base = parts.next()?.to_ascii_lowercase();
+    if base.is_empty() { return None; }
+    if base == "zh" {
+        let trad = parts.any(|p| matches!(p.to_ascii_lowercase().as_str(), "hant" | "tw" | "hk" | "mo"));
+        return Some(if trad { Lang::ZhTw } else { Lang::Zh });
+    }
+    Lang::ALL.into_iter().find(|l| l.code() == base)
+}
+
 /// Pick the first supported system language; saved preferences still win.
 fn system_lang() -> Lang {
-    sys_locale::get_locales().find_map(|locale| {
-        let code = locale.split(['-', '_']).next().unwrap_or("").to_ascii_lowercase();
-        Lang::ALL.into_iter().find(|l| l.code() == code)
-    }).unwrap_or(Lang::En)
+    sys_locale::get_locales().find_map(|l| lang_for_locale(&l)).unwrap_or(Lang::En)
 }
 
 impl Default for Preferences {
@@ -161,6 +170,7 @@ impl Preferences {
         if !self.theme.is_empty() { self.theme.clone() } else if self.feishu { "feishu".into() } else { "craft".into() }
     }
     pub fn lang(&self) -> Lang {
+        if matches!(self.language.as_str(), "zh-TW" | "zh-Hant") { return Lang::ZhTw; }
         Lang::ALL.into_iter().find(|l| l.code() == self.language).unwrap_or(if self.english { Lang::En } else { Lang::Zh })
     }
     pub fn set_lang(&mut self, lang: Lang) {
@@ -1945,6 +1955,8 @@ mod preference_tests {
         for (json, expected) in [
             (r#"{"english":false}"#, Lang::Zh),
             (r#"{"english":true}"#, Lang::En),
+            (r#"{"english":true,"language":"zh-TW"}"#, Lang::ZhTw),
+            (r#"{"english":true,"language":"zh-Hant"}"#, Lang::ZhTw),
             (r#"{"english":true,"language":"ko"}"#, Lang::Ko),
             (r#"{"english":true,"language":"ar"}"#, Lang::Ar),
             (r#"{"english":true,"language":"xx"}"#, Lang::En),
@@ -1956,7 +1968,22 @@ mod preference_tests {
         p.set_lang(Lang::Ko);
         let json = serde_json::to_value(&p).unwrap();
         assert_eq!((json["language"].as_str(), json["english"].as_bool()), (Some("ko"), Some(true)), "older builds read English");
+        p.set_lang(Lang::ZhTw);
+        assert_eq!((p.language.as_str(), p.english), ("zh-TW", true));
         p.set_lang(Lang::Zh);
         assert!(!p.english);
+    }
+
+    #[test]
+    fn system_locale_distinguishes_traditional_and_simplified_chinese() {
+        use super::{Lang, lang_for_locale};
+        for tag in ["zh-TW", "zh_TW.UTF-8", "zh-Hant", "zh-Hant-TW", "zh-Hant-HK", "zh-HK", "zh-MO"] {
+            assert_eq!(lang_for_locale(tag), Some(Lang::ZhTw), "{tag}");
+        }
+        for tag in ["zh", "zh-CN", "zh_CN.UTF-8", "zh-Hans", "zh-Hans-CN", "zh-SG"] {
+            assert_eq!(lang_for_locale(tag), Some(Lang::Zh), "{tag}");
+        }
+        assert_eq!(lang_for_locale("fr_FR.UTF-8"), Some(Lang::Fr));
+        assert_eq!(lang_for_locale("C.UTF-8"), None);
     }
 }
