@@ -564,7 +564,8 @@ fn font_info(family: &str, dl: Option<&crate::font_downloads::Entry>) -> crate::
     use crate::font_classes::{guess, info, Class, Info};
     if let Some(e) = dl {
         let cjk = e.group == crate::font_downloads::Group::Cjk || e.id == "maple-mono-cn";
-        let han = if cjk { if e.simplified { 1. } else { 0.7 } } else { 0. };
+        // a Chinese font in the catalog covers simplified Chinese (tools/fonts/stage.py checks)
+        let han = if cjk { 1. } else { 0. };
         return Info { class: e.class(), latin: true, han, trad: cjk, kana: false, hangul: false, arabic: false, symbol: false, other_lang: false };
     }
     let mut i = info(family).unwrap_or_else(|| guess(family));

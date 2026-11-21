@@ -10,7 +10,9 @@ usage: python3 tools/fonts/stage.py [--out DIR] [--cache DIR] [--fill] [--only I
            ~/.cache/quiet-md-font-sources)
   --fill   write each file's name, sha256 and size into packaging/fonts.json
            (after adding or updating a font); without it every file must
-           match the catalog, or the run fails
+           match the catalog, or the run fails. Either way a Chinese font
+           (group cjk) must cover 通用规范汉字表's 3500 first-level characters
+           (checked with fontTools)
   --only   just these fonts; --official: all but the ones marked trial
   --serve  then serve --out on 127.0.0.1:PORT, for QUIET_MD_FONT_URL=http://127.0.0.1:PORT/
            (a preview or a test build fetching from this machine instead of download.quiet.md)
@@ -87,6 +89,9 @@ def main():
             base = f["from"].split("#")[-1].rsplit("/", 1)[-1].lower()
             ext = "ttf.zlib" if base.endswith(".ttf.zlib") else base.rsplit(".", 1)[1]
             name = f"{f['stem']}-{sha[:12]}.{ext}"
+            if e.get("group", "cjk") == "cjk" and (missing := simplified_missing(inflate(data) if f.get("zlib") else data)):
+                bad.append(f"{e['id']}: a Chinese font must cover 通用规范汉字表's 3500 first-level characters; {len(missing)} missing, e.g. {''.join(missing[:20])}")
+                continue
             if a.fill:
                 f.update(name=name, sha256=sha, size=len(data))
                 fam = family_of(inflate(data) if f.get("zlib") else data)
@@ -100,11 +105,24 @@ def main():
     if a.fill:
         catalog_path.write_text(json.dumps(doc, ensure_ascii=False, indent=1) + "\n")
     if bad:
-        sys.exit("files differ from packaging/fonts.json:\n  " + "\n  ".join(bad))
+        sys.exit("refused:\n  " + "\n  ".join(bad))
     if a.serve:
         os.chdir(out)
         print(f"serving {out} at http://127.0.0.1:{a.serve}/", file=sys.stderr)
         http.server.ThreadingHTTPServer(("127.0.0.1", a.serve), http.server.SimpleHTTPRequestHandler).serve_forever()
+
+
+def simplified_missing(data):
+    """First-level characters of 通用规范汉字表 the font lacks ([] without fontTools: not checked)."""
+    try:
+        from fontTools.ttLib import TTFont
+        import io
+    except ImportError:
+        print("fontTools not installed: simplified Chinese coverage not checked", file=sys.stderr)
+        return []
+    have = set(TTFont(io.BytesIO(data), lazy=True).getBestCmap())
+    level1 = [l.strip() for l in (repo / "tools/fonts/data/tongyong-level1.txt").read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")]
+    return [c for c in level1 if ord(c) not in have]
 
 
 def inflate(data):

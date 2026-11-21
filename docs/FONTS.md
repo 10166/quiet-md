@@ -20,13 +20,13 @@ Settings › Appearance › Document font and Interface font share one list (`se
 
 ## Trial fonts
 
-Entries marked `trial` are being tried out. Release builds leave them out of the list (`TRIAL_FONTS` in `src/font_downloads.rs`); preview builds (`scripts/preview.sh`) and `QUIET_MD_TRIAL_FONTS=1` list them. `"simplified": false` marks a CJK font that lacks simplified characters (`tools/fonts/coverage.py`: under 100% of 通用规范汉字表's 3500 first-level characters); the list labels it 繁体为主 and, in the simplified Chinese interface, puts it last. `"group"` is `cjk`, `latin` (labelled 西文; CJK falls back to the system font) or `mono` (等宽).
+Entries marked `trial` are being tried out. Release builds leave them out of the list (`TRIAL_FONTS` in `src/font_downloads.rs`); preview builds (`scripts/preview.sh`) and `QUIET_MD_TRIAL_FONTS=1` list them. Chinese fonts in the catalog cover simplified Chinese in full (see below). `"group"` is `cjk`, `latin` (labelled 西文; CJK falls back to the system font) or `mono` (等宽).
 
 ## Adding or updating a font
 
 1. Add or edit its entry in `packaging/fonts.json`: `id`, `family` (as the font's name table says), `zh` / `en` names, `group`, `trial`, provenance (`version`, `license`, `home`, `license_from`) and `files` with `stem` and `from` (a URL, `URL#member` of a zip, or `repo:<path>`).
 2. `python3 tools/fonts/stage.py --fill` builds the files from upstream and writes `name`, `sha256` and `size`. With fontTools installed it also checks the family name.
-3. For a CJK font, `python3 tools/fonts/coverage.py <file>` and set `"simplified": false` if first-level coverage is under 100%.
+3. A Chinese font (`"group": "cjk"`) must cover all 3500 first-level characters of 通用规范汉字表: `stage.py` refuses it otherwise (with fontTools installed; `python3 tools/fonts/coverage.py <file>` shows the coverage and the missing characters).
 4. A font offered to everyone (not `trial`) goes in THIRD_PARTY.md.
 
 ## Release order

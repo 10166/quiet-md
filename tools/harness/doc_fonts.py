@@ -179,7 +179,7 @@ def sheet(shots):
         crop = im.crop((int(w * 0.27), int(h * 0.1), int(w * 0.95), int(h * 0.75)))
         tile = Image.new("RGB", (crop.width, crop.height + 80), "white")
         tile.paste(crop, (0, 80))
-        tag = {"latin": " · 西文", "mono": " · 等宽"}.get(e.get("group"), "") + ("" if e.get("simplified", True) else " · 繁体为主") + (" · 试用" if e.get("trial") else "")
+        tag = {"latin": " · 西文", "mono": " · 等宽"}.get(e.get("group"), "") + (" · 试用" if e.get("trial") else "")
         ImageDraw.Draw(tile).text((24, 18), f"{e['zh']}（{e['family']}）{tag}", fill=(200, 40, 40), font=label_font)
         tiles.append(tile.resize((tile.width // 2, tile.height // 2)))
     cols = 3

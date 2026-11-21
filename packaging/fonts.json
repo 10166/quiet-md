@@ -124,52 +124,6 @@
    ]
   },
   {
-   "id": "iansui",
-   "family": "Iansui",
-   "zh": "芫荽",
-   "en": "Iansui",
-   "group": "cjk",
-   "class": "kai",
-   "trial": true,
-   "simplified": false,
-   "version": "1.020",
-   "license": "OFL-1.1",
-   "home": "https://github.com/ButTaiwan/iansui",
-   "license_from": "https://github.com/ButTaiwan/iansui/releases/download/v1.020/iansui.zip#OFL.txt",
-   "files": [
-    {
-     "stem": "iansui-regular",
-     "name": "iansui-regular-7f1aa62e9dcb.ttf",
-     "sha256": "7f1aa62e9dcbf40d0ce41a5d3f1e5ea602e66c295778ac6fefb6b84d8ed08bd5",
-     "size": 9447424,
-     "from": "https://github.com/ButTaiwan/iansui/releases/download/v1.020/iansui.zip#Iansui-Regular.ttf"
-    }
-   ]
-  },
-  {
-   "id": "jf-openhuninn",
-   "family": "jf-openhuninn-2.1",
-   "zh": "jf 粉圆",
-   "en": "jf open-huninn",
-   "group": "cjk",
-   "class": "yuan",
-   "trial": true,
-   "simplified": false,
-   "version": "2.1",
-   "license": "OFL-1.1",
-   "home": "https://github.com/justfont/open-huninn-font",
-   "license_from": "https://raw.githubusercontent.com/justfont/open-huninn-font/v2.1/LICENSE",
-   "files": [
-    {
-     "stem": "jf-openhuninn",
-     "name": "jf-openhuninn-9d5bf4932d31.ttf",
-     "sha256": "9d5bf4932d31fe94c18cd8cfddc98bc1b14ce10f4e354c682179db290a99c825",
-     "size": 4911464,
-     "from": "https://github.com/justfont/open-huninn-font/releases/download/v2.1/jf-openhuninn-2.1.ttf"
-    }
-   ]
-  },
-  {
    "id": "literata",
    "family": "Literata",
    "zh": "Literata",

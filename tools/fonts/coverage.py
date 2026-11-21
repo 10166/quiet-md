@@ -4,8 +4,8 @@ first-level characters of 通用规范汉字表 (data/tongyong-level1.txt), the 
 of GB 2312 (from Python's gb2312 codec) and common Chinese punctuation.
 
 usage: python3 tools/fonts/coverage.py <font>… (TrueType / OpenType; .zlib inflated)
-Needs fontTools. A font whose first-level coverage is under 100% is marked
-`"simplified": false` in packaging/fonts.json (设置 lists it as 繁体为主).
+Needs fontTools. tools/fonts/stage.py refuses a Chinese font (group cjk) in
+packaging/fonts.json whose first-level coverage is under 100%.
 """
 import io, sys, zlib
 from pathlib import Path

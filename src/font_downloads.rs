@@ -52,14 +52,8 @@ pub struct Entry {
     pub class: String,
     #[serde(default)]
     pub trial: bool,
-    /// Covers 通用规范汉字表's 3500 first-level characters (tools/fonts/coverage.py);
-    /// false: mostly traditional Chinese.
-    #[serde(default = "yes")]
-    pub simplified: bool,
     pub files: Vec<File>,
 }
-
-fn yes() -> bool { true }
 
 #[derive(Deserialize, Debug, Default, Clone, Copy, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -392,7 +386,7 @@ mod tests {
         // the release lists only the fonts no longer on trial
         const { assert!(!TRIAL_FONTS) };
         assert!(["xiaolai", "lxgw-wenkai", "zhuque-fangsong"].iter().all(|id| entry(id).is_some_and(|e| !e.trial)));
-        assert!(parse(r#"{"fonts":[{"id":"a","family":"A","zh":"甲","en":"A","files":[]}]}"#).unwrap()[0].simplified);
+        assert!(parse(r#"{"fonts":[{"id":"a","family":"A","zh":"甲","en":"A","files":[]}]}"#).is_ok());
         assert!(parse(r#"{"fonts":[{"id":"a"}]}"#).is_err());
     }
 
