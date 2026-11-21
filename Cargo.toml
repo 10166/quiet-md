@@ -17,7 +17,7 @@ categories = ["text-editors"]
 [features]
 devtools = ["embed-xiaolai"]
 # `embed-xiaolai`: the board's CJK font (14 MB) compiled in instead of fetched
-# when first needed (src/board/xiaolai.rs). On with `devtools`, so harness
+# when first needed (src/font_downloads.rs). On with `devtools`, so harness
 # screenshots never depend on the network; off in shipped builds.
 embed-xiaolai = []
 datatable = []

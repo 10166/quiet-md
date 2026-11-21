@@ -26,6 +26,18 @@ fn tidy(mut list: Vec<String>) -> Vec<String> {
     list
 }
 
+/// A downloaded family was registered (`font_downloads`): it counts as
+/// installed from now on, and what punctuation it draws is probed again (a
+/// probe before it arrived saw a fallback face).
+pub fn added(family: &str) {
+    if let Some(list) = FAMILIES.write().unwrap().as_mut() && !list.iter().any(|f| f.eq_ignore_ascii_case(family)) {
+        let mut l = (**list).clone();
+        l.push(family.to_string());
+        *list = Arc::new(tidy(l));
+    }
+    OWN_GLYPHS.write().unwrap().retain(|(f, _)| !f.eq_ignore_ascii_case(family));
+}
+
 /// Whether `family` is installed, ignoring case (the platform's spelling of a
 /// family need not match the one saved).
 pub fn installed(family: &str, cx: &App) -> bool {

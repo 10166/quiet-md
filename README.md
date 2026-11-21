@@ -43,7 +43,7 @@
 
 ## Why Quiet.md
 
-**📁 Your notes are just files.** No account, no cloud, and nothing goes over the network by default, apart from the optional update check and a one-time download of the handwriting font for Chinese, Japanese and Korean the first time a whiteboard needs it. Every folder in the sidebar is a real folder on your disk, and every note is a file named after its title: `.md` for Markdown, `.xml` for rich documents. Sync them with iCloud, Git or anything you like. If you ever stop using Quiet.md, your files stay right where they are.
+**📁 Your notes are just files.** No account, no cloud, and nothing goes over the network by default, apart from the optional update check and font downloads you cause: the handwriting font for Chinese, Japanese and Korean the first time a whiteboard needs it, and a downloadable document font when you pick one. Every folder in the sidebar is a real folder on your disk, and every note is a file named after its title: `.md` for Markdown, `.xml` for rich documents. Sync them with iCloud, Git or anything you like. If you ever stop using Quiet.md, your files stay right where they are.
 
 **⚡ Native, and fast.** The whole interface is drawn on the GPU by Rust and [GPUI](https://www.gpui.rs/). No Electron, no WebView. In a one-million-character note, typing takes about 5 ms a frame, and a 120 Hz display allows 8.3.
 

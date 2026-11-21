@@ -1,20 +1,14 @@
 # Updates and forced updates
 
-`src/update.rs` keeps an installed copy current; `src/board/xiaolai.rs` fetches the board's CJK font when first needed ([Board font](#board-font)). Everything it trusts is signed with the release minisign key (`packaging/update-key.pub`; the secret key stays with the maintainer).
+`src/update.rs` keeps an installed copy current; fonts fetched on demand are in [Downloadable fonts](FONTS.md). Everything it trusts is signed with the release minisign key (`packaging/update-key.pub`; the secret key stays with the maintainer).
 
 ## Ordinary updates
 
 `scripts/publish-downloads.sh <packages…>` uploads each package to `v<version>/`, signs it (trusted comment: the package's file name) and writes `latest/update-<platform>.json` last. The app reads that manifest 10 seconds after launch and every 12 hours while Settings › About › Automatic updates is on. It downloads only when the user asks. The manifest is unsigned, so it can name only a package on download.quiet.md over HTTPS whose signature carries that package's own name, version included. Only newer versions are offered.
 
-## Board font
+## Fonts
 
-Xiaolai, the handwriting font boards draw Chinese, Japanese and Korean with (14 MB), is not in the packages. `src/board/xiaolai.rs` fetches it the first time a board needs it: an Excalifont text with CJK characters Excalifont lacks, or a copy as SVG / PNG of such text. Nothing is fetched before that, and nothing is sent besides the request for the file.
-
-- The file is `https://download.quiet.md/fonts/xiaolai-<first 12 hex digits of its SHA-256>.ttf.zlib`. The app has the whole SHA-256 compiled in and discards a file that does not match. It is fetched with the same `curl` call as update packages (HTTPS only, the system's proxy settings).
-- The verified file is kept in the app's data folder (`~/Library/Application Support/quiet.md/fonts` on macOS, `%LOCALAPPDATA%\quiet.md\fonts` on Windows, `~/.local/share/quiet.md/fonts` on Linux), never in the library. A cached file that no longer verifies is fetched again.
-- Until it arrives, boards draw CJK with the system's fonts; then open boards re-measure their CJK texts and repaint. Offline, the fetch fails quietly and is tried again only when needed, after 15 seconds, doubling up to an hour. A copy as picture waits up to 8 seconds for the font, then uses the system's fonts and says so.
-- **Release order:** `scripts/publish-downloads.sh --fonts` uploads the file (skipped when already served). Publishing packages runs that step first, so the font is served before any copy that needs it. A changed font gets a new name: update `SHA256`, `SIZE` and `NAME` in `src/board/xiaolai.rs` (a test checks them against the assets file).
-- `--features embed-xiaolai` (on with `devtools`) compiles the font in, for tests and harness screenshots. `QUIET_MD_FONT_URL` points at another folder (http allowed; a compiled-in copy is then ignored) and `QUIET_MD_FONT_DIR` replaces the cache folder, for testing.
+Xiaolai, the board's CJK handwriting font, and the downloadable document fonts are fetched from `fonts/` on download.quiet.md when first needed. See [Downloadable fonts](FONTS.md). Publishing packages uploads them first.
 
 ## Forced updates
 

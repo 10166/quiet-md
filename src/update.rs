@@ -535,7 +535,7 @@ fn curl_to(args: &[&str], stdout: Stdio) -> Result<Vec<u8>, String> {
     Err(format!("{}: {msg}", crate::settings::tr("无法连接更新服务器", "Could not reach the update server")))
 }
 
-/// `curl` as every download here runs it (board fonts too: board::xiaolai):
+/// `curl` as every download here runs it (fonts too: font_downloads):
 /// HTTPS only, redirects too, unless `testing` (a test server may be plain
 /// http); the system's proxy settings, as curl reads them.
 pub(crate) fn curl_command(testing: bool) -> Command {

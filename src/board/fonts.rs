@@ -17,7 +17,7 @@
 //! upstream) isn't bundled (the copy upstream ships is the GPL-licensed 1.x)
 //! and draws with Arial, which it is metric-compatible with. Xiaolai (14 MB
 //! compressed) is not in shipped builds: the first time a text needs it, it is
-//! fetched (`super::xiaolai`), then unpacked and registered; until then (and
+//! fetched (`crate::font_downloads`), then unpacked and registered; until then (and
 //! in the web build, which never fetches) boards draw CJK with the fallbacks.
 
 use fdl_core::board::consts::font_family as ff;
@@ -28,6 +28,7 @@ use rustc_hash::FxHashSet;
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::sync::{Arc, OnceLock};
+use crate::font_downloads::XIAOLAI as XL;
 
 /// Bundled faces: family number, family name (as Excalidraw's CSS names
 /// it, and as the font's name table says), file under assets/.
@@ -51,7 +52,7 @@ fn index(family: u32) -> Option<usize> { BUNDLED.iter().position(|b| b.0 == fami
 /// The font file of a family or fallback number (core's `FontSource`);
 /// Xiaolai once it is here.
 pub fn bytes(family: u32) -> Option<&'static [u8]> {
-    if family == XIAOLAI_FALLBACK { return super::xiaolai::font(); }
+    if family == XIAOLAI_FALLBACK { return crate::font_downloads::font(XL); }
     asset(BUNDLED[index(family)?].2)
 }
 
@@ -82,7 +83,6 @@ pub fn load(cx: &App) {
     if let Err(e) = cx.text_system().add_fonts(fonts) { log::warn!("board fonts: {e}"); }
     TEXT_SYSTEM.with(|t| *t.borrow_mut() = Some(cx.text_system().clone()));
     set_font_source(bytes);
-    super::xiaolai::init(cx);
 }
 
 /// Adds the bundled fonts to a usvg font database (copy as PNG rasterizes
@@ -100,8 +100,8 @@ pub fn load_into(db: &mut resvg::usvg::fontdb::Database, cjk: bool) {
 fn xiaolai_added() -> bool {
     XIAOLAI_ADDED.with(|a| {
         if a.get() { return true; }
-        let Some(b) = super::xiaolai::font() else { super::xiaolai::want(); return false };
-        let ok = TEXT_SYSTEM.with(|t| t.borrow().clone()).is_some_and(|ts| ts.add_fonts(vec![Cow::Borrowed(b)]).is_ok());
+        if crate::font_downloads::font(XL).is_none() { crate::font_downloads::want(XL, crate::font_downloads::Mode::Fetch); return false }
+        let ok = TEXT_SYSTEM.with(|t| t.borrow().clone()).is_some_and(|ts| crate::font_downloads::register(XL, &ts));
         a.set(ok);
         ok
     })

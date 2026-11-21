@@ -19,6 +19,7 @@ pub mod action;
 pub mod canvas;
 pub mod chrome;
 pub mod fonts;
+pub mod font_hint;
 pub mod frame_name;
 pub mod keys;
 pub mod overlay;
@@ -26,7 +27,6 @@ pub mod render;
 pub mod run;
 pub mod text_editor;
 pub mod tools;
-pub mod xiaolai;
 
 pub use fdl_core::board::*;
 
@@ -141,6 +141,8 @@ pub struct BoardView {
     pub(crate) hits: RefCell<canvas::HitIndex>,
     /// The chrome's view (made on the first render).
     chrome: Option<Entity<chrome::ChromeView>>,
+    /// The note while the CJK handwriting font downloads (`font_hint`).
+    font_hint: Option<Entity<font_hint::FontHint>>,
     /// The next notify comes from a pointer move that leaves the chrome as
     /// it was (`chrome::ChromeView`).
     pub(crate) chrome_quiet: Cell<bool>,
@@ -184,17 +186,19 @@ impl BoardView {
             m: render::measure(window), painter: Rc::new(RefCell::new({ let mut p = render::Painter::default(); p.screen_frame_names = true; p })), focus: cx.focus_handle(), bounds: Rc::default(), gesture: None, space: false, fitted: false,
             linear: None, multi: None, suggested: None, snap_lines: vec![], text: None, frame_name: None, frame_labels: vec![], font_cache: None, font_previewing: false, refocus: false, hover_cursor: CursorStyle::Arrow, pointer: point(px(0.), px(0.)),
             menu: None, help: false, copied_styles: vec![], flowchart: FlowChartCreator::default(), navigator: FlowChartNavigator::default(),
-            faded: FxHashMap::default(), saved: 0, slider: false, aabbs: RefCell::default(), hits: RefCell::default(), chrome: None, chrome_quiet: Cell::new(false),
+            faded: FxHashMap::default(), saved: 0, slider: false, aabbs: RefCell::default(), hits: RefCell::default(), chrome: None, font_hint: None, chrome_quiet: Cell::new(false),
         };
         // the loaded scene is the baseline, not an undoable step
         v.store.schedule_action(CaptureUpdateAction::Never);
         let _ = v.store.commit(Some(v.scene.elements_including_deleted()), Some(&v.app));
         v.saved = v.scene_version();
-        cx.observe_global::<xiaolai::Ready>(|me, cx| me.fonts_arrived(cx)).detach();
+        cx.observe_global::<crate::font_downloads::Changed>(|me, cx| {
+            if cx.global::<crate::font_downloads::Changed>().ok && cx.global::<crate::font_downloads::Changed>().id == crate::font_downloads::XIAOLAI { me.fonts_arrived(cx) }
+        }).detach();
         v
     }
 
-    /// Xiaolai arrived (`xiaolai::Ready`): CJK texts measured with the
+    /// Xiaolai arrived (`font_downloads::Changed`): CJK texts measured with the
     /// fallbacks take their Xiaolai size (not an undo step; only texts whose
     /// box changes are touched, so a board measured with Xiaolai elsewhere
     /// stays as saved), and the cached shapes go.
@@ -438,6 +442,7 @@ impl Render for BoardView {
         let frame_name = frame_name::element(self, cx);
         let me = cx.entity();
         let chrome = self.chrome.get_or_insert_with(|| cx.new(|cx| chrome::ChromeView::new(&me, cx))).clone();
+        let hint = self.font_hint.get_or_insert_with(|| cx.new(font_hint::FontHint::new)).clone();
         div()
             .id("board")
             .key_context("Board")
@@ -456,6 +461,7 @@ impl Render for BoardView {
             .child(div().absolute().top_0().left_0().size_full().overflow_hidden().children(labels).children(frame_name))
             .children(editor)
             .child(AnyView::from(chrome).cached(StyleRefinement::default().absolute().top_0().left_0().size_full()))
+            .child(hint)
             .children(canvas::capture_layer(self, cx))
     }
 }

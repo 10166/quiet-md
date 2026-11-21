@@ -228,10 +228,66 @@ pub fn check_fonts(cx: &App) {
     let p = prefs();
     if p.ui_family.trim().is_empty() && p.doc_family.trim().is_empty() { return }
     crate::fonts::families(cx);
+    load_downloaded(&p.doc_family, cx);
     crate::fonts::probe(&p.doc_family, cx);
     crate::fonts::probe(&p.ui_family, cx);
     themes::set_doc_font(&p.doc_family);
     theme::set_ui_family(&p.ui_family);
+}
+
+/// A document font from 设置's download list: registered if this run has
+/// it, else read from the cache (`Mode::Cache`: a deleted or damaged copy is
+/// not fetched behind the reader's back; the font row offers it again and
+/// the default face stands in, as for an uninstalled font).
+fn load_downloaded(family: &str, cx: &App) {
+    use crate::font_downloads as fd;
+    let Some(e) = fd::by_family(family) else { return };
+    if fd::register(&e.id, cx.text_system()) { crate::fonts::added(&e.family); return }
+    if fd::on_disk(&e.id) { fd::want(&e.id, fd::Mode::Cache); }
+}
+
+/// The download list's font picked while it was still on its way (its id):
+/// it becomes the document font when it arrives.
+static PENDING_DOC: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// A downloadable font arrived or failed (`font_downloads::Changed`, every
+/// window): a pending pick takes effect or is dropped with a toast (the font
+/// in use stays); the document font in use starts drawing in it.
+pub fn font_changed(cx: &mut App) {
+    use crate::font_downloads as fd;
+    let c = cx.global::<fd::Changed>().clone();
+    let Some(e) = fd::entry(&c.id) else { return };
+    let pending = { let mut p = PENDING_DOC.lock().unwrap(); if p.as_deref() == Some(c.id.as_str()) { p.take() } else { None } };
+    let uses = prefs().doc_family.eq_ignore_ascii_case(&e.family);
+    let ws = cx.active_window().or_else(|| cx.windows().first().copied()).and_then(|w| w.downcast::<Workspace>());
+    // Picked from a cache that turned out damaged: download it after all.
+    if !c.ok && c.error.is_none() && pending.is_some() {
+        *PENDING_DOC.lock().unwrap() = pending;
+        fd::want(&c.id, fd::Mode::Now);
+        return;
+    }
+    if !c.ok {
+        if pending.is_some() && let Some(w) = ws {
+            let msg = crate::localized_format!("{} 下载失败，仍用原来的字体：{}", "Could not download {}; the font in use stays: {}", e.name(), c.error.clone().unwrap_or_default());
+            let _ = w.update(cx, |ws, _, cx| ws.show_toast_kind(ui::ToastKind::Error, &msg, cx));
+        }
+        return;
+    }
+    if !(uses || pending.is_some()) { return }
+    // Xiaolai registers when a board first needs it; as a document font, now.
+    fd::register(&e.id, cx.text_system());
+    crate::fonts::added(&e.family);
+    let family = e.family.clone();
+    match (pending, ws) {
+        (Some(_), Some(w)) => { let _ = w.update(cx, |ws, _, cx| ws.set_pref(|p| p.doc_family = family, cx)); }
+        _ => {
+            crate::fonts::probe(&family, cx);
+            themes::set_doc_font(&family);
+            for w in cx.windows() {
+                if let Some(h) = w.downcast::<Workspace>() { let _ = h.update(cx, |ws, _, cx| refresh_all(ws, cx)); }
+            }
+        }
+    }
 }
 
 /// Tell the OS which look the app wants (macOS: the window material, menus
@@ -441,15 +497,71 @@ pub struct FontMenu {
     _sub: Subscription,
 }
 
-/// 外观's font list: 跟随主题, then the installed families `term` matches. A
-/// search drops 跟随主题 — it is a reset, not a family.
-fn font_choices(term: &str, cx: &App) -> Vec<String> { filter_fonts(term, &crate::fonts::families(cx)) }
+/// 外观's font list: 跟随主题, then (文档字体) the fonts it can download, then
+/// the installed families `term` matches. A search drops 跟随主题 — it is a
+/// reset, not a family. A download row is `DOWNLOAD` and the font's id; its
+/// family isn't listed again with the installed ones.
+fn font_choices(term: &str, target: FontTarget, cx: &App) -> Vec<String> {
+    let downloads: Vec<(&str, &str, &str)> = if target == FontTarget::Doc { download_list().map(|e| (e.id.as_str(), e.name(), e.family.as_str())).collect() } else { vec![] };
+    filter_fonts(term, &crate::fonts::families(cx), &downloads)
+}
 
-fn filter_fonts(term: &str, families: &[String]) -> Vec<String> {
+/// What marks a download row in `font_choices`.
+const DOWNLOAD: char = '\u{1}';
+
+/// The download list in display order: in the simplified Chinese interface
+/// the fonts that lack simplified characters (繁体为主) go last.
+fn download_list() -> impl Iterator<Item = &'static crate::font_downloads::Entry> {
+    let mut v: Vec<_> = crate::font_downloads::listed().collect();
+    if lang() == Lang::Zh { v.sort_by_key(|e| !e.simplified); }
+    v.into_iter()
+}
+
+/// `downloads`: (id, name, family).
+fn filter_fonts(term: &str, families: &[String], downloads: &[(&str, &str, &str)]) -> Vec<String> {
     let term = term.trim().to_lowercase();
     let mut list = if term.is_empty() { vec![String::new()] } else { vec![] };
-    list.extend(families.iter().filter(|f| f.to_lowercase().contains(&term)).cloned());
+    list.extend(downloads.iter().filter(|d| d.1.to_lowercase().contains(&term) || d.2.to_lowercase().contains(&term)).map(|d| format!("{DOWNLOAD}{}", d.0)));
+    list.extend(families.iter().filter(|f| f.to_lowercase().contains(&term) && !downloads.iter().any(|d| d.2.eq_ignore_ascii_case(f))).cloned());
     list
+}
+
+/// A row of 文档字体's download list: the font's name (in its own face once
+/// it is here), what it is (西文, 等宽, 繁体为主, 试用), then its size and a
+/// download mark, its progress, or (downloaded) a check when in use and a
+/// delete button.
+fn download_row(e: &'static crate::font_downloads::Entry, g: SharedString, focused: bool, current: &str, cx: &mut Context<Workspace>) -> Div {
+    use crate::font_downloads::{self as fd, Group};
+    let id = e.id.as_str();
+    let downloaded = fd::on_disk(id);
+    let here = downloaded || crate::fonts::installed(&e.family, cx) && !fd::registered(id);
+    let face: SharedString = if crate::fonts::installed(&e.family, cx) { e.family.clone().into() } else { theme::ui_family().into() };
+    let picked = e.family.eq_ignore_ascii_case(current);
+    let small = |t: String| div().flex_none().text_size(px(theme::ui_font_small() - 1.)).line_height(px(theme::ui_font_small() + 3.)).text_color(Theme::text_caption()).child(t);
+    let tags: Vec<&str> = [
+        (e.group == Group::Latin).then(|| tr("西文", "Latin")),
+        (e.group == Group::Mono).then(|| tr("等宽", "Mono")),
+        (e.group == Group::Cjk && !e.simplified).then(|| tr("繁体为主", "Traditional")),
+        e.trial.then(|| tr("试用", "Trial")),
+    ].into_iter().flatten().collect();
+    let mb = e.size() as f64 / 1e6;
+    let status = if fd::pending(id) { small(format!("{:.0}%", fd::progress(id) * 100.)).into_any_element() }
+        else if here { div().flex_none().w(px(14.)).when(picked, |d| d.child(ui::menu_glyph("check", 14., g.clone()))).into_any_element() }
+        else {
+            div().flex_none().flex().items_center().gap(px(4.)).child(small(if mb < 10. { format!("{mb:.1} MB") } else { format!("{mb:.0} MB") }))
+                .child(svg().path("editor-icons/download.svg").size(px(13.)).text_color(Theme::icon())).into_any_element()
+        };
+    let value = format!("{DOWNLOAD}{id}");
+    let del = id.to_string();
+    div().w_full().flex().flex_col().child(ui::menu_row(g.clone(), g.clone())
+        .when(focused, |d| d.bg(Theme::fill_hover()))
+        .child(div().flex_1().min_w_0().overflow_hidden().font_family(face).child(ui::menu_label(SharedString::from(e.name().to_string()), g.clone(), gpui::white())))
+        .children(tags.into_iter().map(|t| small(t.to_string()).px(px(5.)).rounded(px(4.)).bg(Theme::fill_hover())))
+        .child(status)
+        .when(downloaded && !fd::pending(id), |d| d.child(div().id(SharedString::from(format!("font-del-{id}"))).flex_none().size(px(20.)).flex().items_center().justify_center().rounded(px(5.))
+            .hover(|s| s.bg(Theme::fill_hover_strong())).child(ui::icon("bin", 13., Theme::icon()))
+            .on_click(cx.listener(move |w, _, _, cx| { cx.stop_propagation(); w.delete_download(&del, cx) }))))
+        .on_click(cx.listener(move |w, _, window, cx| w.pick_font(value.clone(), FontTarget::Doc, window, cx))))
 }
 
 /// A segmented control: a grey groove and a white selected pill.
@@ -731,7 +843,7 @@ impl Workspace {
         // Open on the family in use.
         let scroll = UniformListScrollHandle::new();
         let current = target.current();
-        if let Some(i) = font_choices("", cx).iter().position(|f| f.eq_ignore_ascii_case(&current)) { scroll.scroll_to_item(i, ScrollStrategy::Center); }
+        if let Some(i) = font_choices("", target, cx).iter().position(|f| f.eq_ignore_ascii_case(&current)) { scroll.scroll_to_item(i, ScrollStrategy::Center); }
         self.font_menu = Some(FontMenu { field, target, focused: None, scroll, _sub: sub });
         window.focus(&focus, cx);
         cx.notify();
@@ -745,7 +857,7 @@ impl Workspace {
         let b = *self.font_anchors.borrow().get(menu.target.key())?;
         let target = menu.target;
         let current = target.current();
-        let choices = std::rc::Rc::new(font_choices(&menu.field.read(cx).text, cx));
+        let choices = std::rc::Rc::new(font_choices(&menu.field.read(cx).text, target, cx));
         let n = choices.len();
         let focused = menu.focused.clone();
         let list = if n == 0 {
@@ -756,6 +868,9 @@ impl Workspace {
                 range.map(|i| {
                     let family = &choices[i];
                     let g = SharedString::from(format!("font-{}-{i}", target.key()));
+                    if let Some(id) = family.strip_prefix(DOWNLOAD) && let Some(e) = crate::font_downloads::entry(id) {
+                        return download_row(e, g, focused.as_deref() == Some(family.as_str()), &current, cx);
+                    }
                     let picked = family.eq_ignore_ascii_case(&current);
                     let (label, face): (SharedString, SharedString) = if family.is_empty() {
                         (target.reset_label().into(), theme::ui_family().into())
@@ -783,7 +898,7 @@ impl Workspace {
                 window.focus(&w.focus, cx);
                 cx.notify();
             }))
-            .child(div().w(px(240.)).flex().flex_col()
+            .child(div().w(px(if target == FontTarget::Doc { 320. } else { 240. })).flex().flex_col()
                 .child(div().px(px(8.)).pt(px(8.)).pb(px(4.))
                     .child(div().h(px(28.)).px(px(7.)).flex().items_center().gap(px(6.)).rounded(px(7.)).bg(Theme::fill_hover())
                         .child(ui::icon("search", 13., Theme::icon()))
@@ -793,6 +908,7 @@ impl Workspace {
     }
 
     fn pick_font(&mut self, family: String, target: FontTarget, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = family.strip_prefix(DOWNLOAD) { return self.pick_download(id, window, cx) }
         self.font_menu = None;
         window.focus(&self.focus, cx);
         self.set_pref(move |p| match target {
@@ -801,11 +917,43 @@ impl Workspace {
         }, cx);
     }
 
+    /// A download row picked: a font this run has (or the system's own copy)
+    /// becomes the document font at once; else it is read from the cache or
+    /// downloaded, the list staying open on its progress, and becomes the
+    /// document font when it arrives (`font_changed`).
+    fn pick_download(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::font_downloads as fd;
+        let Some(e) = fd::entry(id) else { return };
+        if fd::fonts(id).is_some() && fd::register(id, cx.text_system()) || crate::fonts::installed(&e.family, cx) && !fd::registered(id) {
+            crate::fonts::added(&e.family);
+            let family = e.family.clone();
+            return self.pick_font(family, FontTarget::Doc, window, cx);
+        }
+        *PENDING_DOC.lock().unwrap() = Some(id.to_string());
+        fd::want(id, if fd::on_disk(id) { fd::Mode::Cache } else { fd::Mode::Now });
+        cx.notify();
+    }
+
+    /// The trash button of a downloaded font: its files go; the document
+    /// font goes back to 跟随主题 if it was this one. Xiaolai stays loaded
+    /// for the boards open now and is fetched again when a board next needs it.
+    fn delete_download(&mut self, id: &str, cx: &mut Context<Self>) {
+        use crate::font_downloads as fd;
+        let Some(e) = fd::entry(id) else { return };
+        if let Err(err) = fd::delete(id) {
+            return self.show_toast_kind(ui::ToastKind::Error, &format!("{}: {err}", tr("删除失败", "Could not delete")), cx);
+        }
+        if prefs().doc_family.eq_ignore_ascii_case(&e.family) { self.set_pref(|p| p.doc_family.clear(), cx); }
+        let msg = if id == fd::XIAOLAI { tr("已删除。画板需要中文手写字体时会重新下载。", "Deleted. Boards download the handwriting font again when they need it.").to_string() }
+            else { crate::localized_format!("已删除 {}", "Deleted {}", e.name()) };
+        self.show_toast_kind(ui::ToastKind::Success, &msg, cx);
+    }
+
     /// ↑ / ↓ in the font list: the first press moves from the family in use,
     /// else lands on the first row (↓) or the last (↑).
     fn move_font_focus(&mut self, down: bool, cx: &mut Context<Self>) {
         let Some(menu) = &self.font_menu else { return };
-        let choices = font_choices(&menu.field.read(cx).text, cx);
+        let choices = font_choices(&menu.field.read(cx).text, menu.target, cx);
         if choices.is_empty() { return }
         // Before the first press the family in use is the starting point.
         let current = menu.target.current();
@@ -828,7 +976,7 @@ impl Workspace {
     /// ↩ in the font list: the highlighted family, else the first match.
     fn pick_focused_font(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let picked = self.font_menu.as_ref().and_then(|m| {
-            let choices = font_choices(&m.field.read(cx).text, cx);
+            let choices = font_choices(&m.field.read(cx).text, m.target, cx);
             let family = match &m.focused {
                 Some(f) => choices.iter().find(|c| *c == f).cloned(),
                 None => choices.first().cloned(),
@@ -1119,13 +1267,17 @@ impl Workspace {
         let family = target.current();
         let description = if family.is_empty() || crate::fonts::installed(&family, cx) {
             desc(about)
+        } else if let Some(e) = crate::font_downloads::by_family(&family) {
+            Some(if crate::font_downloads::pending(&e.id) { tr("正在载入这个字体…", "Loading that font…").into() }
+                else { tr("这个字体还没下载（或已被删除），暂时用默认字体显示。打开列表可以重新下载。", "That font isn't downloaded (or was deleted); the default face stands in. Open the list to download it again.").into() })
         } else {
             Some(tr("这个字体没有安装，暂时用默认字体显示。", "That font isn't installed; the default face stands in for now.").into())
         };
         row(title, description, {
             let anchors = self.font_anchors.clone();
             let key = target.key();
-            let label: SharedString = if family.is_empty() { target.reset_label().into() } else { family.clone().into() };
+            let label: SharedString = if family.is_empty() { target.reset_label().into() }
+                else { crate::font_downloads::by_family(&family).map_or_else(|| family.clone(), |e| e.name().to_string()).into() };
             let open = self.font_menu.as_ref().is_some_and(|m| m.target == target);
             popup_button(format!("{}-font-picker", target.key()), label, open)
                 .child(canvas(move |b, _, _| { anchors.borrow_mut().insert(key, b); }, |_, _, _, _| {}).absolute().inset_0())
@@ -2267,9 +2419,13 @@ mod tests {
     #[test]
     fn font_list_filters_and_drops_the_reset_while_searching() {
         let all: Vec<String> = ["Georgia", "LXGW WenKai", "Songti SC"].map(String::from).to_vec();
-        assert_eq!(filter_fonts("", &all), ["", "Georgia", "LXGW WenKai", "Songti SC"]);
-        assert_eq!(filter_fonts(" wen ", &all), ["LXGW WenKai"]);
-        assert!(filter_fonts("zzz", &all).is_empty());
+        assert_eq!(filter_fonts("", &all, &[]), ["", "Georgia", "LXGW WenKai", "Songti SC"]);
+        assert_eq!(filter_fonts(" wen ", &all, &[]), ["LXGW WenKai"]);
+        assert!(filter_fonts("zzz", &all, &[]).is_empty());
+        // the download list comes first, its fonts not listed again
+        let dl = [("lxgw-wenkai", "霞鹜文楷", "LXGW WenKai"), ("zhuque-fangsong", "朱雀仿宋", "Zhuque Fangsong")];
+        assert_eq!(filter_fonts("", &all, &dl), ["", "\u{1}lxgw-wenkai", "\u{1}zhuque-fangsong", "Georgia", "Songti SC"]);
+        assert_eq!(filter_fonts("朱雀", &all, &dl), ["\u{1}zhuque-fangsong"]);
     }
 
     /// A preferences.json from before the font settings reads with both

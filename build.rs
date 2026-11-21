@@ -7,7 +7,7 @@ use std::path::Path;
 fn main() {
     // The bundled emoji font is for Linux only: macOS and Windows have color emoji fonts GPUI draws.
     let linux = matches!(std::env::var("CARGO_CFG_TARGET_OS").as_deref(), Ok("linux" | "freebsd"));
-    // Xiaolai (14 MB) is fetched the first time a board needs it (src/board/xiaolai.rs);
+    // Xiaolai (14 MB) is fetched the first time a board needs it (src/font_downloads.rs);
     // `embed-xiaolai` (with `devtools`) keeps it in for tests and screenshots. The
     // site's live demo never has it: boards there draw CJK with the fallbacks.
     let web = std::env::var("CARGO_CFG_TARGET_FAMILY").is_ok_and(|f| f.split(',').any(|f| f == "wasm"));

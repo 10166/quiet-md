@@ -10,9 +10,9 @@
 # --policy instead of packages signs and uploads latest/policy.json, the forced update (docs/UPDATES.md):
 #   MIN_VERSION=0.1.15 MESSAGE_ZH='…' MESSAGE_EN='…' scripts/publish-downloads.sh --policy
 #   PLATFORM_MIN='windows-x64=0.1.16' (per platform, in place of MIN_VERSION); neither set clears the policy.
-# --fonts uploads the board's Xiaolai font as fonts/xiaolai-<hash>.ttf.zlib (skipped when already served).
-# Copies fetch it the first time a board needs it (src/board/xiaolai.rs), so it must be there before a
-# release: publishing packages does this step first.
+# --fonts uploads the downloadable fonts (packaging/fonts.json: the board's Xiaolai, 设置's document fonts) as
+# fonts/<name>-<hash>.<ext>, built by tools/fonts/stage.py (skipped when already served). Copies fetch them
+# when first needed, so they must be there before a release: publishing packages does this step first.
 set -euo pipefail
 export PYTHONIOENCODING=utf-8
 cd "$(dirname "$0")/.."
@@ -44,20 +44,24 @@ sign() {  # file trusted-comment signature
   minisign -V -q -p "$pub" -m "$1" -x "$3" || { echo "$(basename "$1"): signature does not match $pub" >&2; exit 1; }
 }
 
-# The font's name carries its SHA-256 (the app has the whole hash compiled in and checks it), so a file is
-# never replaced: a changed font is a new name. Not signed: the compiled-in hash is what the app trusts.
+# Downloadable fonts (packaging/fonts.json, docs/FONTS.md): tools/fonts/stage.py builds each file from its
+# upstream release and checks it against the catalog, whose SHA-256 the app has compiled in; a file's name
+# carries its hash, so a file is never replaced (a changed font is a new name). Already served: skipped.
+# Each font's license goes along as fonts/<id>-LICENSE.txt. The fonts marked trial (listed only by preview
+# builds) are left out unless named: FONTS='id …' publishes just those.
 publish_fonts() {
-  local file=assets/fonts/excalidraw/Xiaolai-Regular.ttf.zlib hash name size
-  hash=$(shasum -a 256 "$file" | cut -d' ' -f1); name="xiaolai-${hash:0:12}.ttf.zlib"; size=$(stat -f %z "$file")
-  grep -q "\"$hash\"" src/board/xiaolai.rs && grep -q "\"$name\"" src/board/xiaolai.rs \
-    || { echo "src/board/xiaolai.rs does not name $file ($hash); update SHA256, SIZE and NAME" >&2; exit 1; }
-  if curl -sfI "$host/fonts/$name" | tr -d '\r' | grep -qi "^content-length: $size$"; then
-    echo "$host/fonts/$name is already served"; return
-  fi
-  put "fonts/$name" "$file" "application/octet-stream" "public, max-age=31536000, immutable"
-  [ -n "${DRY_RUN:-}" ] && return
-  curl -sfI "$host/fonts/$name" | tr -d '\r' | grep -qi "^content-length: $size$" || { echo "fonts/$name is not served" >&2; exit 1; }
-  echo "$host/fonts/$name ($size bytes)"
+  local staged="$work/fonts" list name size
+  python3 tools/fonts/stage.py --out "$staged" $([ -n "${FONTS:-}" ] && echo "--only ${FONTS// /,}" || echo --official) >"$work/fonts.txt" || { echo "tools/fonts/stage.py failed" >&2; exit 1; }
+  list=$(cut -f1 "$work/fonts.txt"; (cd "$staged" && ls ./*-LICENSE.txt | sed 's|^\./||'))
+  for name in $list; do
+    size=$(stat -f %z "$staged/$name")
+    if curl -sfI "$host/fonts/$name" | tr -d '\r' | grep -qi "^content-length: $size$"; then echo "$host/fonts/$name is already served"; continue; fi
+    case "$name" in *.txt) type="text/plain; charset=utf-8" ;; *.otf) type=font/otf ;; *.ttf) type=font/ttf ;; *) type=application/octet-stream ;; esac
+    put "fonts/$name" "$staged/$name" "$type" "public, max-age=31536000, immutable"
+    [ -n "${DRY_RUN:-}" ] && continue
+    curl -sfI "$host/fonts/$name" | tr -d '\r' | grep -qi "^content-length: $size$" || { echo "fonts/$name is not served" >&2; exit 1; }
+    echo "$host/fonts/$name ($size bytes)"
+  done
 }
 if [ "$1" = --fonts ]; then
   [ $# -eq 1 ] || { echo "--fonts takes no packages" >&2; exit 1; }
@@ -105,7 +109,7 @@ PYTHON
   exit 0
 fi
 
-# Before any package: a copy that cannot fetch the font draws CJK on boards with the system fonts.
+# Before any package: a copy that cannot fetch a font falls back (boards: the system's CJK font).
 publish_fonts
 for file in "$@"; do
   name=$(basename "$file")
