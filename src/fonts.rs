@@ -79,6 +79,8 @@ pub struct Glyphs { pub cjk_punct: bool, pub quotes: bool }
 pub fn probe(family: &str, cx: &App) {
     let family = family.trim();
     if family.is_empty() || OWN_GLYPHS.read().unwrap().iter().any(|(f, _)| f == family) { return }
+    // a downloaded font still loading: probed once it is registered (`added`)
+    if crate::font_downloads::by_family(family).is_some_and(|e| !crate::font_downloads::registered(&e.id) && !installed(family, cx)) { return }
     let ts = cx.text_system();
     let id = ts.resolve_font(&gpui::font(family.to_string()));
     let width = |ch| ts.advance(id, gpui::px(16.), ch).ok().map(|s| s.width);

@@ -999,7 +999,7 @@ impl Workspace {
         self.theme_menu = None;
         self.lang_menu = None;
         self.pref_menu = None;
-        self.font_menu = None;
+        self.close_font_menu(cx);
         self.home.sort_menu = false;
         cx.notify();
     }

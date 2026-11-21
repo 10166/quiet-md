@@ -6,6 +6,10 @@ Some fonts are not in the packages. `src/font_downloads.rs` fetches them when th
 - **Document fonts** in Settings › Appearance › Document font, under the system's fonts: 霞鹜文楷 (LXGW WenKai, Regular and Medium), 朱雀仿宋 (Zhuque Fangsong) and Xiaolai. Each shows its size; picking one downloads it with progress in the list, then makes it the document font. A failed download leaves the font in use and says why. A downloaded font has a delete button. Deleting the document font in use goes back to the theme's. Deleting Xiaolai leaves the boards open now as they are; boards fetch it again when they need it.
 - Nothing is fetched before it is needed, and nothing is sent besides the request for the file.
 
+## The font lists
+
+Settings › Appearance › Document font and Interface font share one list (`settings::font_choices`): the reset, 收藏 (starred, shared by both lists) and 最近使用 (the last 5 picked for that list), then a section per class: 黑体, 宋体, 楷体·手写, 圆体, 等宽, 西文衬线, 西文无衬线, 其他. The CJK sections come first in Chinese, Japanese and Korean interfaces, the Latin ones otherwise; within a section, faces that suit the interface language lead (full simplified Chinese for 简体中文). Symbol faces and faces made for another script are folded under 其他语言和符号. `src/font_classes.rs` reads what each installed family is from its file (fontdb's scan, about 0.2 s off the main thread when the list first opens): coverage of 通用规范汉字表's first-level characters, monospace from `post` or the ASCII advances, serif or sans from OS/2 `sFamilyClass` and PANOSE, else from the names; `KNOWN` fixes common system families those get wrong. Each row draws a sample in its face; hovering or arrowing to a row shows the page in it after a short pause, Return or a click saves it, Esc or a click outside puts the saved font back.
+
 ## Trust and cache
 
 - Each file's name carries the first 12 hex digits of its SHA-256; the catalog holds the full hash and size, and a file that does not match is discarded. Files are fetched with the same `curl` call as update packages (HTTPS only including redirects, the system's proxy settings).

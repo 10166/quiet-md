@@ -62,6 +62,7 @@ mod table;
 mod l10n;
 mod themes;
 mod fonts;
+mod font_classes;
 mod font_downloads;
 mod shortcuts;
 #[allow(dead_code, unused_imports)]

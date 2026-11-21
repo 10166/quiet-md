@@ -53,6 +53,8 @@ base64 = "0.22"
 resvg = { version = "0.45", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
 # the board's Xiaolai font is stored deflated (src/board/fonts.rs)
 miniz_oxide = "0.9"
+# 设置's font lists read what each installed family is (src/font_classes.rs)
+ttf-parser = "0.25"
 minisign-verify = "0.3.0"
 sha2 = "0.10.9"
 log = "0.4"

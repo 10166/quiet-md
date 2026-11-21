@@ -47,6 +47,9 @@ pub struct Entry {
     pub en: String,
     #[serde(default)]
     pub group: Group,
+    /// Where 设置's font list files it: hei, song, kai, yuan, mono, latin-serif, latin-sans.
+    #[serde(default)]
+    pub class: String,
     #[serde(default)]
     pub trial: bool,
     /// Covers 通用规范汉字表's 3500 first-level characters (tools/fonts/coverage.py);
@@ -73,6 +76,10 @@ pub struct File {
 }
 
 impl Entry {
+    pub fn class(&self) -> crate::font_classes::Class {
+        use crate::font_classes::Class;
+        match self.class.as_str() { "hei" => Class::Hei, "song" => Class::Song, "kai" => Class::Kai, "yuan" => Class::Yuan, "mono" => Class::Mono, "latin-serif" => Class::LatinSerif, "latin-sans" => Class::LatinSans, _ => Class::Other }
+    }
     pub fn size(&self) -> u64 { self.files.iter().map(|f| f.size).sum() }
     pub fn name(&self) -> &str { if matches!(crate::settings::lang(), crate::settings::Lang::Zh | crate::settings::Lang::ZhTw) { &self.zh } else { &self.en } }
 }
@@ -373,6 +380,7 @@ mod tests {
         assert_eq!((ids.len(), fams.len()), (c.len(), c.len()));
         for e in c {
             assert!(!e.files.is_empty() && !e.zh.is_empty() && !e.en.is_empty(), "{}", e.id);
+            assert_ne!(e.class(), crate::font_classes::Class::Other, "{} has a class", e.id);
             for f in &e.files {
                 assert_eq!(f.sha256.len(), 64, "{}", f.name);
                 assert!(f.name.contains(&format!("-{}.", &f.sha256[..12])), "{} carries its hash", f.name);
