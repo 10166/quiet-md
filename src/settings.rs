@@ -132,6 +132,8 @@ pub struct Preferences {
     pub doc_family: String,
     /// When 稍后 put off moving the library to real folders (Unix seconds; 0 never).
     pub migrate_later: u64,
+    /// 查找 › `.*`: the find box takes regular expressions.
+    pub find_regex: bool,
 }
 
 /// A week between asks to move the library to real folders.
@@ -170,7 +172,7 @@ fn system_lang() -> Lang {
 impl Default for Preferences {
     fn default() -> Self {
         let lang = system_lang();
-        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_home: false, browser: String::new(), opaque_window: false, ui_font: String::new(), ui_family: String::new(), doc_family: String::new(), migrate_later: 0 }
+        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_home: false, browser: String::new(), opaque_window: false, ui_font: String::new(), ui_family: String::new(), doc_family: String::new(), migrate_later: 0, find_regex: false }
     }
 }
 
@@ -1759,6 +1761,8 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "查找" => "Find",
         "替换为" => "Replace with",
         "全部替换" => "Replace all",
+        "正则表达式" => "Regular expression",
+        "正则有误" => "Invalid regex",
         "替换" => "Replace",
         "请输入代码块名称" => "Enter code block name",
         "输入图片描述" => "Enter image caption",
