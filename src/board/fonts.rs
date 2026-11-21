@@ -16,8 +16,9 @@
 //! Windows (as browsers resolve it); Liberation Sans (9, not user-pickable
 //! upstream) isn't bundled (the copy upstream ships is the GPL-licensed 1.x)
 //! and draws with Arial, which it is metric-compatible with. Xiaolai (14 MB
-//! compressed) is unpacked and registered the first time a text needs it; the
-//! web build has none (build.rs), so its boards draw CJK with the fallbacks.
+//! compressed) is not in shipped builds: the first time a text needs it, it is
+//! fetched (`super::xiaolai`), then unpacked and registered; until then (and
+//! in the web build, which never fetches) boards draw CJK with the fallbacks.
 
 use fdl_core::board::consts::font_family as ff;
 use fdl_core::board::font_subset::mapped_chars;
@@ -38,9 +39,8 @@ const BUNDLED: [(u32, &str, &str); 8] = [
     (ff::COMIC_SHANNS, "Comic Shanns", "fonts/excalidraw/ComicShanns-Regular.ttf"),
     (ff::CASCADIA, "Cascadia", "fonts/excalidraw/CascadiaCode-Regular.ttf"),
     (ff::ASSISTANT, "Assistant", "fonts/excalidraw/Assistant-Regular.ttf"),
-    (XIAOLAI_FALLBACK, "Xiaolai", XIAOLAI_FILE),
+    (XIAOLAI_FALLBACK, "Xiaolai", ""),
 ];
-const XIAOLAI_FILE: &str = "fonts/excalidraw/Xiaolai-Regular.ttf.zlib";
 /// Assistant's other weights (upstream's UI font, `fonts.css`).
 const ASSISTANT_WEIGHTS: [&str; 3] = ["fonts/excalidraw/Assistant-Medium.ttf", "fonts/excalidraw/Assistant-SemiBold.ttf", "fonts/excalidraw/Assistant-Bold.ttf"];
 
@@ -48,31 +48,31 @@ fn asset(path: &str) -> Option<&'static [u8]> { crate::assets::FILES.iter().find
 
 fn index(family: u32) -> Option<usize> { BUNDLED.iter().position(|b| b.0 == family) }
 
-/// Xiaolai's TrueType bytes, unpacked once.
-fn xiaolai() -> Option<&'static [u8]> {
-    static X: OnceLock<Option<&'static [u8]>> = OnceLock::new();
-    *X.get_or_init(|| {
-        let z = asset(XIAOLAI_FILE)?;
-        miniz_oxide::inflate::decompress_to_vec_zlib(z).ok().map(|v| &*Box::leak(v.into_boxed_slice()))
-    })
-}
-
-/// The font file of a family or fallback number (core's `FontSource`).
+/// The font file of a family or fallback number (core's `FontSource`);
+/// Xiaolai once it is here.
 pub fn bytes(family: u32) -> Option<&'static [u8]> {
-    if family == XIAOLAI_FALLBACK { return xiaolai(); }
+    if family == XIAOLAI_FALLBACK { return super::xiaolai::font(); }
     asset(BUNDLED[index(family)?].2)
 }
 
-/// The characters a bundled font maps.
+/// The characters a bundled font maps (None while Xiaolai isn't here).
 fn coverage(family: u32) -> Option<&'static FxHashSet<char>> {
     static C: [OnceLock<FxHashSet<char>>; 8] = [const { OnceLock::new() }; 8];
     let i = index(family)?;
-    Some(C[i].get_or_init(|| bytes(family).map(|b| mapped_chars(b).into_iter().collect()).unwrap_or_default()))
+    if let Some(c) = C[i].get() { return Some(c); }
+    let b = bytes(family)?;
+    Some(C[i].get_or_init(|| mapped_chars(b).into_iter().collect()))
+}
+
+/// Whether a text of `family` has characters Xiaolai would draw (what a
+/// picture of it waits for Xiaolai for).
+pub fn needs_xiaolai(text: &str, family: u32) -> bool {
+    family == ff::EXCALIFONT && text.chars().any(|c| maybe_xiaolai(c) && coverage(family).is_some_and(|s| !s.contains(&c)))
 }
 
 thread_local! {
     static TEXT_SYSTEM: RefCell<Option<Arc<TextSystem>>> = const { RefCell::new(None) };
-    static XIAOLAI_ADDED: Cell<Option<bool>> = const { Cell::new(None) };
+    static XIAOLAI_ADDED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Registers the Latin faces (Xiaolai waits for its first character) and
@@ -82,6 +82,7 @@ pub fn load(cx: &App) {
     if let Err(e) = cx.text_system().add_fonts(fonts) { log::warn!("board fonts: {e}"); }
     TEXT_SYSTEM.with(|t| *t.borrow_mut() = Some(cx.text_system().clone()));
     set_font_source(bytes);
+    super::xiaolai::init(cx);
 }
 
 /// Adds the bundled fonts to a usvg font database (copy as PNG rasterizes
@@ -94,12 +95,14 @@ pub fn load_into(db: &mut resvg::usvg::fontdb::Database, cjk: bool) {
     }
 }
 
-/// Registers Xiaolai with GPUI, once; false when it can't be.
+/// Registers Xiaolai with GPUI, once it is here; false (and a fetch asked
+/// for) until then.
 fn xiaolai_added() -> bool {
     XIAOLAI_ADDED.with(|a| {
-        if let Some(v) = a.get() { return v; }
-        let ok = TEXT_SYSTEM.with(|t| t.borrow().clone()).zip(xiaolai()).is_some_and(|(ts, b)| ts.add_fonts(vec![Cow::Borrowed(b)]).is_ok());
-        a.set(Some(ok));
+        if a.get() { return true; }
+        let Some(b) = super::xiaolai::font() else { super::xiaolai::want(); return false };
+        let ok = TEXT_SYSTEM.with(|t| t.borrow().clone()).is_some_and(|ts| ts.add_fonts(vec![Cow::Borrowed(b)]).is_ok());
+        a.set(ok);
         ok
     })
 }
@@ -179,7 +182,7 @@ mod tests {
     fn fonts_register_and_measure() {
         let ts = std::rc::Rc::new(gpui::WindowTextSystem::new(Arc::new(gpui::TextSystem::new(Arc::new(gpui_apple::AppleTextSystem::new())))));
         ts.add_fonts(BUNDLED.iter().map(|b| Cow::Borrowed(bytes(b.0).unwrap())).collect()).unwrap();
-        XIAOLAI_ADDED.with(|a| a.set(Some(true)));
+        XIAOLAI_ADDED.with(|a| a.set(true));
         let m = super::super::render::GpuiMeasure(ts.clone());
         use fdl_core::board::text_measure::{Font as BFont, Measure};
         let w = |s: &str, f: u32| m.line_width(s, BFont::new(20., f));

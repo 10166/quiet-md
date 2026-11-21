@@ -1001,4 +1001,5 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("Windows 和 Linux：复制为 Markdown 改为 Ctrl+Shift+M", "Windows y Linux: Copiar como Markdown pasa a ser Ctrl+Shift+M"),
     ("画板支持触控板双指缩放；窗口变窄时收起的侧栏，放宽后自动展开", "Zoom con pellizco en las pizarras desde el trackpad; la barra lateral que ocultó una ventana estrecha vuelve al ensancharla"),
     ("修复切换文档卡顿、代码块折叠不保存、画板选背景色时崩溃和深色模式下按钮看不清", "Corregidos: lentitud al cambiar de documento, plegados de bloques de código que no se guardaban, un cierre en el selector de fondo de las pizarras y botones poco legibles en modo oscuro"),
+    ("中文手写字体还没下载好，已用系统字体代替", "La fuente manuscrita para chino, japonés y coreano aún no se ha descargado. Se usó la fuente del sistema."),
 ];

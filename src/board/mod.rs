@@ -26,6 +26,7 @@ pub mod render;
 pub mod run;
 pub mod text_editor;
 pub mod tools;
+pub mod xiaolai;
 
 pub use fdl_core::board::*;
 
@@ -56,6 +57,8 @@ pub enum BoardEvent {
     Close,
     /// The elements changed (a committed step): save.
     Changed,
+    /// A note for the user (the window's toast).
+    Toast(String),
 }
 
 /// Room the chrome takes from the canvas edges when fitting (screen px):
@@ -187,7 +190,26 @@ impl BoardView {
         v.store.schedule_action(CaptureUpdateAction::Never);
         let _ = v.store.commit(Some(v.scene.elements_including_deleted()), Some(&v.app));
         v.saved = v.scene_version();
+        cx.observe_global::<xiaolai::Ready>(|me, cx| me.fonts_arrived(cx)).detach();
         v
+    }
+
+    /// Xiaolai arrived (`xiaolai::Ready`): CJK texts measured with the
+    /// fallbacks take their Xiaolai size (not an undo step; only texts whose
+    /// box changes are touched, so a board measured with Xiaolai elsewhere
+    /// stays as saved), and the cached shapes go.
+    fn fonts_arrived(&mut self, cx: &mut Context<Self>) {
+        use fdl_core::board::text::{redraw_text_bounding_box, refresh_text_dimensions};
+        let m = self.m.clone();
+        let stale: Vec<Element> = self.scene.non_deleted_elements().filter(|e| e.text().is_some_and(|t| fonts::needs_xiaolai(&t.original_text, t.font_family))).filter(|e| {
+            let t = e.text().unwrap();
+            let container = e.container_id().and_then(|c| self.scene.get_element(c));
+            refresh_text_dimensions(e, container, &self.scene, Some(&t.original_text), None, &*m)
+                .is_some_and(|d| d.text != t.text || (d.width - e.width).abs() > 0.01 || (d.height - e.height).abs() > 0.01)
+        }).cloned().collect();
+        for e in &stale { redraw_text_bounding_box(&mut self.scene, e, e.container_id(), &*m); }
+        self.painter.borrow_mut().clear();
+        if stale.is_empty() { cx.notify(); } else { self.commit(Some(CaptureUpdateAction::Never), cx); }
     }
 
     // ---- what the chrome reads and calls

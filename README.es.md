@@ -43,7 +43,7 @@
 
 ## Por qué Quiet.md
 
-**📁 Tus notas son archivos, sin más.** Sin cuenta, sin nube y, por defecto, nada sale a la red (salvo la comprobación opcional de actualizaciones). Cada carpeta de la barra lateral es una carpeta real de tu disco, y cada nota es un archivo con el nombre de su título: `.md` para Markdown y `.xml` para documentos enriquecidos. Sincronízalas con iCloud, Git o lo que prefieras. Si algún día dejas Quiet.md, tus archivos siguen exactamente donde estaban.
+**📁 Tus notas son archivos, sin más.** Sin cuenta, sin nube y, por defecto, nada sale a la red (salvo la comprobación opcional de actualizaciones y una descarga única de la fuente manuscrita para chino, japonés y coreano la primera vez que una pizarra la necesita). Cada carpeta de la barra lateral es una carpeta real de tu disco, y cada nota es un archivo con el nombre de su título: `.md` para Markdown y `.xml` para documentos enriquecidos. Sincronízalas con iCloud, Git o lo que prefieras. Si algún día dejas Quiet.md, tus archivos siguen exactamente donde estaban.
 
 **⚡ Nativa, y rápida.** Toda la interfaz la dibujan en la GPU Rust y [GPUI](https://www.gpui.rs/). Sin Electron, sin WebView. En una nota de un millón de caracteres, escribir cuesta unos 5 ms por fotograma, y una pantalla de 120 Hz da 8,3.
 

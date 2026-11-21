@@ -15,7 +15,11 @@ categories = ["text-editors"]
 # still being polished. Off: no way to make one; existing ones show a read-only
 # placeholder and are left as they are (`crate::DATATABLE`).
 [features]
-devtools = []
+devtools = ["embed-xiaolai"]
+# `embed-xiaolai`: the board's CJK font (14 MB) compiled in instead of fetched
+# when first needed (src/board/xiaolai.rs). On with `devtools`, so harness
+# screenshots never depend on the network; off in shipped builds.
+embed-xiaolai = []
 datatable = []
 
 # `fdl_core` is the GPUI-free document engine; plain `cargo test` covers both.
