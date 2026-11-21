@@ -312,14 +312,47 @@ impl Workspace {
         }).detach();
     }
 
-    /// 设置 › 文档库 › 未使用资源 (#237): take away exactly the sweep's files.
-    pub(crate) fn remove_unused_assets(&mut self, names: &[String], cx: &mut Context<Self>) {
-        let gone = crate::store::Store::remove_unused_assets(&crate::store::Store::root_dir(), names);
-        if gone > 0 {
-            self.show_toast_kind(ToastKind::Success, &crate::localized_format!("已移出 {gone} 个未使用资源", "Moved {gone} unused assets out of the asset folder"), cx);
-        } else {
-            self.show_toast(crate::settings::text("没有可清理的资源"), cx);
+    /// What the unused-asset sweep (#237) reads besides the library: the
+    /// sources every open editor holds — this window's and the others',
+    /// quick notes included — that the disk does not (unsaved text, the
+    /// snapshots Undo can still bring back), and the 本机文件 and 本机文件夹,
+    /// whose pasted pictures are copied into the library's assets too.
+    pub(crate) fn sweep_inputs(&self, window: &Window, cx: &Context<Self>) -> (Vec<String>, Vec<std::path::PathBuf>) {
+        let mut live: Vec<String> = self.editor.as_ref().map(|e| e.read(cx).core.asset_refs()).unwrap_or_default();
+        // This window is being updated: reading it again would panic.
+        let me = window.window_handle().window_id();
+        for w in cx.windows().into_iter().filter(|w| w.window_id() != me).filter_map(|w| w.downcast::<Workspace>()) {
+            let Ok(ws) = w.entity(cx) else { continue };
+            if let Some(e) = &ws.read(cx).editor { live.extend(e.read(cx).core.asset_refs()); }
         }
+        let outside = self.entries.iter().filter_map(|e| e.meta.path.as_ref().map(std::path::PathBuf::from)).collect();
+        (live, outside)
+    }
+
+    pub(crate) fn sweep_failed(&mut self, e: &anyhow::Error, cx: &mut Context<Self>) {
+        log::warn!("unused assets: {e:#}");
+        self.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法读取文档库，未清理：{}", "Could not read the library; nothing was removed: {}", e), cx);
+    }
+
+    /// 设置 › 文档库 › 未使用资源 (#237): take away the listed files that are
+    /// still unused. The sweep runs again first, off the UI thread: a page
+    /// restored or a picture brought back by Undo since the list was made
+    /// keeps its file.
+    pub(crate) fn remove_unused_assets(&mut self, names: Vec<(String, u64)>, window: &Window, cx: &mut Context<Self>) {
+        let root = crate::store::Store::root_dir();
+        let (live, outside) = self.sweep_inputs(window, cx);
+        cx.spawn(async move |this, cx| {
+            let gone = cx.background_executor().spawn(async move {
+                let still = crate::store::Store::unused_assets_at(root.clone(), live, outside)?;
+                let names: Vec<String> = names.into_iter().map(|(n, _)| n).filter(|n| still.iter().any(|(s, _)| s == n)).collect();
+                anyhow::Ok(crate::store::Store::remove_unused_assets(&root, &names))
+            }).await;
+            let _ = this.update(cx, |w, cx| match gone {
+                Ok(0) => w.show_toast(crate::settings::text("没有可清理的资源"), cx),
+                Ok(n) => w.show_toast_kind(ToastKind::Success, &crate::localized_format!("已移出 {} 个未使用资源", "Moved {} unused assets out of the asset folder", n), cx),
+                Err(e) => w.sweep_failed(&e, cx),
+            });
+        }).detach();
     }
 
     fn show_store_warnings(&mut self, cx: &mut Context<Self>) {
@@ -362,9 +395,10 @@ impl Workspace {
                 true,
             ),
             Confirm::Purge(_) => (crate::settings::text("确认彻底删除？").to_string(), crate::settings::text("彻底删除后，该页面及其子页面将无法恢复").to_string(), crate::settings::text("删除"), true),
-            Confirm::RemoveUnused(names) => (
+            Confirm::RemoveUnused(files) => (
                 crate::settings::text("清理未使用资源").to_string(),
-                crate::localized_format!("{} 个文件将被移出资源目录，保留 {} 天后清除。误清的可在 .quiet/removed-assets 中找回", "{} files will be moved out of the asset folder and cleared after {}. A file taken by mistake can be found in .quiet/removed-assets", names.len(), crate::store::TRASH_DAYS),
+                crate::localized_format!("{} 个文件（{}）将移到文档库的 .quiet/removed-assets 文件夹，{} 天后自动删除；在此之前可以从那里拖回 .assets。", "{} files ({}) will be moved to .quiet/removed-assets in the library and deleted after {} days; until then they can be dragged back to .assets.",
+                    files.len(), crate::docinfo::format_size(files.iter().map(|(_, n)| n).sum()), crate::store::TRASH_DAYS),
                 crate::settings::text("移出"),
                 true,
             ),
@@ -485,7 +519,7 @@ impl Workspace {
                             Confirm::Restore(id) => w.restore_doc(&id, cx),
                             Confirm::Purge(id) => w.purge_doc(&id, cx),
                             Confirm::EmptyTrash => w.empty_trash(cx),
-                            Confirm::RemoveUnused(names) => w.remove_unused_assets(&names, cx),
+                            Confirm::RemoveUnused(files) => w.remove_unused_assets(files, window, cx),
                             Confirm::Refs { show, no_ask } => {
                                 if no_ask {
                                     let mut s = w.store.settings();
