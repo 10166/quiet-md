@@ -612,7 +612,7 @@ pub fn ui_runs(text: &str, style: &TextStyle, hits: &[std::ops::Range<usize>], h
     cuts.windows(2)
         .map(|w| {
             let mut run = style.to_run(w[1] - w[0]);
-            if text[w[0]..w[1]].chars().all(is_cjk_punct) {
+            if text[w[0]..w[1]].chars().all(is_cjk_punct) && !crate::fonts::own_glyphs(&run.font.family).cjk_punct {
                 run.font.family = CJK_PUNCT_FONT.into();
             }
             if hits.iter().any(|r| r.start <= w[0] && w[1] <= r.end) {

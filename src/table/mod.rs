@@ -500,7 +500,7 @@ impl Render for TableView {
         let state = self.state.clone();
         let st = state.read(cx);
         let root = div().id("table-view").key_context("Table").track_focus(&self.focus).relative().w_full().when(self.full, |d| d.h_full()).flex().flex_col()
-            .bg(Theme::bg_body()).font_family(crate::theme::ui_family()).text_size(px(TEXT)).text_color(Theme::text())
+            .bg(Theme::bg_body()).font_family(crate::theme::DOC_UI_FONT).text_size(px(TEXT)).text_color(Theme::text())
             .on_key_down(cx.listener(keys::key_down))
             // a gesture in progress follows the pointer wherever it goes in the window
             .when(self.drag.is_some(), |d| {

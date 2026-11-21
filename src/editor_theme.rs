@@ -1,5 +1,5 @@
 pub use crate::theme::{craft, c, ca, rgbaf, ta, TITLE, MONO_FONT, BlockMetrics};
-pub use crate::theme::ui_family;
+pub use crate::theme::{ui_family, DOC_UI_FONT};
 /// The active theme's resolved style (themes.rs).
 pub fn style() -> &'static crate::themes::Style { crate::themes::active() }
 pub fn body_size() -> f32 { style().num("page.size") }

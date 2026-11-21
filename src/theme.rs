@@ -477,16 +477,14 @@ pub fn ui_font_small() -> f32 { ui_font() - 1. }
 /// that names a family keeps it there.)
 static UI_FAMILY: std::sync::RwLock<Option<&'static str>> = std::sync::RwLock::new(None);
 
-pub fn set_ui_family(family: &str) {
-    let family = family.trim();
-    let mut cur = UI_FAMILY.write().unwrap();
-    let same = match *cur { Some(f) => f.eq_ignore_ascii_case(family), None => family.is_empty() };
-    // Preferences are applied on every save: only a real change costs the leak.
-    if same { return }
-    *cur = if family.is_empty() { None } else { Some(&*Box::leak(family.to_string().into_boxed_str())) };
-}
+pub fn set_ui_family(family: &str) { crate::fonts::store(&UI_FAMILY, family) }
 
 pub fn ui_family() -> &'static str { UI_FAMILY.read().unwrap().unwrap_or(SYSTEM_FONT) }
+
+/// Labels drawn as part of a document rather than around it — list numbers,
+/// mentions, captions, a table's cells, a board: the platform's sans, which
+/// neither 界面字体 nor 文档字体 changes (the latter is for prose).
+pub const DOC_UI_FONT: &str = SYSTEM_FONT;
 
 #[allow(unused_imports)]
 pub use crate::palette::{HUES, FONT_COLORS, BG_COLORS, CALLOUT_BG_COLORS, CELL_BG_COLORS, bg_canon};

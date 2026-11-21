@@ -608,7 +608,7 @@ impl R<'_> {
         div()
             .w_full()
             .flex()
-            .font_family(theme::ui_family())
+            .font_family(theme::DOC_UI_FONT)
             .map(|d| match b.align {
                 Align::Left => d.justify_start(),
                 Align::Center => d.justify_center(),

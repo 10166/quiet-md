@@ -631,7 +631,7 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("界面字体", "Police de l’interface"),
     ("侧栏、菜单和设置页用这个字体；文档用下面的「文档字体」。", "La barre latérale, les menus et les réglages utilisent cette police ; le document a la sienne ci-dessous."),
     ("跟随系统字体", "Police du système"),
-    ("这个字体没有安装，暂时用系统字体显示。", "Cette police n’est pas installée ; celle du système la remplace."),
+    ("这个字体没有安装，暂时用默认字体显示。", "Cette police n’est pas installée ; celle par défaut la remplace pour l’instant."),
     ("小", "Petite"),
     ("标准", "Standard"),
     ("大", "Grande"),

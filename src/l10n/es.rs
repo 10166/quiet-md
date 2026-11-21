@@ -593,7 +593,7 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("界面字体", "Fuente de la interfaz"),
     ("侧栏、菜单和设置页用这个字体；文档用下面的「文档字体」。", "La barra lateral, los menús y los ajustes usan esta fuente; el documento tiene la suya abajo."),
     ("跟随系统字体", "Fuente del sistema"),
-    ("这个字体没有安装，暂时用系统字体显示。", "Esta fuente no está instalada; se usa la del sistema."),
+    ("这个字体没有安装，暂时用默认字体显示。", "Esta fuente no está instalada; se usa la predeterminada por ahora."),
     ("小", "Pequeño"),
     ("标准", "Estándar"),
     ("大", "Grande"),

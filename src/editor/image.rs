@@ -753,7 +753,7 @@ fn error_el(w: f32, h: f32, missing: bool, blocked: bool, border: Hsla, retry: O
         .justify_center()
         .overflow_hidden()
         .text_color(Theme::text_caption())
-        .font_family(theme::ui_family())
+        .font_family(theme::DOC_UI_FONT)
         .when(w > 120. && h > 162., |d| d.child(icon("image-broken", 56., Theme::icon()).mb(px(8.))))
         .children(body)
         .into_any_element()
@@ -903,7 +903,7 @@ impl R<'_> {
         // keeps 4px below it (`.with-caption`). The caption: 13pt, light,
         // the caption grey, centred.
         let caption_el = show_caption.then(|| {
-            let wrap = div().id(("image-caption", id.0)).mt(px(6.)).w_full().flex().font_family(theme::ui_family());
+            let wrap = div().id(("image-caption", id.0)).mt(px(6.)).w_full().flex().font_family(theme::DOC_UI_FONT);
             match ed.caption_field(id).filter(|_| !self.ghost) {
                 Some(f) => wrap
                     .child(f)

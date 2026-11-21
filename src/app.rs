@@ -426,6 +426,7 @@ impl Workspace {
 
     fn build_window(quick: bool, document: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         crate::settings::load();
+        crate::settings::check_fonts(cx);
         if !cx.has_global::<SharedStore>() { cx.set_global(SharedStore::open().expect("open document library")); }
         let mut store = cx.global::<SharedStore>().clone();
         let entries = store.list();
