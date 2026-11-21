@@ -878,23 +878,17 @@ impl Workspace {
         let mut writer = self.store.tree_writer();
         let task = cx.background_executor().spawn(async move {
             let journal = writer.track_file_changes();
-            let mut deleted = vec![];
-            let mut errors = vec![];
-            let batch = writer.begin_batch().is_ok();
-            for (id, root) in &groups {
-                if root.as_ref().is_some_and(|r| !deleted.contains(r)) { continue; }
-                match writer.delete(id, root.as_deref()) {
-                    Ok(()) => deleted.push(id.clone()),
-                    Err(e) => errors.push(crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string()))),
-                }
-            }
-            if batch && let Err(e) = writer.end_batch() {
-                errors.push(crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string())));
-            }
+            // One write for all of them: each index write waits for the disk.
+            let (deleted, result) = writer.delete_many(&groups);
+            let errors = result.err().map(|e| crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string()))).into_iter().collect();
             let warnings = writer.take_warnings();
             let listed = ListedDocs { entries: writer.list(), trash: writer.list_trash(), warnings };
             (DeletedDocs { deleted, errors, changes: journal.take() }, listed)
         });
+        // The rows go now; the list read back when the files have moved
+        // replaces this, bringing back anything that could not go.
+        let all: std::collections::HashSet<String> = all.into_iter().collect();
+        self.entries.retain(|e| !all.contains(&e.id));
         self.batch = None;
         self.row_menu = None;
         cx.notify();

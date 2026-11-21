@@ -278,20 +278,17 @@ impl Workspace {
         if self.store.file_task_busy() || self.file_history.busy || self.tree_writes_pending() || ids.is_empty() { return; }
         let Some(task_guard) = self.store.begin_file_task() else { return };
         let mut writer = self.store.tree_writer();
+        let gone = ids.clone();
         let task = cx.background_executor().spawn(async move {
-            let batch = writer.begin_batch().is_ok();
-            let mut errors = vec![];
-            let mut result: anyhow::Result<()> = Ok(());
-            for id in ids {
-                result = writer.purge(&id);
-                if result.is_err() { break }
-            }
-            if let Err(e) = result { errors.push(e.to_string()); }
-            if batch && let Err(e) = writer.end_batch() { errors.push(e.to_string()); }
+            // The 回收站's index is written once, not once a page.
+            let errors = writer.purge_many(&gone).err().map(|e| e.to_string()).into_iter().collect();
             let warnings = writer.take_warnings();
             let trash = writer.list_trash();
             (PurgedTrash { errors }, ListedTrash { trash, warnings })
         });
+        // The rows go now; the 回收站 read back afterwards replaces this.
+        let ids: std::collections::HashSet<String> = ids.into_iter().collect();
+        self.trash.retain(|t| !ids.contains(&t.id));
         self.trash_menu = None;
         cx.notify();
         cx.spawn(async move |this, cx| {
