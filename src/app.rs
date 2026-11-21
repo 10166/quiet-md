@@ -1783,6 +1783,7 @@ impl Render for Workspace {
         let pref_menu = self.render_pref_menu(cx);
         let font_menu = self.render_font_menu(cx);
         let toast = self.render_toast(window);
+        let forced_update = crate::update::prompt(window, cx);
         let mode_menu = self.render_mode_menu(cx);
         let main = match self.view {
             View::Doc => div()
@@ -1909,6 +1910,12 @@ impl Render for Workspace {
             }))
             // Esc leaves 批量操作 (closing its menu or confirmation first), even from the editor.
             .capture_key_down(cx.listener(|w, ev: &KeyDownEvent, _, cx| {
+                // A required update waits for 立即重启更新 (↩): no key reaches the window beneath.
+                if crate::update::blocking(cx) {
+                    if ev.keystroke.key == "enter" { crate::update::install(cx); }
+                    cx.stop_propagation();
+                    return;
+                }
                 let undo = ev.keystroke.modifiers.secondary(cx) && matches!(ev.keystroke.key.as_str(), "z" | "y");
                 if w.store.file_task_busy() || (w.file_history.busy && !undo) { cx.stop_propagation(); return; }
                 // 版本历史: the editor keeps the caret, so Esc has to be taken
@@ -1977,6 +1984,7 @@ impl Render for Workspace {
             .children(create_menu)
             .children(import_menu)
             .children(place_menu)
+            .children(forced_update)
             .children(toast)
             // Over everything, toasts included, until its last page is done.
             .when_some(self.onboarding.clone(), |d, o| d.child(deferred(div().id("onboarding-cover").absolute().inset_0().occlude().child(o)).with_priority(30)))
