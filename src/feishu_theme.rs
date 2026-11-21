@@ -121,7 +121,8 @@ impl Theme {
     pub fn text_caption() -> Hsla { c(ud::N600) }
     pub fn text_placeholder() -> Hsla { c(ud::N500) }
     pub fn block_placeholder() -> Hsla { c(ud::N400) }
-    pub fn text_disabled() -> Hsla { c(ud::N400) }
+    /// Dark mode: N400 mirrors to L 0.41 and vanishes on raised surfaces (GitHub #319); take the base theme's.
+    pub fn text_disabled() -> Hsla { if crate::theme::dark() { crate::theme::Theme::text_disabled() } else { c(ud::N400) } }
     pub fn text_code() -> Hsla { c(ud::N800) }
     pub fn link() -> Hsla { c(ud::B500) }
     pub fn primary() -> Hsla { c(ud::B600) }
