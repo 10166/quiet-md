@@ -58,6 +58,7 @@ mod settings;
 mod table;
 mod l10n;
 mod themes;
+mod fonts;
 mod shortcuts;
 #[allow(dead_code, unused_imports)]
 mod feishu_theme;
@@ -197,6 +198,7 @@ pub(crate) fn init_app(cx: &mut App) {
     settings::apply_appearance(&settings::prefs().appearance);
     settings::sync_dark(cx);
     themes::load(&settings::prefs().theme_id(), false, || cx.text_system().all_font_names());
+    settings::check_fonts(cx);
 }
 
 #[cfg(target_family = "wasm")]

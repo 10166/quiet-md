@@ -283,6 +283,10 @@ pub struct Workspace {
     /// where each button was drawn last frame.
     pub pref_menu: Option<crate::settings::PrefMenu>,
     pub pref_anchors: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<&'static str, Bounds<Pixels>>>>,
+    /// 外观's font list while open (its search field lives in here), and
+    /// where each of its two buttons was drawn last frame.
+    pub font_menu: Option<crate::settings::FontMenu>,
+    pub font_anchors: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<&'static str, Bounds<Pixels>>>>,
     /// 快捷键's filter field.
     pub settings_filter: Entity<TextField>,
     native_sidebar: crate::native_header::NativeSidebar,
@@ -427,6 +431,7 @@ impl Workspace {
 
     fn build_window(quick: bool, document: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         crate::settings::load();
+        crate::settings::check_fonts(cx);
         if !cx.has_global::<SharedStore>() { cx.set_global(SharedStore::open().expect("open document library")); }
         let mut store = cx.global::<SharedStore>().clone();
         let entries = store.list();
@@ -557,6 +562,8 @@ impl Workspace {
             lang_anchor: Default::default(),
             pref_menu: None,
             pref_anchors: Default::default(),
+            font_menu: None,
+            font_anchors: Default::default(),
             settings_filter,
             store,
             entries,
@@ -984,6 +991,7 @@ impl Workspace {
         self.theme_menu = None;
         self.lang_menu = None;
         self.pref_menu = None;
+        self.font_menu = None;
         self.home.sort_menu = false;
         cx.notify();
     }
@@ -1771,6 +1779,7 @@ impl Render for Workspace {
         let theme_menu = self.render_theme_menu(cx);
         let lang_menu = self.render_lang_menu(cx);
         let pref_menu = self.render_pref_menu(cx);
+        let font_menu = self.render_font_menu(cx);
         let toast = self.render_toast(window);
         let mode_menu = self.render_mode_menu(cx);
         let main = match self.view {
@@ -1835,7 +1844,7 @@ impl Render for Workspace {
             .size_full()
             .flex()
             .bg(Theme::window())
-            .font_family(theme::UI_FONT)
+            .font_family(theme::ui_family())
             .text_color(Theme::text())
             // Window keys act on the window they were pressed in, not on
             // whichever window macOS considers active.
@@ -1952,6 +1961,7 @@ impl Render for Workspace {
             .children(theme_menu)
             .children(lang_menu)
             .children(pref_menu)
+            .children(font_menu)
             .children(confirm)
             .children(move_dlg)
             .children(export_md)
