@@ -644,7 +644,7 @@ impl R<'_> {
                         .flex()
                         .items_center()
                         .whitespace_nowrap()
-                        .font_family(theme::UI_FONT)
+                        .font_family(theme::DOC_UI_FONT)
                         .font_weight(weight)
                         .text_size(px(size))
                         .text_color(Theme::text_caption())
@@ -700,7 +700,7 @@ impl R<'_> {
                 .px(px(1.))
                 .mr(px(6.))
                 .whitespace_nowrap()
-                .font_family(theme::UI_FONT)
+                .font_family(theme::DOC_UI_FONT)
                 .text_size(px(spec.size))
                 .text_color(theme::style().color("number.color").unwrap_or_else(Theme::text))
                 .child(core::ordered_marker(core::ordered_number(siblings, idx), env.depth))
@@ -969,7 +969,7 @@ impl R<'_> {
                     .pr(px(6.))
                     .flex()
                     .items_center()
-                    .font_family(theme::UI_FONT)
+                    .font_family(theme::DOC_UI_FONT)
                     .children(caption)
                     .child(
                         div()
@@ -1189,7 +1189,7 @@ impl Editor {
                 spec.line_height = theme::title().line_height;
                 spec.weight = FontWeight(theme::style().num("title.weight"));
                 if let Some(c) = theme::style().color("title.color") { spec.color = c; }
-                let tf = theme::style().font("title.font");
+                let tf = theme::title_font();
                 if tf != theme::body_font() { spec.font = Some(tf); }
                 cover = self.cover_el(window, cx);
                 div()
@@ -1610,7 +1610,7 @@ impl Editor {
             .size_full()
             .relative()
             // No fill of its own: the note panel behind it is white and rounded.
-            .font_family(theme::UI_FONT)
+            .font_family(theme::ui_family())
             .text_color(Theme::text())
             .on_mouse_move(cx.listener(Self::on_hover_move))
             .on_mouse_up(
@@ -1631,6 +1631,9 @@ impl Editor {
                 div()
                     .id("editor-page")
                     .size_full()
+                    // The note's own labels (list numbers, captions) keep the
+                    // platform face; the menus over it follow 界面字体.
+                    .font_family(theme::DOC_UI_FONT)
                     .cursor(CursorStyle::IBeam)
                     .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
                     .on_drag_move(cx.listener(Self::file_drag_move))
@@ -2245,7 +2248,7 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
                     .pr(px(8.))
                     .flex()
                     .items_center()
-                    .font_family(theme::UI_FONT)
+                    .font_family(theme::DOC_UI_FONT)
                     .children(caption)
                     .child(
                         div()

@@ -318,14 +318,16 @@ pub fn shadow_button() -> Vec<BoxShadow> {
     vec![shadow(0.05, 1., 1.5, 0.)]
 }
 
+/// The platform's sans: the interface's family unless 外观 › 界面字体 says
+/// otherwise, and the document's when its theme names no family.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-pub const UI_FONT: &str = ".SystemUIFont";
+pub const SYSTEM_FONT: &str = ".SystemUIFont";
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_family = "wasm")))]
-pub const UI_FONT: &str = "Noto Sans";
+pub const SYSTEM_FONT: &str = "Noto Sans";
 /// The web build brings its own fonts (src/web.rs).
 #[cfg(target_family = "wasm")]
-pub const UI_FONT: &str = "Inter";
-pub const NUMERAL_FONT: &str = if cfg!(any(target_os = "macos", target_os = "windows")) { "Helvetica Neue" } else { UI_FONT };
+pub const SYSTEM_FONT: &str = "Inter";
+pub const NUMERAL_FONT: &str = if cfg!(any(target_os = "macos", target_os = "windows")) { "Helvetica Neue" } else { SYSTEM_FONT };
 /// Platform monospace font.
 #[cfg(target_os = "macos")]
 pub const MONO_FONT: &str = ".AppleSystemUIFontMonospaced";
@@ -470,6 +472,20 @@ pub fn ui_font() -> f32 {
 
 /// The same scale for secondary rows (descriptions, counts).
 pub fn ui_font_small() -> f32 { ui_font() - 1. }
+
+/// 外观 › 界面字体: the family the sidebar, menus and settings are drawn in.
+/// `None` is the platform's own sans. (The note has its own setting; a theme
+/// that names a family keeps it there.)
+static UI_FAMILY: std::sync::RwLock<Option<&'static str>> = std::sync::RwLock::new(None);
+
+pub fn set_ui_family(family: &str) { crate::fonts::store(&UI_FAMILY, family) }
+
+pub fn ui_family() -> &'static str { UI_FAMILY.read().unwrap().unwrap_or(SYSTEM_FONT) }
+
+/// Labels drawn as part of a document rather than around it — list numbers,
+/// mentions, captions, a table's cells, a board: the platform's sans, which
+/// neither 界面字体 nor 文档字体 changes (the latter is for prose).
+pub const DOC_UI_FONT: &str = SYSTEM_FONT;
 
 #[allow(unused_imports)]
 pub use crate::palette::{HUES, FONT_COLORS, BG_COLORS, CALLOUT_BG_COLORS, CELL_BG_COLORS, bg_canon};

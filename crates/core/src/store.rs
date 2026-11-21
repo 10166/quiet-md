@@ -507,6 +507,29 @@ fn write_atomic_then(path: &std::path::Path, bytes: &[u8], sync_dir: bool) -> Re
     result
 }
 
+/// A page's text with the ways a file name is written undone: Markdown
+/// percent-encodes (`%20` for a space) and may backslash-escape punctuation
+/// (`a\_b.png`), DocxXML escapes (`&amp;` for `&`), and none of it is the name
+/// on disk. Deliberately loose — a name that only appears in prose keeps its
+/// file, which costs nothing and loses nothing. Lossy where
+/// `markdown::percent_decode` gives up: one `%C4%E3` that is not UTF-8 (a
+/// GBK link) must not leave the rest of the page undecoded.
+fn decoded(text: &str) -> String {
+    let unescaped = text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&");
+    let b = unescaped.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = |at: usize| b.get(at).and_then(|&c| (c as char).to_digit(16)).map(|d| d as u8);
+        match (b[i], hex(i + 1), hex(i + 2), b.get(i + 1)) {
+            (b'%', Some(h), Some(l), _) => { out.push(h << 4 | l); i += 3 }
+            (b'\\', _, _, Some(&c)) if c.is_ascii_punctuation() => { out.push(c); i += 2 }
+            (c, ..) => { out.push(c); i += 1 }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 fn with_suffix(path: &std::path::Path, suffix: &str) -> PathBuf {
     let mut p = path.as_os_str().to_owned();
     p.push(suffix);
@@ -704,6 +727,169 @@ impl Store {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (found.dirs, found.docs, found.pending).hash(&mut h);
         h.finish()
+    }
+
+    /// 设置 › 文档库 › 未使用资源 (#237): the files at the top of the asset
+    /// folder that nothing mentions. Everything that can hold a reference is
+    /// read: the documents (either layout, 画板 included) and their `.bak`
+    /// copies; the 回收站 and the version history — restoring a page or an old
+    /// version must not bring back a missing picture; every 数据表 — a library
+    /// file, one embedded in a page (`.assets/<id>.sqlite`) or a version of
+    /// one — through SQLite, since its text may sit anywhere in the file;
+    /// `outside`, the 本机文件 and 本机文件夹, since a picture pasted into them
+    /// is copied here too; and `live`, the references open editors hold that
+    /// the disk does not: unsaved text, and the undo and redo snapshots.
+    /// A name is matched as a name, with the ways it is written down undone
+    /// first (Markdown percent-encodes a space, DocxXML escapes `&`). Whatever
+    /// cannot be read — a file, a folder, an iCloud placeholder not downloaded
+    /// yet, an outside folder on a disk not attached — makes the sweep fail:
+    /// nothing is offered rather than something in use taken away.
+    /// Standalone so it can run off the UI thread.
+    pub fn unused_assets_at(root: PathBuf, live: Vec<String>, outside: Vec<PathBuf>) -> Result<Vec<(String, u64)>> {
+        /// Every file under `dir`: a trashed folder keeps its pages inside it.
+        fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+            let rd = match crate::vfs::read_dir(dir) {
+                Ok(rd) => rd,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(e) => return Err(e).with_context(|| format!("reading {}", dir.display())),
+            };
+            for e in rd {
+                let e = e?;
+                let t = e.file_type()?;
+                if t.fs_is_dir() { walk(&e.path(), out)? } else if t.fs_is_file() { out.push(e.path()) }
+            }
+            Ok(())
+        }
+        /// The pages under `dir`; a scan that could not see them all is refused.
+        fn scan(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+            let found = layout::scan(dir);
+            if found.partial { anyhow::bail!("a folder under {} could not be read", dir.display()) }
+            if let Some(p) = found.pending.first() { anyhow::bail!("{} is not downloaded from iCloud", dir.join(p).display()) }
+            out.extend(found.docs.iter().map(|rel| dir.join(rel)));
+            Ok(())
+        }
+        /// A 数据表's values, a line each.
+        fn table_text(path: &Path) -> Result<String> {
+            #[cfg(not(target_family = "wasm"))]
+            return crate::table::sqlite::all_text(path);
+            #[cfg(target_family = "wasm")]
+            anyhow::bail!("{} is a 数据表, not readable here", path.display())
+        }
+        let flat = Self::flat_at(&root);
+        let internal = if flat { root.clone() } else { root.join(INTERNAL) };
+        let docs = if flat { root.join("docs") } else { root.clone() };
+        let mut pages: Vec<PathBuf> = vec![];
+        scan(&docs, &mut pages)?;
+        pages.extend(pages.clone().iter().map(|p| with_suffix(p, ".bak")));
+        walk(&if flat { root.join("trash") } else { internal.join("trash") }, &mut pages)?;
+        walk(&internal.join("history"), &mut pages)?;
+        walk(&internal.join("history-trash"), &mut pages)?;
+        for p in &outside {
+            if p.fs_is_dir() { scan(p, &mut pages)? }
+            else if p.fs_is_file() { pages.push(p.clone()) }
+            // A 本机文件 deleted where it was is gone; with its folder gone too it may be on a disk not attached.
+            else if !p.parent().is_some_and(|d| d.fs_is_dir()) { anyhow::bail!("{} cannot be reached", p.display()) }
+        }
+
+        let listed = match crate::vfs::read_dir(Self::assets_in(&root)) {
+            Ok(rd) => rd,
+            // A library that never took an image has no asset folder: nothing to list.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+            Err(e) => return Err(e.into()),
+        };
+        // An entry that cannot be read is skipped: it is then never offered.
+        let mut sizes: Vec<(String, u64)> = vec![];
+        for e in listed.flatten() {
+            let Ok(meta) = e.metadata() else { continue };
+            if !meta.is_file() { continue }
+            let Some(name) = e.file_name().to_str().map(str::to_string) else { continue };
+            if name.starts_with('.') {
+                if name.ends_with(".sqlite.icloud") { anyhow::bail!("{name} is not downloaded from iCloud") }
+                continue
+            }
+            // An embedded 数据表 is read like a page (its attachments are here
+            // too); SQLite's own files beside one are never offered.
+            if name.ends_with(".sqlite") { pages.push(e.path()) }
+            if ["-journal", "-wal", "-shm"].iter().any(|s| name.ends_with(s)) { continue }
+            sizes.push((name, meta.len()));
+        }
+        let mut used = std::collections::HashSet::new();
+        // An open editor's sources are paths (`.assets/a b.png`), already in the
+        // form the block holds them; a name is what the asset folder lists.
+        for src in &live {
+            for written in [src.clone(), decoded(src)] {
+                if let Some(name) = Path::new(&written).file_name().and_then(|n| n.to_str()) { used.insert(name.to_string()); }
+            }
+        }
+        // Read each page once, marking the names it mentions, so a big history
+        // costs one pass and the text is not all held at once. The text as it
+        // is on disk is tried first; only when a name is not there is the
+        // decoded copy made, once per page. Bytes that are not UTF-8 (a stray
+        // `.DS_Store`) are replaced, which cannot hide a name that is.
+        pages.sort();
+        pages.dedup();
+        for page in &pages {
+            if sizes.iter().all(|(name, _)| used.contains(name)) { break }
+            if !page.fs_is_file() {
+                if layout::placeholder(page).is_some_and(|p| p.fs_exists()) { anyhow::bail!("{} is not downloaded from iCloud", page.display()) }
+                continue
+            }
+            if page.to_string_lossy().ends_with(".icloud") { anyhow::bail!("{} is not downloaded from iCloud", page.display()) }
+            let bytes = crate::vfs::read(page).with_context(|| format!("reading {}", page.display()))?;
+            let text = if bytes.starts_with(b"SQLite format 3\0") { table_text(page)? } else { String::from_utf8_lossy(&bytes).into_owned() };
+            let mut loose: Option<String> = None;
+            for (name, _) in &sizes {
+                if used.contains(name) || text.contains(name.as_str()) { used.insert(name.clone()); continue }
+                let loose = loose.get_or_insert_with(|| decoded(&text));
+                if loose.contains(name.as_str()) { used.insert(name.clone()); }
+            }
+        }
+        sizes.retain(|(name, _)| !used.contains(name));
+        sizes.sort();
+        Ok(sizes)
+    }
+
+    /// Take the sweep's files out of the asset folder into
+    /// `.quiet/removed-assets/<date>/`, where the Finder can reach them:
+    /// nothing is destroyed on the spot, so a picture the sweep got wrong can
+    /// be dragged back by hand. A day's folder is cleared once it is older
+    /// than the 回收站's own `TRASH_DAYS` — by its name, since a moved file
+    /// keeps the time it was last written, which may be long before. A name
+    /// with a path separator, a dot prefix or a vanished file is skipped, not
+    /// a failure.
+    pub fn remove_unused_assets(root: &Path, names: &[String]) -> usize {
+        use crate::time::{civil, days_from_civil};
+        let from = Self::assets_in(root);
+        let internal = if Self::flat_at(root) { root.to_path_buf() } else { root.join(INTERNAL) };
+        let gone = internal.join("removed-assets");
+        let (y, m, d, ..) = civil(now());
+        let today = days_from_civil(y, m, d);
+        if let Ok(rd) = crate::vfs::read_dir(&gone) {
+            for e in rd.flatten() {
+                let Some(n) = e.file_name().to_str().map(str::to_string) else { continue };
+                let p: Vec<u32> = n.split('-').map_while(|p| p.parse().ok()).collect();
+                let &[y, m, d] = p.as_slice() else { continue };
+                if e.file_type().is_ok_and(|t| t.fs_is_dir()) && days_from_civil(y as i64, m, d) + (TRASH_DAYS as i64) < today { let _ = crate::vfs::remove_dir_all(e.path()); }
+            }
+        }
+        let gone = gone.join(format!("{y:04}-{m:02}-{d:02}"));
+        let mut moved = 0;
+        for name in names {
+            if name.contains('/') || name.contains('\\') || name.starts_with('.') { continue }
+            let src = from.join(name);
+            if !src.fs_is_file() { continue }
+            if crate::vfs::create_dir_all(&gone).is_err() { break }
+            // A second sweep the same day may offer a name this folder already holds.
+            let (stem, ext) = name.rsplit_once('.').map_or((name.as_str(), ""), |(s, e)| (s, e));
+            let mut dst = gone.join(name);
+            let mut n = 1;
+            while crate::vfs::exists(&dst).unwrap_or(false) {
+                n += 1;
+                dst = gone.join(if ext.is_empty() { format!("{stem} {n}") } else { format!("{stem} {n}.{ext}") });
+            }
+            if crate::vfs::rename(&src, &dst).is_ok() { moved += 1 }
+        }
+        moved
     }
 
     /// Whether `dir` holds a library, of this layout or an older one.
@@ -2504,6 +2690,34 @@ mod tests {
         s.purge(&id).unwrap();
     }
 
+    /// #237: the older layout (everything at the root) is read the same way,
+    /// and taking a file away leaves it in the library rather than destroying it.
+    #[test]
+    fn unused_assets_sweep_reads_the_old_layout() {
+        let d = std::env::temp_dir().join(format!("fdl-test-unused-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(d.join("docs")).unwrap();
+        std::fs::create_dir_all(d.join("trash")).unwrap();
+        std::fs::create_dir_all(d.join("assets")).unwrap();
+        std::fs::write(d.join("format.json"), "{}").unwrap();
+        std::fs::write(d.join("docs/a.xml"), "<title>A</title><img src=\"assets/used.png\"/>").unwrap();
+        std::fs::write(d.join("docs/a.xml.bak"), "<title>A</title><img src=\"assets/bak-only.png\"/>").unwrap();
+        std::fs::write(d.join("trash/b.xml"), "trash-only.png").unwrap();
+        std::fs::write(d.join("assets/used.png"), b"12345").unwrap();
+        std::fs::write(d.join("assets/bak-only.png"), b"12").unwrap();
+        std::fs::write(d.join("assets/trash-only.png"), b"123").unwrap();
+        std::fs::write(d.join("assets/lonely.png"), b"1234567").unwrap();
+        std::fs::write(d.join("assets/.hidden.png"), b"1").unwrap();
+        let unused = Store::unused_assets_at(d.clone(), vec![], vec![]).unwrap();
+        assert_eq!(unused, vec![("lonely.png".to_string(), 7)]);
+        assert_eq!(Store::remove_unused_assets(&d, &unused.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>()), 1);
+        assert!(!d.join("assets/lonely.png").exists());
+        assert!(removed(&d.join("removed-assets")).join("lonely.png").exists());
+        assert!(d.join("assets/used.png").exists() && d.join("assets/trash-only.png").exists() && d.join("assets/bak-only.png").exists());
+        // Path tricks and vanished files are skipped, not taken.
+        assert_eq!(Store::remove_unused_assets(&d, &["../escape.png".into(), "no-such.png".into(), ".hidden.png".into()]), 0);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn file_history_ignores_external_creations() {
         let lib = Lib::new("file-journal");
@@ -3877,4 +4091,163 @@ mod tests {
         let n = s.list().len();
         eprintln!("导入文件夹 ({n} entries, list included): {:?}", t.elapsed());
     }
+
+    /// 设置 › 文档库 › 未使用资源 (#237): an asset file named `name`.
+    fn asset(lib: &Lib, name: &str) -> PathBuf {
+        let dir = Store::assets_in(&lib.0);
+        crate::vfs::create_dir_all(&dir).unwrap();
+        crate::vfs::write(dir.join(name), b"png").unwrap();
+        dir.join(name)
+    }
+
+    /// Today's folder of what a sweep set aside.
+    fn removed(gone: &Path) -> PathBuf {
+        let (y, m, d, ..) = crate::time::civil(now());
+        gone.join(format!("{y:04}-{m:02}-{d:02}"))
+    }
+
+    /// A page's file, body verbatim; folders made as needed.
+    fn page_at(lib: &Lib, rel: &str, body: &str) {
+        let p = lib.0.join(rel);
+        crate::vfs::create_dir_all(p.parent().unwrap()).unwrap();
+        crate::vfs::write(&p, body).unwrap();
+    }
+
+    fn spare_assets(lib: &Lib, live: Vec<String>) -> Vec<String> {
+        Store::unused_assets_at(lib.0.clone(), live, vec![]).unwrap().into_iter().map(|(name, _)| name).collect()
+    }
+
+    #[test]
+    fn unused_assets_match_names_the_way_they_are_written() {
+        let lib = Lib::new("sweep-names");
+        asset(&lib, "1a2b-Screen Shot 2026-11-17 at 10.00.png");
+        asset(&lib, "a&b.png");
+        asset(&lib, "spare.png");
+        // Markdown percent-encodes a space, DocxXML escapes `&`, and a page in
+        // a subfolder writes its source relative to itself.
+        page_at(&lib, "note.md", "![](/Users/x/Quiet.md/.assets/1a2b-Screen%20Shot%202026-11-17%20at%2010.00.png)");
+        page_at(&lib, "sub/deep.md", "![](../.assets/a&amp;b.png)");
+        // One link that does not decode to UTF-8 leaves the rest decodable,
+        // and Markdown may escape punctuation with a backslash.
+        asset(&lib, "c d.png");
+        asset(&lib, "e_f.png");
+        page_at(&lib, "gbk.md", "[百度](https://www.baidu.com/s?wd=%C4%E3)\n\n![](.assets/c%20d.png) ![](.assets/e\\_f.png)");
+        assert_eq!(Store::unused_assets_at(lib.0.clone(), vec![], vec![]).unwrap(), vec![("spare.png".to_string(), 3)]);
+    }
+
+    #[test]
+    fn unused_assets_read_the_trash_the_history_and_the_backups() {
+        let lib = Lib::new("sweep-keep");
+        for name in ["trashed.png", "old.png", "backup.png"] { asset(&lib, name); }
+        // Restoring a page, or a version of one, must not bring back a missing picture.
+        page_at(&lib, ".quiet/trash/9f2.xml", "<image src=\"/x/.assets/trashed.png\"/>");
+        page_at(&lib, ".quiet/history/9f2/1.xml", "<image src=\"/x/.assets/old.png\"/>");
+        // The `.bak` of a page that is still there, with the picture its
+        // current text no longer has.
+        page_at(&lib, "note.md", "no pictures now");
+        page_at(&lib, "note.md.bak", "![](./.assets/backup.png)");
+        assert!(spare_assets(&lib, vec![]).is_empty());
+    }
+
+    #[test]
+    fn unused_assets_keep_what_an_open_editor_holds() {
+        let lib = Lib::new("sweep-live");
+        asset(&lib, "unsaved.png");
+        asset(&lib, "undone.png");
+        // Text not saved yet, and a snapshot Undo can still bring back.
+        let live = vec![".assets/unsaved.png".to_string(), "/Users/x/Quiet.md/.assets/undone.png".to_string()];
+        assert!(spare_assets(&lib, live).is_empty());
+    }
+
+    #[test]
+    fn removing_unused_assets_sets_them_aside_in_the_library() {
+        let lib = Lib::new("sweep-move");
+        asset(&lib, "spare.png");
+        // A name that leaves the folder is not followed.
+        let names = vec!["../outside.png".to_string(), "spare.png".to_string()];
+        assert_eq!(Store::remove_unused_assets(&lib.0, &names), 1);
+        let from = Store::assets_in(&lib.0);
+        assert!(!from.join("spare.png").fs_is_file());
+        let day = removed(&lib.0.join(".quiet").join("removed-assets"));
+        assert!(day.join("spare.png").fs_is_file());
+        // A second sweep of the same name adds a number rather than overwriting.
+        asset(&lib, "spare.png");
+        assert_eq!(Store::remove_unused_assets(&lib.0, &["spare.png".to_string()]), 1);
+        assert!(day.join("spare 2.png").fs_is_file());
+    }
+
+    /// A 数据表 keeps its attachments inside SQLite, as a library file, one
+    /// embedded in a page, or a version of either; and SQLite's own files
+    /// beside an embedded one are never offered.
+    #[test]
+    fn unused_assets_read_every_table() {
+        let lib = Lib::new("sweep-tables");
+        for name in ["in-file.png", "in-embedded.png", "in-version.png", "spare.png", "t.sqlite-journal"] { asset(&lib, name); }
+        let base = |name: &str| {
+            use crate::table::*;
+            let mut b = Base::blank_named(0, "T", "文本");
+            let id = b.new_id();
+            let t = &mut b.tables[0];
+            t.fields.push(Field { id, name: "附件".into(), ty: FieldType::Attachment, opts: FieldOpts::default(), desc: String::new() });
+            t.records[0].cells.insert(id, Value::Files(vec![Attachment { path: format!(".assets/{name}"), name: name.into() }]));
+            b
+        };
+        crate::table::sqlite::create(&lib.0.join("表.sqlite"), &base("in-file.png")).unwrap();
+        crate::table::sqlite::create(&Store::assets_in(&lib.0).join("t.sqlite"), &base("in-embedded.png")).unwrap();
+        page_at(&lib, "page.xml", "<title>P</title>\n<table src=\".assets/t.sqlite\"/>");
+        crate::vfs::create_dir_all(lib.0.join(".quiet/history/x")).unwrap();
+        crate::table::sqlite::create(&lib.0.join(".quiet/history/x/1700000000000-0000abcd.sqlite"), &base("in-version.png")).unwrap();
+        assert_eq!(spare_assets(&lib, vec![]), ["spare.png"]);
+    }
+
+    /// Bytes that are not text (a Finder `.DS_Store` in the 回收站) are no
+    /// reason to give up; a page iCloud has not downloaded is.
+    #[test]
+    fn unused_assets_refuse_what_they_cannot_see() {
+        let lib = Lib::new("sweep-blind");
+        asset(&lib, "a.png");
+        page_at(&lib, "note.md", "nothing");
+        crate::vfs::create_dir_all(lib.0.join(".quiet/trash")).unwrap();
+        crate::vfs::write(lib.0.join(".quiet/trash/.DS_Store"), [0u8, 159, 146, 150, 0xff]).unwrap();
+        assert_eq!(spare_assets(&lib, vec![]), ["a.png"]);
+        page_at(&lib, "sub/.cloud.md.icloud", "bplist00");
+        assert!(Store::unused_assets_at(lib.0.clone(), vec![], vec![]).is_err());
+    }
+
+    /// A picture pasted into a 本机文件 or a note in a 本机文件夹 is copied into
+    /// this library too; an outside folder that cannot be reached stops the sweep.
+    #[test]
+    fn unused_assets_read_the_files_opened_outside() {
+        let lib = Lib::new("sweep-outside");
+        for name in ["file.png", "folder.png", "spare.png"] { asset(&lib, name); }
+        let out = Lib::new("sweep-outside-files");
+        page_at(&out, "single.md", "![](/x/.assets/file.png)");
+        page_at(&out, "dir/deep/n.md", "![](/x/.assets/folder.png)");
+        let outside = vec![out.0.join("single.md"), out.0.join("dir"), out.0.join("deleted.md")];
+        assert_eq!(Store::unused_assets_at(lib.0.clone(), vec![], outside).unwrap(), vec![("spare.png".to_string(), 3)]);
+        assert!(Store::unused_assets_at(lib.0.clone(), vec![], vec![out.0.join("unplugged/n.md")]).is_err());
+    }
+
+    /// What a sweep set aside waits in a folder named by its day, cleared by
+    /// that name once older than the 回收站's days: a moved file keeps an old
+    /// write time, which must not count.
+    #[test]
+    fn removed_assets_are_cleared_by_the_day_they_were_removed() {
+        let lib = Lib::new("sweep-days");
+        let gone = lib.0.join(".quiet/removed-assets");
+        page_at(&lib, ".quiet/removed-assets/2001-02-03/old.png", "png");
+        page_at(&lib, ".quiet/removed-assets/notes.txt", "kept");
+        asset(&lib, "spare.png");
+        assert_eq!(Store::remove_unused_assets(&lib.0, &["spare.png".to_string()]), 1);
+        assert!(!gone.join("2001-02-03").fs_exists() && gone.join("notes.txt").fs_is_file());
+        assert!(removed(&gone).join("spare.png").fs_is_file());
+    }
+
+    #[test]
+    fn a_library_without_an_asset_folder_has_nothing_to_sweep() {
+        let lib = Lib::new("sweep-none");
+        page_at(&lib, "note.md", "no pictures here");
+        assert!(spare_assets(&lib, vec![]).is_empty());
+    }
+
 }

@@ -1,8 +1,8 @@
 <h1 align="center">Quiet.md</h1>
 
 <p align="center">
-  <b>A fast, quiet, local notes app.</b><br>
-  Drawn natively with Rust + GPUI. Your notes stay on your computer, stored in the Feishu (Lark) DocxXML format.
+  <b>Fast, quiet notes that live on your computer.</b><br>
+  A native notes app built with Rust + GPUI: real folders, Markdown that formats itself, and a whiteboard inside your notes. Free and open source.
 </p>
 
 <p align="center">
@@ -29,13 +29,13 @@
 <p align="center">
   <a href="https://quiet.md/?lang=en"><b>Website</b></a> ·
   <a href="#download"><b>Download</b></a> ·
-  <a href="#performance">Performance</a> ·
   <a href="#features">Features</a> ·
+  <a href="#performance">Performance</a> ·
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 <p align="center">
-  <img src="docs/images/home.png" width="100%" alt="The Quiet.md home screen: a document tree on the left and all notes in a grid on the right.">
+  <img src="docs/images/readme-home.webp" width="100%" alt="Quiet.md on a pixel-art meadow: the sidebar lists folders, and Home shows each folder as a stack of note cards with pictures.">
 </p>
 
 > [!NOTE]
@@ -43,11 +43,51 @@
 
 ## Why Quiet.md
 
-**⚡ Fast, the native kind of fast.** The whole interface is drawn on the GPU by Rust and [GPUI](https://www.gpui.rs/). No WebView, no Electron. In a one-million-character document, typing, deleting and scrolling all stay under 6 ms per frame at P95.
+**📁 Your notes are just files.** No account, no cloud, and nothing goes over the network by default (the optional update check aside). Every folder in the sidebar is a real folder on your disk, and every note is a file named after its title: `.md` for Markdown, `.xml` for rich documents. Sync them with iCloud, Git or anything you like. If you ever stop using Quiet.md, your files stay right where they are.
 
-**🔒 Local-first. Your files are yours.** No account, no cloud, and nothing goes over the network by default (the optional update check aside). Your library is an ordinary folder on your computer: the sidebar's folders are real folders, and each note is a file named by its title (`.xml`, or `.md` for Markdown). Manage it with Git, iCloud or any sync tool you like; if you ever stop using Quiet.md, your files are still there.
+**⚡ Native, and fast.** The whole interface is drawn on the GPU by Rust and [GPUI](https://www.gpui.rs/). No Electron, no WebView. In a one-million-character note, typing takes about 5 ms a frame, and a 120 Hz display allows 8.3.
 
-**📝 A full rich-text editor that speaks Feishu (Lark) DocxXML.** Notes are saved in the DocxXML format used by Feishu (Lark) Docs, so copy-paste, import and export keep their structure. Headings, to-dos, tables, columns, callouts, code, math, images and attachments — the blocks you reach for when writing documents are all there.
+**✍️ Write and draw in one place.** Type `#`, `-`, `[]` or `>` and Markdown formats itself. When words are not enough, put a whiteboard right in the note. Rich notes are stored in the Feishu (Lark) DocxXML format, so pasting from Feishu or a web page keeps its structure.
+
+## Features
+
+### Write
+
+<p align="center">
+  <img src="docs/images/readme-write.webp" width="100%" alt="A long note open in Quiet.md, with headings, inline math and a table of ion concentrations.">
+</p>
+
+Headings, lists, to-dos, quotes, callouts, columns, tables with merged cells, code with syntax highlighting, LaTeX math, images, files and covers. Markdown shortcuts work as you type, and the `/` menu has everything else. Mention another note to link it; the other note lists its backlinks.
+
+### Draw
+
+<p align="center">
+  <img src="docs/images/readme-board.webp" width="100%" alt="A board in Quiet.md: pictures and maps laid out with handwritten labels, boxes and connecting arrows.">
+</p>
+
+Boards are a whiteboard ported from Excalidraw: shapes, arrows that stay attached, freehand, text, sticky notes, frames and pictures. Put one inside a note, or keep it as an `.excalidraw` file that excalidraw.com opens. Zoom with a trackpad pinch; a board with 10,000 shapes stays smooth.
+
+### Organize in real folders
+
+Home shows each folder as a stack of its pages. Hold a note over a folder and it opens for you; folders go inside folders, and moves can be undone. Pin and favorite notes, search every title and line with `⌘ J`, and find and replace within a note. Deleted notes wait in the Trash. Markdown files and folders elsewhere on your computer can be opened under **Files on this computer** and edited where they are.
+
+### Bring your notes
+
+<p align="center">
+  <img src="docs/images/readme-import.webp" width="100%" alt="The first-launch screen of Quiet.md, offering to import an Obsidian vault it found.">
+</p>
+
+On first launch, Quiet.md looks for your Obsidian, Logseq, iA Writer and Typora libraries and copies them in, leaving the originals alone. Later, drag Markdown files and folders onto Home or straight into a sidebar folder. Notes go out again as Markdown or PDF, or straight to the printer.
+
+### And more
+
+- **Version history**: every note keeps snapshots as it saves (20 by default, up to 30). Open one to see what changed in place, restore it in one click, or give it a name.
+- **Quick notes**: on macOS, a global shortcut (`⌥ Space` by default) opens a small note window over any app.
+- **Your look**: four built-in styles — Craft, Feishu, Notion and Obsidian — each with a dark variant, or your own CSS ([docs/THEMES.md](docs/THEMES.md)). Choose the interface and document fonts.
+- **Your keys**: press `⌘ /` to see every shortcut, and rebind any of them. On Windows and Linux, Ctrl stands in for ⌘ and Alt for ⌥.
+- **Your language**: English, Simplified Chinese, Traditional Chinese, Japanese, Korean, Spanish, French, Arabic and Turkish.
+- **Housekeeping**: Settings › Documents finds images and files no note uses any more and moves them out once you confirm.
+- **Updates**: new versions install from inside the app after their signature is verified. Automatic checks can be turned off.
 
 ## Download
 
@@ -74,8 +114,6 @@ You can also download from [Quiet.md](https://quiet.md/?lang=en). Every release 
 
 On first launch, Quiet.md asks for the interface language, where to keep your library and the quick-note shortcut, and offers to copy in notes from Obsidian, Logseq, iA Writer or Typora. An empty library gets a **Getting started** guide — a ten-minute tour of the main features. Existing notes are never overwritten.
 
-The interface is available in English, Simplified Chinese, Traditional Chinese, Japanese, Korean, Spanish, French, Arabic and Turkish.
-
 ## Performance
 
 Frame processing time over 100 consecutive operations in a mixed document of **1 million characters** and 549 chapters:
@@ -95,16 +133,6 @@ A 120 Hz display gives each frame 8.3 ms. Even at P95 on a million-character doc
 | Runtime | No WebView, no Electron, no background services |
 
 <sub>Apple M5 Pro / 48 GiB, macOS 26.5, release build. Methodology and scripts to reproduce: [docs/PERFORMANCE.md](docs/PERFORMANCE.md).</sub>
-
-## Features
-
-- **Editing**: headings, ordered and bulleted lists, to-dos, quotes, code blocks with syntax highlighting, LaTeX math, tables (with merged cells), callouts, columns, images, attachments and covers. Markdown shortcuts such as `#`, `-`, `[]` and `>`, plus a `/` slash menu.
-- **Boards**: a whiteboard ported from Excalidraw — shapes, arrows that stay bound, freehand, text, sticky notes, frames and images — as a block in a note or a standalone `.excalidraw` file that excalidraw.com opens.
-- **Version history**: each note keeps snapshots of its previous contents as it saves (20 by default, 1–30 under Settings › Documents). A drawer lists them by day; clicking one shows that version in place, read-only, with the blocks it added or rewrote tinted and a one-click restore. Important versions can be named.
-- **Organizing**: a document tree, pinning, favorites, full-text search and a trash.
-- **Import and export**: import Markdown folders (Obsidian picture embeds and callouts included) and Feishu (Lark) DocxXML; export Markdown and PDF, or print directly. Drag files from Finder onto Home or straight into a sidebar folder. Pasting from Feishu or a web page keeps the structure.
-- **Shortcuts**: press `⌘ /` (`Ctrl+/` on Windows) to see them all. Every one can be rebound. On Windows, Ctrl stands in for ⌘ and Alt for ⌥; the app and the Getting started guides show the keys for your system.
-- **Themes**: four built-in styles — Craft, Feishu, Notion and Obsidian — each with a dark variant, or write your own in CSS; see [docs/THEMES.md](docs/THEMES.md).
 
 ## Contributors
 

@@ -6,6 +6,7 @@
 use fdl_core::vfs::PathExt as _;
 use crate::{app::{View, Workspace}, theme::{self, craft, Theme}, themes, ui};
 use crate::ui::{TitleBarExt, TipExt};
+use crate::input::{TextField, TextFieldEvent};
 use crate::sidebar as sb;
 use gpui::{prelude::FluentBuilder, *};
 use serde::{Deserialize, Serialize};
@@ -123,6 +124,12 @@ pub struct Preferences {
     pub opaque_window: bool,
     /// 外观 › 界面字号: "small" or "large"; empty is the 13pt standard.
     pub ui_font: String,
+    /// 外观 › 界面字体: the family the sidebar, menus and settings are drawn in
+    /// (a system family name); empty is the platform's own sans.
+    pub ui_family: String,
+    /// 外观 › 文档字体: the family the note's body text and headings are drawn
+    /// in (a system family name); empty follows the document theme.
+    pub doc_family: String,
     /// When 稍后 put off moving the library to real folders (Unix seconds; 0 never).
     pub migrate_later: u64,
 }
@@ -163,7 +170,7 @@ fn system_lang() -> Lang {
 impl Default for Preferences {
     fn default() -> Self {
         let lang = system_lang();
-        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_home: false, browser: String::new(), opaque_window: false, ui_font: String::new(), migrate_later: 0 }
+        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_home: false, browser: String::new(), opaque_window: false, ui_font: String::new(), ui_family: String::new(), doc_family: String::new(), migrate_later: 0 }
     }
 }
 
@@ -202,7 +209,24 @@ fn apply(p: Preferences) {
     MOTION_HIGH.store(p.motion == "high", Ordering::Relaxed);
     // Before the themes are read (startup) the base comes from `feishu`.
     themes::select(&p.theme_id());
+    themes::set_doc_font(&p.doc_family);
+    theme::set_ui_family(&p.ui_family);
     *PREFS.write().unwrap() = Some(p);
+}
+
+/// Startup and each new window: with a font chosen, read the installed
+/// families once so one that has been uninstalled since falls back to the
+/// default face (`fonts::store`) instead of GPUI's last resort, and note which
+/// punctuation it draws itself (`fonts::probe`). Without one, fonts stay
+/// unenumerated.
+pub fn check_fonts(cx: &App) {
+    let p = prefs();
+    if p.ui_family.trim().is_empty() && p.doc_family.trim().is_empty() { return }
+    crate::fonts::families(cx);
+    crate::fonts::probe(&p.doc_family, cx);
+    crate::fonts::probe(&p.ui_family, cx);
+    themes::set_doc_font(&p.doc_family);
+    theme::set_ui_family(&p.ui_family);
 }
 
 /// Tell the OS which look the app wants (macOS: the window material, menus
@@ -383,6 +407,46 @@ pub struct PrefMenu {
     on: std::rc::Rc<dyn Fn(&mut Workspace, usize, &mut Context<Workspace>)>,
 }
 
+/// Which family a font list picks: the note's text or the interface's.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum FontTarget { Doc, Ui }
+
+impl FontTarget {
+    fn key(self) -> &'static str { match self { FontTarget::Doc => "doc", FontTarget::Ui => "ui" } }
+    /// The family in use ("" follows the theme / the platform).
+    fn current(self) -> String { match self { FontTarget::Doc => prefs().doc_family, FontTarget::Ui => prefs().ui_family } }
+    /// The first row of the list: put the setting back to the default.
+    fn reset_label(self) -> &'static str {
+        match self { FontTarget::Doc => tr("跟随主题", "Theme default"), FontTarget::Ui => tr("跟随系统字体", "System font") }
+    }
+}
+
+/// 外观 › 文档字体 / 界面字体: the open font list. Its search field filters the
+/// system's families (`crate::fonts`, read once per run); ↑ / ↓ walk the
+/// list, ↩ picks.
+pub struct FontMenu {
+    pub field: Entity<TextField>,
+    target: FontTarget,
+    /// The row the arrow keys point at, by family ("" is 跟随主题): filtering
+    /// the list would shift an index.
+    focused: Option<String>,
+    /// The list is virtual (hundreds of families, each shaped in its own
+    /// face) and follows the arrow keys.
+    scroll: UniformListScrollHandle,
+    _sub: Subscription,
+}
+
+/// 外观's font list: 跟随主题, then the installed families `term` matches. A
+/// search drops 跟随主题 — it is a reset, not a family.
+fn font_choices(term: &str, cx: &App) -> Vec<String> { filter_fonts(term, &crate::fonts::families(cx)) }
+
+fn filter_fonts(term: &str, families: &[String]) -> Vec<String> {
+    let term = term.trim().to_lowercase();
+    let mut list = if term.is_empty() { vec![String::new()] } else { vec![] };
+    list.extend(families.iter().filter(|f| f.to_lowercase().contains(&term)).cloned());
+    list
+}
+
 /// A segmented control: a grey groove and a white selected pill.
 fn segmented(id: &'static str, labels: &[&'static str], selected: usize, on: impl Fn(&mut Workspace, usize, &mut Context<Workspace>) + Clone + 'static, cx: &mut Context<Workspace>) -> Div {
     div().flex_none().h(px(28.)).p(px(2.)).flex().gap(px(2.)).rounded(px(9.)).bg(Theme::fill_hover_strong())
@@ -434,7 +498,8 @@ fn sample_page(t: &themes::Theme, s: f32) -> Div {
     let sc = |v: f32| px((v * s).max(0.5));
     let text = st.color("page.color").unwrap_or_else(|| st.token("text"));
     let (body, line) = (st.num("page.size"), st.num("page.line"));
-    let (font, mono): (SharedString, SharedString) = (st.font("page.font").into(), st.font("pre.font").into());
+    // 文档字体 follows into the sample: what the page shows is what the note looks like.
+    let (font, mono): (SharedString, SharedString) = (themes::doc_font_in(st, "page.font").into(), st.font("pre.font").into());
     let gap = sc(st.num("p.gap")).clamp(px(4.), px(9.));
     let p = |c: Div| c.text_size(sc(body)).line_height(sc(line));
     let heading = |l: u8, s: &'static str| {
@@ -517,7 +582,7 @@ fn sample_page(t: &themes::Theme, s: f32) -> Div {
         // min_w_0: the column follows the frame, not its widest unbreakable line.
         .child(div().w_full().min_w_0().overflow_hidden().max_w((sc(st.num("page.width")) * 1.35).min(px(760.))).px(px(32.)).pt(px(22.)).flex().flex_col().gap(gap)
             .child(div().text_size(sc(st.num("title.size"))).line_height(sc(st.num("title.size") * 1.25)).font_weight(FontWeight(st.num("title.weight")))
-                .font_family(SharedString::from(st.font("title.font"))).text_color(st.color("title.color").unwrap_or(text)).child(tr("开始指南", "Getting started")))
+                .font_family(SharedString::from(themes::doc_font_in(st, "title.font"))).text_color(st.color("title.color").unwrap_or(text)).child(tr("开始指南", "Getting started")))
             .child(para)
             .child(callout)
             .child(heading(1, tr("五分钟上手", "Five minutes")))
@@ -632,6 +697,142 @@ impl Workspace {
         cx.notify();
     }
 
+    /// 外观 › 文档字体 / 界面字体: open (or close) the font list, its search
+    /// field focused.
+    pub(crate) fn toggle_font_menu(&mut self, target: FontTarget, window: &mut Window, cx: &mut Context<Self>) {
+        if self.font_menu.take().is_some() {
+            window.focus(&self.focus, cx);
+            cx.notify();
+            return;
+        }
+        let field = cx.new(|cx| {
+            let mut f = TextField::new(tr("搜索字体", "Search fonts"), cx);
+            f.placeholder_color = Theme::text_disabled();
+            f
+        });
+        // Typing re-filters the list; the keys walk it (the field stops the
+        // window's own key handling, so the events come from here).
+        let sub = cx.subscribe_in(&field, window, |w, _, ev: &TextFieldEvent, window, cx| {
+            match ev {
+                TextFieldEvent::Changed => if let Some(m) = &mut w.font_menu { m.focused = None; m.scroll.scroll_to_item(0, ScrollStrategy::Top); },
+                TextFieldEvent::Down | TextFieldEvent::Up => w.move_font_focus(*ev == TextFieldEvent::Down, cx),
+                TextFieldEvent::Submit => w.pick_focused_font(window, cx),
+                TextFieldEvent::Cancel => { w.font_menu = None; window.focus(&w.focus, cx); }
+                _ => {}
+            }
+            cx.notify();
+        });
+        let focus = field.focus_handle(cx);
+        // Open on the family in use.
+        let scroll = UniformListScrollHandle::new();
+        let current = target.current();
+        if let Some(i) = font_choices("", cx).iter().position(|f| f.eq_ignore_ascii_case(&current)) { scroll.scroll_to_item(i, ScrollStrategy::Center); }
+        self.font_menu = Some(FontMenu { field, target, focused: None, scroll, _sub: sub });
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    /// The font list under its button: a search field, then 跟随主题 and the
+    /// installed families, each drawn in its own face.
+    pub(crate) fn render_font_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let menu = self.font_menu.as_ref()?;
+        if self.view != View::Settings || self.settings_page != Page::Appearance { return None }
+        let b = *self.font_anchors.borrow().get(menu.target.key())?;
+        let target = menu.target;
+        let current = target.current();
+        let choices = std::rc::Rc::new(font_choices(&menu.field.read(cx).text, cx));
+        let n = choices.len();
+        let focused = menu.focused.clone();
+        let list = if n == 0 {
+            div().px(px(10.)).py(px(6.)).text_size(px(theme::ui_font_small())).line_height(px(theme::ui_font_small() + 5.))
+                .text_color(Theme::text_caption()).child(tr("没有匹配的字体", "No matching font")).into_any_element()
+        } else {
+            uniform_list("font-list", n, cx.processor(move |_, range: std::ops::Range<usize>, _, cx| {
+                range.map(|i| {
+                    let family = &choices[i];
+                    let g = SharedString::from(format!("font-{}-{i}", target.key()));
+                    let picked = family.eq_ignore_ascii_case(&current);
+                    let (label, face): (SharedString, SharedString) = if family.is_empty() {
+                        (target.reset_label().into(), theme::ui_family().into())
+                    } else { (family.clone().into(), family.clone().into()) };
+                    let value = family.clone();
+                    // A virtual list's rows don't stretch on their own.
+                    div().w_full().flex().flex_col().child(ui::menu_row(g.clone(), g.clone())
+                        .when(focused.as_deref() == Some(family.as_str()), |d| d.bg(Theme::fill_hover()))
+                        .child(div().flex_1().min_w_0().overflow_hidden().font_family(face).child(ui::menu_label(label, g.clone(), gpui::white())))
+                        .child(div().flex_none().w(px(14.)).when(picked, |d| d.child(ui::menu_glyph("check", 14., g.clone()))))
+                        .on_click(cx.listener(move |w, _, window, cx| w.pick_font(value.clone(), target, window, cx))))
+                }).collect()
+            }))
+            .track_scroll(&menu.scroll)
+            .h(px((n as f32 * ui::MENU_ROW_H).min(300.)))
+            .into_any_element()
+        };
+        let anchors = self.font_anchors.clone();
+        let key = target.key();
+        let popup = ui::popover().id("font-menu").occlude().flex()
+            .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, window, cx| {
+                // A press on the button itself: its click closes the list.
+                if anchors.borrow().get(key).is_some_and(|b| b.contains(&ev.position)) { return }
+                w.font_menu = None;
+                window.focus(&w.focus, cx);
+                cx.notify();
+            }))
+            .child(div().w(px(240.)).flex().flex_col()
+                .child(div().px(px(8.)).pt(px(8.)).pb(px(4.))
+                    .child(div().h(px(28.)).px(px(7.)).flex().items_center().gap(px(6.)).rounded(px(7.)).bg(Theme::fill_hover())
+                        .child(ui::icon("search", 13., Theme::icon()))
+                        .child(div().flex_1().min_w_0().child(menu.field.clone()))))
+                .child(div().pb(px(ui::MENU_PAD_Y)).child(list)));
+        Some(deferred(anchored().anchor(Anchor::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(popup)).with_priority(2).into_any_element())
+    }
+
+    fn pick_font(&mut self, family: String, target: FontTarget, window: &mut Window, cx: &mut Context<Self>) {
+        self.font_menu = None;
+        window.focus(&self.focus, cx);
+        self.set_pref(move |p| match target {
+            FontTarget::Doc => p.doc_family = family,
+            FontTarget::Ui => p.ui_family = family,
+        }, cx);
+    }
+
+    /// ↑ / ↓ in the font list: the first press moves from the family in use,
+    /// else lands on the first row (↓) or the last (↑).
+    fn move_font_focus(&mut self, down: bool, cx: &mut Context<Self>) {
+        let Some(menu) = &self.font_menu else { return };
+        let choices = font_choices(&menu.field.read(cx).text, cx);
+        if choices.is_empty() { return }
+        // Before the first press the family in use is the starting point.
+        let current = menu.target.current();
+        let at = match &menu.focused {
+            Some(f) => choices.iter().position(|c| c == f),
+            None => choices.iter().position(|c| !c.is_empty() && c.eq_ignore_ascii_case(&current)),
+        };
+        let next = match (at, down) {
+            (None, true) => 0,
+            (None, false) => choices.len() - 1,
+            (Some(i), true) => (i + 1).min(choices.len() - 1),
+            (Some(i), false) => i.saturating_sub(1),
+        };
+        if let Some(m) = &mut self.font_menu {
+            m.focused = Some(choices[next].clone());
+            m.scroll.scroll_to_item(next, ScrollStrategy::Nearest);
+        }
+    }
+
+    /// ↩ in the font list: the highlighted family, else the first match.
+    fn pick_focused_font(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let picked = self.font_menu.as_ref().and_then(|m| {
+            let choices = font_choices(&m.field.read(cx).text, cx);
+            let family = match &m.focused {
+                Some(f) => choices.iter().find(|c| *c == f).cloned(),
+                None => choices.first().cloned(),
+            };
+            family.map(|f| (f, m.target))
+        });
+        if let Some((family, target)) = picked { self.pick_font(family, target, window, cx); }
+    }
+
     /// Keys while a 通用 dropdown is open; true when used.
     pub(crate) fn pref_menu_key(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
         let Some(m) = &mut self.pref_menu else { return false };
@@ -716,7 +917,9 @@ impl Workspace {
             if p.quick_hotkey { crate::quick_note::register(cx); } else { crate::quick_note::suspend_hotkey(); }
         }
         if p.appearance != old.appearance { apply_appearance(&p.appearance); }
-        if p.theme_id() != old.theme_id() || p.lang() != old.lang() || sync_dark(cx) {
+        if p.doc_family != old.doc_family { crate::fonts::probe(&p.doc_family, cx); }
+        if p.ui_family != old.ui_family { crate::fonts::probe(&p.ui_family, cx); }
+        if p.theme_id() != old.theme_id() || p.lang() != old.lang() || p.doc_family != old.doc_family || p.ui_family != old.ui_family || sync_dark(cx) {
             refresh_all(self, cx);
         }
         cx.notify();
@@ -784,7 +987,7 @@ impl Workspace {
                 .child(title)
                 .on_click(cx.listener(move |w, _, _, cx| match page { Some(p) => w.open_settings(p, cx), None => w.show_view(View::Trash, cx) }))
         };
-        div().w(px(self.sidebar_w(window))).h_full().flex_none().flex().flex_col().text_color(Theme::text()).font_family(theme::UI_FONT)
+        div().w(px(self.sidebar_w(window))).h_full().flex_none().flex().flex_col().text_color(Theme::text()).font_family(theme::ui_family())
             .child(div().h(px(crate::app::HEADER_H)).flex_none().flex().items_center().pl(px(theme::TRAFFIC_LIGHTS_W)).pr(px(12.)).title_bar().child(self.header_navigation(cx))
                 .child(div().flex_1()).children(update_pill(cx)))
             // The document sidebar's rhythm: 主页 sits 8 under the bar, a section
@@ -835,7 +1038,7 @@ impl Workspace {
             Page::Library => self.library_page(cx),
             Page::About => self.about_page(cx),
         };
-        div().flex_1().min_w_0().h_full().flex().flex_col().bg(Theme::bg_body()).text_color(Theme::text()).font_family(theme::UI_FONT)
+        div().flex_1().min_w_0().h_full().flex().flex_col().bg(Theme::bg_body()).text_color(Theme::text()).font_family(theme::ui_family())
             // The bar only drags the window; the page title heads the centred column.
             .child(div().h(px(crate::app::HEADER_H)).flex_none().flex().items_center().title_bar()
                 .when(!self.sidebar_open, |d| d.pl(px(theme::TRAFFIC_LIGHTS_W)).child(self.header_navigation(cx))))
@@ -900,6 +1103,28 @@ impl Workspace {
             .into_any_element()
     }
 
+    /// 外观's two font rows (界面字体, 文档字体): the family in use and a list of
+    /// every family the system has. `about` describes the row; a family that
+    /// was uninstalled since it was picked says so instead.
+    fn font_row(&self, target: FontTarget, title: &'static str, about: &'static str, cx: &mut Context<Self>) -> Div {
+        let family = target.current();
+        let description = if family.is_empty() || crate::fonts::installed(&family, cx) {
+            desc(about)
+        } else {
+            Some(tr("这个字体没有安装，暂时用默认字体显示。", "That font isn't installed; the default face stands in for now.").into())
+        };
+        row(title, description, {
+            let anchors = self.font_anchors.clone();
+            let key = target.key();
+            let label: SharedString = if family.is_empty() { target.reset_label().into() } else { family.clone().into() };
+            let open = self.font_menu.as_ref().is_some_and(|m| m.target == target);
+            popup_button(format!("{}-font-picker", target.key()), label, open)
+                .child(canvas(move |b, _, _| { anchors.borrow_mut().insert(key, b); }, |_, _, _, _| {}).absolute().inset_0())
+                .relative()
+                .on_click(cx.listener(move |w, _, window, cx| w.toggle_font_menu(target, window, cx)))
+        })
+    }
+
     fn appearance_page(&self, cx: &mut Context<Self>) -> AnyElement {
         let current = prefs().theme_id();
         let list = themes::themes();
@@ -957,7 +1182,14 @@ impl Workspace {
                         segmented("ui-font", &[tr("小", "Small"), tr("标准", "Default"), tr("大", "Large")], sel,
                             |w, i, cx| w.set_pref(|p| p.ui_font = ["small", "", "large"][i].into(), cx), cx)
                     }).into_any_element(),
+                    // 界面字体: the chrome — sidebar, menus, this page.
+                    self.font_row(FontTarget::Ui, tr("界面字体", "Interface font"),
+                        tr("侧栏、菜单和设置页用这个字体；文档用下面的「文档字体」。", "The sidebar, menus and settings use it; the note has its own below."), cx).into_any_element(),
                     row(tr("文档主题", "Document theme"), None, picker).into_any_element(),
+                    // 文档字体: every family the system has, for the note's
+                    // body text and headings (code keeps the theme's).
+                    self.font_row(FontTarget::Doc, tr("文档字体", "Document font"),
+                        tr("正文和标题用这个字体，代码块仍用主题的等宽字体。", "Body text and headings use it; code keeps the theme's monospace face."), cx).into_any_element(),
                     sample.into_any_element(),
                 ].into_iter().chain(THEME_CSS.then(|| {
                     row(tr("主题 CSS", "Theme CSS"), Some(where_),
@@ -1006,6 +1238,20 @@ impl Workspace {
                     .when(std::env::var_os("QUIET_MD_HOME").is_none(), |d| d.child(button("change-library", tr("更改…", "Change…")).on_click(cx.listener(|w, _, _, cx| w.pick_library(cx)))))).into_any_element(),
                 row(tr("回收站", "Trash"), Some(crate::localized_format!("删除的文档保留 {} 天后自动清除。", "Deleted documents are kept for {} days.", crate::store::TRASH_DAYS).into()),
                     button("open-trash", tr("打开", "Open")).on_click(cx.listener(|w, _, _, cx| w.show_view(View::Trash, cx)))).into_any_element(),
+                // #237: files no document (the Trash included) mentions.
+                row(tr("未使用资源", "Unused assets"), Some(tr("资源文件夹里没有任何文档（含回收站、版本历史和本机文件）引用的图片和文件。检查后确认才会移出。", "Images and files in the asset folder that no document mentions, including the Trash, version history and local files. Nothing is moved until you confirm.").into()),
+                    button("sweep-assets", tr("检查", "Check")).on_click(cx.listener(|w, _, window, cx| {
+                        let root = crate::store::Store::root_dir();
+                        let (live, outside) = w.sweep_inputs(window, cx);
+                        cx.spawn(async move |this, cx| {
+                            let sweep = cx.background_executor().spawn(async move { crate::store::Store::unused_assets_at(root, live, outside) }).await;
+                            let _ = this.update(cx, |w, cx| match sweep {
+                                Ok(files) if files.is_empty() => w.show_toast(crate::settings::text("没有未使用资源"), cx),
+                                Ok(files) => { w.confirm = Some(crate::app::Confirm::RemoveUnused(files)); cx.notify(); }
+                                Err(e) => w.sweep_failed(&e, cx),
+                            });
+                        }).detach();
+                    }))).into_any_element(),
                 row(tr("版本历史", "Version history"),
                     desc(tr("每篇文档保留的历史版本数（1–30 份）", "Snapshots kept for each document (1–30)")),
                     div().flex_none().flex().items_center().gap(px(12.))
@@ -1366,6 +1612,10 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "已彻底删除" => "Permanently deleted",
         "清空" => "Empty",
         "已清空回收站" => "Trash emptied",
+        "清理未使用资源" => "Remove unused assets",
+        "没有未使用资源" => "No unused assets",
+        "没有可清理的资源" => "Nothing to remove",
+        "移出" => "Move out",
         "确认清空回收站？" => "Empty the Trash?",
         "删除的内容将进入回收站，30 天后自动彻底删除" => "Deleted items will be moved to Trash and permanently deleted after 30 days.",
         "确认恢复？" => "Restore this document?",
@@ -1996,5 +2246,26 @@ mod preference_tests {
     fn languages_are_listed_in_declaration_order() {
         use super::Lang;
         for (i, l) in Lang::ALL.into_iter().enumerate() { assert_eq!(l as usize, i, "{l:?}"); }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{filter_fonts, Preferences};
+
+    #[test]
+    fn font_list_filters_and_drops_the_reset_while_searching() {
+        let all: Vec<String> = ["Georgia", "LXGW WenKai", "Songti SC"].map(String::from).to_vec();
+        assert_eq!(filter_fonts("", &all), ["", "Georgia", "LXGW WenKai", "Songti SC"]);
+        assert_eq!(filter_fonts(" wen ", &all), ["LXGW WenKai"]);
+        assert!(filter_fonts("zzz", &all).is_empty());
+    }
+
+    /// A preferences.json from before the font settings reads with both
+    /// empty: the theme's and the platform's faces.
+    #[test]
+    fn old_preferences_have_no_fonts() {
+        let p: Preferences = serde_json::from_str(r#"{"theme":"craft","ui_font":"large"}"#).unwrap();
+        assert_eq!((p.ui_family.as_str(), p.doc_family.as_str(), p.ui_font.as_str()), ("", "", "large"));
     }
 }

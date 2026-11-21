@@ -671,6 +671,29 @@ impl Core {
         hit
     }
 
+    /// Every file source this editor can still bring back: the cover, images,
+    /// attachments (inline ones too) and 数据表 files of the open document, and
+    /// of the undo and redo snapshots behind it. The unused-asset sweep reads
+    /// the disk, so without these a picture deleted a moment ago — still one
+    /// Undo away — would be taken as unused (#237).
+    pub fn asset_refs(&self) -> Vec<String> {
+        fn take(doc: &Document, out: &mut Vec<String>) {
+            out.extend(doc.cover.as_ref().map(|c| c.src.clone()));
+            doc.for_each_block(|b| {
+                match &b.kind {
+                    BlockKind::Image { src, .. } | BlockKind::File(FileBlock { src, .. }) => out.push(src.clone()),
+                    BlockKind::DataTable(t) => out.push(t.src.clone()),
+                    _ => {}
+                }
+                out.extend(b.text.runs.iter().filter_map(|r| r.marks.inline.as_ref().and_then(Inline::file)).map(|f| f.src.clone()));
+            });
+        }
+        let mut out = vec![];
+        take(&self.doc, &mut out);
+        for s in self.undo.iter().chain(self.redo.iter()) { take(&s.doc, &mut out); }
+        out
+    }
+
     pub fn break_coalescing(&mut self) {
         self.last_edit = None;
     }
@@ -3512,6 +3535,22 @@ mod tests {
         let mut c = doc("<title>T</title><hr/><p>a</p>");
         let (hr, a) = (id(&c, 1), id(&c, 2));
         assert!(!c.move_blocks(&[a], hr, DropPlace::FirstChild));
+    }
+
+    /// #237: the unused-asset sweep reads the disk, so an editor has to say
+    /// what it can still bring back — the document, and the snapshots behind it.
+    #[test]
+    fn asset_refs_keep_a_picture_undo_can_bring_back() {
+        let mut c = doc("<title>T</title><img src=\"/lib/.assets/a.png\"/><p>x</p>");
+        assert_eq!(c.asset_refs(), ["/lib/.assets/a.png".to_string()]);
+        c.delete_block(id(&c, 1));
+        assert!(!c.asset_refs().is_empty(), "the picture is one Undo away");
+        assert!(c.asset_refs().iter().any(|s| s.ends_with("a.png")));
+        assert!(c.undo());
+        assert_eq!(c.asset_refs(), ["/lib/.assets/a.png".to_string()]);
+        // The cover is a file of the library's assets as much as a picture is.
+        let c = doc("<title cover=\".assets/c.png\">T</title><p>x</p>");
+        assert_eq!(c.asset_refs(), [".assets/c.png".to_string()]);
     }
 
     #[test]
