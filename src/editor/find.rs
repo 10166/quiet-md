@@ -278,8 +278,8 @@ impl Editor {
             let (bg, border, color) = match (primary, enabled) {
                 (true, true) => (Theme::primary(), Theme::primary(), gpui::white()),
                 (true, false) => (theme::ca(craft::B500, 0.4), gpui::transparent_black(), gpui::white()),
-                (false, true) => (Theme::bg_body(), Theme::button_border(), Theme::text()),
-                (false, false) => (Theme::bg_body(), Theme::button_border(), Theme::text_disabled()),
+                (false, true) => (crate::theme::raised(Theme::bg_body()), Theme::button_border(), Theme::text()),
+                (false, false) => (crate::theme::raised(Theme::bg_body()), Theme::button_border(), Theme::text_disabled()),
             };
             div()
                 .id(id)

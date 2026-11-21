@@ -345,7 +345,8 @@ impl Theme {
     pub fn text_placeholder() -> Hsla { c(craft::N500) }
     /// Empty-block hints: placeholders are text at ~25%.
     pub fn block_placeholder() -> Hsla { ca(craft::N900, 0.25) }
-    pub fn text_disabled() -> Hsla { ca(craft::N900, 0.3) }
+    /// Dark mode: 40%, as 30% of the light ink on a raised surface fades out (GitHub #319).
+    pub fn text_disabled() -> Hsla { ca(craft::N900, if dark() { 0.4 } else { 0.3 }) }
     /// Toolbar glyphs.
     pub fn text_code() -> Hsla { c(craft::N800) }
     /// The link colour: the content accent (#0087FF) blended half-way to the

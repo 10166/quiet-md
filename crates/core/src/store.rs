@@ -325,6 +325,21 @@ pub struct Store {
     /// What `open` moved to the new layout this launch, for 更新日志.
     pub migrated: Option<MigrationReport>,
     batch: Batch,
+    /// 最近打开 and 阅读位置 not yet on disk, see [`Self::flush_view_state`].
+    view: std::cell::RefCell<PendingView>,
+}
+
+/// What switching documents remembers in memory only: each write of it is an
+/// atomic write with two full fsyncs (about 8 ms on an idle SSD, past 100 ms
+/// when the disk is busy), and it used to happen on every switch (#324).
+#[derive(Default)]
+struct PendingView {
+    opened: HashMap<String, u64>,
+    scroll: HashMap<String, Option<(usize, f32)>>,
+}
+
+impl Drop for Store {
+    fn drop(&mut self) { let _ = self.flush_view_state(); }
 }
 
 /// The parts of an `Entry` that come from the document file.
@@ -787,7 +802,7 @@ impl Store {
         }
         let base = if flat { root.clone() } else { internal.clone() };
         let trash = load_json(&base.join("trash").join("index.json"), "回收站索引", &mut warnings);
-        let mut store = Store { file_changes: vec![], root, index: HashMap::new(), foreign: DiskIndex::new(), trash, flat, warnings, migrated: None, loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), batch: Default::default() };
+        let mut store = Store { file_changes: vec![], root, index: HashMap::new(), foreign: DiskIndex::new(), trash, flat, warnings, migrated: None, loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), batch: Default::default(), view: Default::default() };
         if flat {
             store.index = load_json(&base.join("index.json"), "文档索引", &mut store.warnings);
             store.flat_folders()?;
@@ -1058,7 +1073,36 @@ impl Store {
             self.reclaim_open(before);
         }
         if let Some(trash) = reread(&self.trash_index_file()) { self.trash = trash; }
+        self.apply_pending_opened();
         Ok(lock)
+    }
+
+    /// An index just re-read from disk gets the 最近打开 times not written yet.
+    fn apply_pending_opened(&mut self) {
+        for (id, t) in &self.view.get_mut().opened {
+            if let Some(m) = self.index.get_mut(id) { m.opened = m.opened.max(*t); }
+        }
+    }
+
+    /// Write what [`Self::touch`] and [`Self::remember_scroll`] kept in memory.
+    /// The window calls this once switching stops and on quit; dropping the store does too.
+    pub fn flush_view_state(&mut self) -> Result<()> {
+        let scroll = std::mem::take(&mut self.view.get_mut().scroll);
+        // The times stay pending until written: `begin_write` puts them back on the re-read index.
+        let opened = if self.view.get_mut().opened.is_empty() { Ok(()) } else {
+            self.begin_write().and_then(|_lock| if self.flat { self.save_index() } else { self.save_local(&self.local_state()) })
+                .map(|()| self.view.get_mut().opened.clear())
+        };
+        if scroll.is_empty() { return opened }
+        let mut s = self.settings();
+        let mut changed = false;
+        for (id, top) in scroll {
+            changed |= match top {
+                Some((ix, y)) => s.scroll_top.insert(id, [ix as f32, y]) != Some([ix as f32, y]),
+                None => s.scroll_top.remove(&id).is_some(),
+            };
+        }
+        opened.and(if changed { self.save_settings(&s) } else { Ok(()) })
     }
 
     /// An editor still open on a document whose entry another copy of the app
@@ -2253,24 +2297,15 @@ impl Store {
 
     /// 阅读位置: the list offset this document was left at.
     pub fn scroll_top(&self, id: &str) -> Option<(usize, f32)> {
+        if let Some(top) = self.view.borrow().scroll.get(id) { return *top }
         let v = self.settings().scroll_top.get(id).copied()?;
         Some((v[0] as usize, v[1]))
     }
 
-    /// Remember — or, with `None`, forget — where a document was left.
-    pub fn remember_scroll(&self, id: &str, top: Option<(usize, f32)>) -> Result<()> {
-        let mut s = self.settings();
-        match top {
-            Some((ix, y)) => {
-                let v = [ix as f32, y];
-                if s.scroll_top.get(id) == Some(&v) { return Ok(()) }
-                s.scroll_top.insert(id.to_string(), v);
-            }
-            None => {
-                if s.scroll_top.remove(id).is_none() { return Ok(()) }
-            }
-        }
-        self.save_settings(&s)
+    /// Remember — or, with `None`, forget — where a document was left; on
+    /// disk at the next [`Self::flush_view_state`].
+    pub fn remember_scroll(&self, id: &str, top: Option<(usize, f32)>) {
+        self.view.borrow_mut().scroll.insert(id.to_string(), top);
     }
 
     /// 重命名 a document that isn't open: rewrite its title on disk and its
@@ -2295,13 +2330,13 @@ impl Store {
         Ok(meta)
     }
 
-    /// Note that `id` was just opened (this computer only).
+    /// Note that `id` was just opened (this computer only); on disk at the
+    /// next [`Self::flush_view_state`] or with any other write of the index.
     pub fn touch(&mut self, id: &str) -> Option<Meta> {
-        let _lock = self.begin_write().ok()?;
         let m = self.index.get_mut(id)?;
         m.opened = now();
         let m = m.clone();
-        let _ = if self.flat { self.save_index() } else { self.save_local(&self.local_state()) };
+        self.view.get_mut().opened.insert(id.to_string(), m.opened);
         Some(m)
     }
 
@@ -2393,6 +2428,31 @@ mod tests {
         let mut d = doc(title);
         d.blocks.push(crate::model::Block::text(body));
         d
+    }
+
+    #[test]
+    fn switching_documents_writes_view_state_later() {
+        let lib = Lib::new("view-state");
+        let mut s = lib.open();
+        let id = s.create_from(&doc_with("one", "alpha")).unwrap();
+        s.index.get_mut(&id).unwrap().opened = 1;
+        s.save_index().unwrap();
+        let opened_on_disk = || lib.open().list().into_iter().find(|e| e.id == id).unwrap().meta.opened;
+        // #324: 最近打开 and 阅读位置 stay in memory while documents are switched …
+        s.touch(&id);
+        s.remember_scroll(&id, Some((3, 12.)));
+        assert_eq!(opened_on_disk(), 1);
+        assert_eq!(lib.open().scroll_top(&id), None);
+        assert_eq!(s.scroll_top(&id), Some((3, 12.)));
+        // … survive the index being re-read for another write …
+        assert!(s.list().iter().find(|e| e.id == id).unwrap().meta.opened > 1);
+        // … and reach the disk when flushed, or when the store goes away.
+        s.flush_view_state().unwrap();
+        assert!(opened_on_disk() > 1);
+        assert_eq!(lib.open().scroll_top(&id), Some((3, 12.)));
+        s.remember_scroll(&id, None);
+        drop(s);
+        assert_eq!(lib.open().scroll_top(&id), None);
     }
 
     #[test]
@@ -3064,7 +3124,7 @@ mod tests {
         let index = crate::vfs::read(trash.join("index.json")).unwrap();
         crate::vfs::rename(&trash, lib.0.join(".quiet/trash-away")).unwrap();
         crate::vfs::write(&trash, b"").unwrap();
-        let mut s = Store { file_changes: vec![], root: lib.0.clone(), index: HashMap::new(), foreign: DiskIndex::new(), flat: false, migrated: None, trash: serde_json::from_slice(&index).unwrap(), warnings: vec![], loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), batch: Default::default() };
+        let mut s = Store { file_changes: vec![], root: lib.0.clone(), index: HashMap::new(), foreign: DiskIndex::new(), flat: false, migrated: None, trash: serde_json::from_slice(&index).unwrap(), warnings: vec![], loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), batch: Default::default(), view: Default::default() };
         assert_eq!(s.list_trash().len(), 1);
         assert_eq!(s.trash.len(), 1);
     }
@@ -3541,6 +3601,7 @@ mod tests {
         s.restore(&a).unwrap();
         s.set_pinned(&a, true).unwrap();
         s.touch(&a);
+        s.flush_view_state().unwrap();
         let mut st = s.settings();
         st.window_size = Some([1., 2.]);
         s.save_settings(&st).unwrap();
