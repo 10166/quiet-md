@@ -813,7 +813,7 @@ impl R<'_> {
         // Header: fold triangle, caption at x 29, then the toolbar (22 tall,
         // right-aligned), revealed on hover / while editing.
         let editing = self.focused && self.ed.core.sel.head.block == id;
-        let folded = self.ed.code_folded.contains(&id);
+        let folded = b.folded;
         // Handle hovered / its menu open (`.hovered`): light blue ring
         // over a clear body so the block tint shows; block-selected: blue
         // border on the gray body.
@@ -914,16 +914,13 @@ impl R<'_> {
             )
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |e, _, _, cx| {
+                cx.listener(move |e, _, window, cx| {
                     cx.stop_propagation();
-                    if !e.code_folded.remove(&id) {
-                        e.code_folded.insert(id);
-                        // Leave the hidden code (it opens again if the caret comes back).
-                        if e.core.sel.head.block == id || e.core.sel.anchor.block == id {
-                            e.core.select_block(id);
-                        }
-                    }
-                    cx.notify();
+                    // Saved with the document; a caret in the hidden code leaves for the
+                    // block (it opens again if the caret comes back).
+                    e.core.set_code_folded(id, !folded);
+                    e.keep_read_only_fold();
+                    e.changed_preserving_viewport(window, cx);
                 }),
             );
         let border = if menu_on {
@@ -1079,8 +1076,6 @@ impl Editor {
         let links = self.links_key();
         // Rows whose look depends on editor state, not the document.
         let mut nonces = self.grid_overrides();
-        // A folded code block is a 40px row.
-        nonces.extend(self.code_folded.iter().map(|&id| (id, id.0.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1)));
         nonces.extend(self.image_nonces(focused).into_iter().chain(self.button_nonce()));
         // Walking a long document costs ~1.5ms (1M chars): skip it when
         // nothing the rows depend on changed, as on every scrolling frame.
@@ -2110,7 +2105,7 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
         // Header: fold triangle, caption at x 29, then the toolbar (22 tall,
         // right-aligned), revealed on hover / while editing.
         let editing = self.focused && self.ed.core.sel.head.block == id;
-        let folded = self.ed.code_folded.contains(&id);
+        let folded = b.folded;
         // Handle hovered / its menu open (`.hovered`): light blue ring
         // over a clear body so the block tint shows; block-selected: blue
         // border on the gray body.
@@ -2210,16 +2205,13 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
             )
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |e, _, _, cx| {
+                cx.listener(move |e, _, window, cx| {
                     cx.stop_propagation();
-                    if !e.code_folded.remove(&id) {
-                        e.code_folded.insert(id);
-                        // Leave the hidden code (it opens again if the caret comes back).
-                        if e.core.sel.head.block == id || e.core.sel.anchor.block == id {
-                            e.core.select_block(id);
-                        }
-                    }
-                    cx.notify();
+                    // Saved with the document; a caret in the hidden code leaves for the
+                    // block (it opens again if the caret comes back).
+                    e.core.set_code_folded(id, !folded);
+                    e.keep_read_only_fold();
+                    e.changed_preserving_viewport(window, cx);
                 }),
             );
         let border = if menu_on {
