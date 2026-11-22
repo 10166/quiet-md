@@ -2814,6 +2814,12 @@ impl EntityInputHandler for Editor {
         Some(t[r].to_string())
     }
 
+    /// The caret block's length: iOS (gpui_ios) brings up the keyboard only
+    /// for a handler that reports one.
+    fn text_length_utf16(&mut self, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
+        Some(self.head_text()?.encode_utf16().count())
+    }
+
     fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {
         let t = self.head_text()?;
         let (r, reversed) = self.reported_range(&t);
