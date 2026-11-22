@@ -44,8 +44,11 @@ impl SharedStore {
     pub fn with_workspace(ws: Workspace) -> Self {
         let s = Self(Rc::new(RefCell::new(Shared { ws, active: None, entries: vec![], trash: vec![] })), Arc::new(AtomicBool::new(false)));
         if let Some(r) = s.0.borrow().ws.first() { Store::set_active_root(&r.path); }
+        s.roots_changed();
         s
     }
+    /// After roots came or went: whether there is a root's look to use.
+    fn roots_changed(&self) { crate::settings::set_has_roots(self.0.borrow().ws.first().is_some()); }
     pub fn file_task_busy(&self) -> bool { self.1.load(Ordering::Acquire) }
     pub fn begin_file_task(&self) -> Option<FileTaskGuard> {
         self.1.compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed).is_ok().then(|| FileTaskGuard(self.1.clone()))
@@ -57,13 +60,18 @@ impl SharedStore {
     pub fn roots(&self) -> Vec<(String, String, PathBuf, Option<String>)> {
         self.0.borrow().ws.roots.iter().map(|r: &Root| (r.key.clone(), r.name(), r.path.clone(), r.error.clone())).collect()
     }
-    pub fn add_root(&self, dir: &Path) -> std::result::Result<String, AddError> { self.0.borrow_mut().ws.add(dir) }
-    pub fn create_root(&self, dir: &Path) -> std::result::Result<String, AddError> { self.0.borrow_mut().ws.create(dir) }
+    pub fn add_root(&self, dir: &Path) -> std::result::Result<String, AddError> { let r = self.0.borrow_mut().ws.add(dir); self.roots_changed(); r }
+    pub fn create_root(&self, dir: &Path) -> std::result::Result<String, AddError> { let r = self.0.borrow_mut().ws.create(dir); self.roots_changed(); r }
     pub fn remove_root(&self, key: &str) -> Result<()> {
         let mut sh = self.0.borrow_mut();
         if let Some(s) = sh.ws.store(key) { let _ = s.flush_view_state(); }
         sh.ws.remove(key)?;
-        if sh.active.as_deref() == Some(key) { sh.active = None; }
+        if sh.active.as_deref() == Some(key) {
+            sh.active = None;
+            if let Some(r) = sh.ws.first() { Store::set_active_root(&r.path); }
+        }
+        drop(sh);
+        self.roots_changed();
         Ok(())
     }
     pub fn retry_root(&self, key: &str) { self.0.borrow_mut().ws.retry(key) }
@@ -78,15 +86,19 @@ impl SharedStore {
 
     /// The document in front is `id`: new ones without a folder go to its
     /// root, and images, 数据表 and 画板 resolve against it.
-    pub fn set_active(&self, id: &str) {
-        let mut sh = self.0.borrow_mut();
-        let Some(key) = sh.ws.owner(id) else { return };
-        if let Some(r) = sh.ws.root(&key) { Store::set_active_root(&r.path); }
-        sh.active = Some(key);
+    /// True when that is another root than before (its look should take over).
+    pub fn set_active(&self, id: &str) -> bool {
+        let key = self.root_of(id);
+        key.is_some_and(|k| self.set_active_root(&k))
     }
-    pub fn set_active_root(&self, key: &str) {
+    /// `set_active` for root `key`; true when the root in front changed.
+    pub fn set_active_root(&self, key: &str) -> bool {
         let mut sh = self.0.borrow_mut();
-        if let Some(r) = sh.ws.root(key).filter(|r| r.store.is_some()) { Store::set_active_root(&r.path); sh.active = Some(key.to_string()); }
+        let Some(path) = sh.ws.root(key).filter(|r| r.store.is_some()).map(|r| r.path.clone()) else { return false };
+        let changed = Store::root_dir() != path;
+        Store::set_active_root(&path);
+        sh.active = Some(key.to_string());
+        changed
     }
     /// The root things go to when nothing else says: the active one, else the first.
     pub fn active_root(&self) -> Option<String> {

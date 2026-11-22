@@ -87,7 +87,7 @@ impl Workspace {
 
     fn root_added(&mut self, key: &str, _window: &mut Window, cx: &mut Context<Self>) {
         self.folded_roots.remove(key);
-        self.store.set_active_root(key);
+        if self.store.set_active_root(key) { cx.defer(crate::settings::root_switched); }
         self.entries = self.store.list();
         self.sort();
         self.show_store_warnings_from(&self.store.take_warnings(), cx);
@@ -131,6 +131,7 @@ impl Workspace {
         }
         let _ = window;
         if let Err(e) = self.store.remove_root(key) { self.show_toast_kind(ToastKind::Error, &crate::settings::diagnostic(&e.to_string()), cx); }
+        cx.defer(crate::settings::root_switched);
         self.entries = self.store.list();
         self.trash = self.store.list_trash();
         self.sort();

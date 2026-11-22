@@ -802,8 +802,8 @@ impl Workspace {
             && self.document_peers(previous, window, cx).is_empty() { self.store.forget_loaded(previous); }
         self.editor = Some(editor);
         self.current = Some(id.to_string());
-        // Pasted images, 数据表 and 画板 belong to this document's root.
-        self.store.set_active(id);
+        // Pasted images, 数据表 and 画板 belong to this document's root, and it has its own look.
+        if self.store.set_active(id) { cx.defer(crate::settings::root_switched); }
         // Web images pasted earlier whose download landed after it closed (#220).
         if let Some(e) = self.editor.clone() { e.update(cx, |e, cx| e.adopt_remote(cx)); }
         crate::quick_note::used(id, cx);

@@ -164,6 +164,8 @@ pub(crate) fn start(existed: bool, scripted: bool, into: Option<&mut Window>, in
     let mut moved = vec![];
     cx.global::<shared_store::SharedStore>().each(|s| moved.extend(s.migrated.take()));
     for r in moved { changelog::migrated(&r); }
+    // The root in front brings its own look (W21).
+    settings::root_switched(cx);
     // The web build has no global shortcut to register.
     if !scripted && !cfg!(target_family = "wasm") { quick_note::install(cx); }
     app::set_menus(cx);

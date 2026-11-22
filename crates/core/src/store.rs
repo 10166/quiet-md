@@ -209,10 +209,27 @@ impl PageWidth {
     }
 }
 
+/// A root's own look (W21): its document theme and font, its themes
+/// folder beside them. A field left out falls back to the root's
+/// preferences of builds before 工作区, then to the built-in default. Kept
+/// behind `Store::root_look_at` so FORMAT 5 can store it per device.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct RootLook {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feishu: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc_family: Option<String>,
+}
+
 /// Window-level UI state: `.quiet/settings.json`, except the window sizes,
 /// which belong to this computer.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Settings {
+    /// The root's look (`Store::root_look_at`), kept through other writes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look: Option<RootLook>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quick_note_size: Option<[f32; 2]>,
     /// Dragged sidebar width; `None` is the default.
@@ -414,6 +431,11 @@ mod subdocs;
 #[derive(Serialize, Deserialize)]
 struct FormatMarker {
     format: u32,
+    /// The library's own id, made with its `.quiet/` and synced with it: what
+    /// tells two roots apart on every device (sync.md 3.6). Older builds
+    /// ignore it; one written without it gets one on opening.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    id: String,
 }
 
 /// An entry of `.quiet/index.json`, keyed by the path relative to the
@@ -766,6 +788,32 @@ impl Store {
         d
     }
 
+    /// Root `root`'s look: its `look` in `.quiet/settings.json`, else what its
+    /// `.quiet/preferences.json` (where builds before 工作区 kept it) says.
+    pub fn root_look_at(root: &Path) -> RootLook {
+        let internal = if Self::flat_at(root) { root.to_path_buf() } else { root.join(INTERNAL) };
+        #[derive(Deserialize, Default)]
+        struct Holder { #[serde(default)] look: Option<RootLook> }
+        if let Some(l) = reread::<Holder>(&internal.join("settings.json")).and_then(|h| h.look) { return l; }
+        #[derive(Deserialize, Default)]
+        struct Old { #[serde(default)] theme: Option<String>, #[serde(default)] feishu: Option<bool>, #[serde(default)] doc_family: Option<String> }
+        let o: Old = reread(&internal.join("preferences.json")).unwrap_or_default();
+        RootLook { theme: o.theme, feishu: o.feishu, doc_family: o.doc_family }
+    }
+
+    pub fn save_root_look_at(root: &Path, look: &RootLook) -> Result<()> {
+        let internal = if Self::flat_at(root) { root.to_path_buf() } else { root.join(INTERNAL) };
+        let path = internal.join("settings.json");
+        let mut v: serde_json::Value = reread(&path).unwrap_or_else(|| serde_json::json!({}));
+        if !v.is_object() { v = serde_json::json!({}); }
+        v["look"] = serde_json::to_value(look)?;
+        crate::vfs::create_dir_all(&internal)?;
+        save_json(&path, &v)
+    }
+
+    /// Root `root`'s themes folder.
+    pub fn themes_dir_of(root: &Path) -> PathBuf { if Self::flat_at(root) { root.join("themes") } else { root.join(INTERNAL).join("themes") } }
+
     /// The 应用级 part of `Settings` (sidebar width, home view, windows),
     /// from `settings_dir`.
     pub fn app_settings() -> Settings { reread(&Self::settings_dir().join("settings.json")).unwrap_or_default() }
@@ -1044,6 +1092,17 @@ impl Store {
         v
     }
 
+    /// The library's own id (`format.json`); empty in the old flat layout.
+    pub fn library_id(&self) -> String { reread::<FormatMarker>(&self.internal().join("format.json")).map(|m| m.id).unwrap_or_default() }
+
+    /// A new library id: this folder was copied whole from another root.
+    pub fn renew_library_id(&self) -> Result<()> {
+        if self.flat { return Ok(()); }
+        let path = self.internal().join("format.json");
+        let m: FormatMarker = serde_json::from_slice(&crate::vfs::read(&path)?)?;
+        write_atomic(&path, &serde_json::to_vec_pretty(&FormatMarker { format: m.format, id: uuid::Uuid::new_v4().to_string() })?)
+    }
+
     /// The folder this library is.
     pub fn root(&self) -> &Path { &self.root }
 
@@ -1081,15 +1140,18 @@ impl Store {
         if flat {
             let format = reread::<FormatMarker>(&root.join("format.json")).map_or(0, |m| m.format);
             anyhow::ensure!(format <= FORMAT, "这个文档库由更新版本的 Quiet.md 创建，请升级后再打开");
-            if !root.join("format.json").fs_exists() { write_atomic(&root.join("format.json"), &serde_json::to_vec_pretty(&FormatMarker { format })?)?; }
+            if !root.join("format.json").fs_exists() { write_atomic(&root.join("format.json"), &serde_json::to_vec_pretty(&FormatMarker { format, id: String::new() })?)?; }
         } else {
             match crate::vfs::read(&marker).ok().and_then(|b| serde_json::from_slice::<FormatMarker>(&b).ok()) {
                 Some(m) if m.format > FORMAT => anyhow::bail!("这个文档库由更新版本的 Quiet.md 创建，请升级后再打开"),
                 // Moved to the new layout; what was left of the old one is set aside.
-                Some(_) => if migrate::legacy(&root) { migrate::finish(&root, &mut warnings); },
+                Some(m) => {
+                    if migrate::legacy(&root) { migrate::finish(&root, &mut warnings); }
+                    if m.id.is_empty() { let _ = write_atomic(&marker, &serde_json::to_vec_pretty(&FormatMarker { format: m.format, id: uuid::Uuid::new_v4().to_string() })?); }
+                }
                 None => {
                     crate::vfs::create_dir_all(&internal)?;
-                    write_atomic(&marker, &serde_json::to_vec_pretty(&FormatMarker { format: FORMAT })?)?;
+                    write_atomic(&marker, &serde_json::to_vec_pretty(&FormatMarker { format: FORMAT, id: uuid::Uuid::new_v4().to_string() })?)?;
                 }
             }
         }
@@ -1503,7 +1565,7 @@ impl Store {
     fn require_markdown_format(&self) -> Result<()> {
         let path = self.internal().join("format.json");
         let format = reread::<FormatMarker>(&path).map_or(0, |m| m.format);
-        if format < 3 { write_atomic(&path, &serde_json::to_vec_pretty(&FormatMarker { format: 3 })?)?; }
+        if format < 3 { write_atomic(&path, &serde_json::to_vec_pretty(&FormatMarker { format: 3, id: String::new() })?)?; }
         Ok(())
     }
 
@@ -1520,7 +1582,7 @@ impl Store {
         migrate::pages_to_folders(&mut index, |id| docs.join(format!("{id}.xml")).fs_is_file(), |id| crate::vfs::read_to_string(docs.join(format!("{id}.xml"))).ok().and_then(|x| docxml::parse(&x).ok()).map(|d| d.title.text));
         self.index = index;
         self.save_index()?;
-        write_atomic(&self.internal().join("format.json"), &serde_json::to_vec_pretty(&FormatMarker { format: 2 })?)
+        write_atomic(&self.internal().join("format.json"), &serde_json::to_vec_pretty(&FormatMarker { format: 2, id: String::new() })?)
     }
 
     /// `list` in the old layout: the files in `docs/` (a `.md` dropped there by

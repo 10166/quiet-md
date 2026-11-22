@@ -139,7 +139,11 @@ impl Workspace {
     fn push(&mut self, key: String, path: PathBuf, store: Result<Store>) {
         let (store, error) = match store {
             Ok(mut s) => {
-                let taken: HashSet<String> = self.roots.iter().filter_map(|r| r.store.as_ref()).flat_map(|s| s.ids().cloned().collect::<Vec<_>>()).collect();
+                let open: Vec<&Store> = self.roots.iter().filter_map(|r| r.store.as_ref()).collect();
+                // A folder copied whole, `.quiet/` and all: a library of its own from now on.
+                let lib = s.library_id();
+                if !lib.is_empty() && open.iter().any(|o| o.library_id() == lib) && let Err(e) = s.renew_library_id() { s.warnings.push(format!("{e}")); }
+                let taken: HashSet<String> = open.iter().flat_map(|s| s.ids().cloned().collect::<Vec<_>>()).collect();
                 if let Err(e) = s.rekey(&taken) { s.warnings.push(format!("{e}")); }
                 (Some(s), None)
             }
@@ -305,6 +309,8 @@ mod tests {
         let list = ws.list();
         let ids: HashSet<&String> = list.iter().map(|e| &e.id).collect();
         assert_eq!(ids.len(), list.len(), "no id in two roots");
+        let (la, lb) = (ws.roots[0].store.as_ref().unwrap().library_id(), ws.roots[1].store.as_ref().unwrap().library_id());
+        assert!(!la.is_empty() && la != lb, "the copy is a library of its own");
     }
 
     #[test]

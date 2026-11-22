@@ -210,10 +210,47 @@ pub(crate) fn show_lang(lang: Lang) {
     apply(p);
 }
 
+/// The preferences: this computer's (应用级), the document theme and font
+/// the root in front's own (W21: they go with its folder).
 pub fn load() {
-    let p = fdl_core::vfs::read(path()).ok().and_then(|b| serde_json::from_slice::<Preferences>(&b).ok()).unwrap_or_default();
+    let mut p = fdl_core::vfs::read(path()).ok().and_then(|b| serde_json::from_slice::<Preferences>(&b).ok()).unwrap_or_default();
+    if let Some(root) = look_root() {
+        let look = crate::store::Store::root_look_at(&root);
+        let d = Preferences::default();
+        p.theme = look.theme.unwrap_or(d.theme);
+        p.feishu = look.feishu.unwrap_or(d.feishu);
+        p.doc_family = look.doc_family.unwrap_or(d.doc_family);
+    }
     apply(p);
 }
+
+/// The root whose look is in use: the one in front, when a root is open.
+fn look_root() -> Option<std::path::PathBuf> {
+    let root = crate::store::Store::root_dir();
+    (cx_has_roots() && root.join(crate::store::INTERNAL).exists()).then_some(root)
+}
+
+/// Whether the 工作区 has a root (none before first launch picks one).
+fn cx_has_roots() -> bool { HAS_ROOTS.load(Ordering::Relaxed) }
+static HAS_ROOTS: AtomicBool = AtomicBool::new(false);
+pub(crate) fn set_has_roots(on: bool) { HAS_ROOTS.store(on, Ordering::Relaxed); }
+
+/// Another root came to the front: its own look (theme, document font,
+/// themes folder) takes over in every window. Changing look between roots is
+/// meant (W21).
+pub(crate) fn root_switched(cx: &mut App) {
+    let before = prefs();
+    load();
+    let now = prefs();
+    if (now.theme_id(), &now.doc_family) == (before.theme_id(), &before.doc_family) && themes::dir() == *THEMES_DIR.lock().unwrap() { return }
+    *THEMES_DIR.lock().unwrap() = themes::dir();
+    themes::load(&now.theme_id(), themes::all_loaded(), || cx.text_system().all_font_names());
+    check_fonts(cx);
+    for w in cx.windows() {
+        if let Some(h) = w.downcast::<Workspace>() { let _ = h.update(cx, |ws, _, cx| refresh_all(ws, cx)); }
+    }
+}
+static THEMES_DIR: std::sync::Mutex<std::path::PathBuf> = std::sync::Mutex::new(std::path::PathBuf::new());
 
 fn apply(p: Preferences) {
     FEISHU.store(p.feishu, Ordering::Relaxed);
@@ -344,6 +381,11 @@ pub(crate) fn save(p: &Preferences) -> anyhow::Result<()> {
     f.write_all(&serde_json::to_vec_pretty(p)?)?;
     f.sync_all()?;
     fdl_core::vfs::rename(tmp, path())?;
+    // The document theme and font are the root in front's (W21).
+    if let Some(root) = look_root() {
+        let look = crate::store::RootLook { theme: Some(p.theme.clone()), feishu: Some(p.feishu), doc_family: Some(p.doc_family.clone()) };
+        if crate::store::Store::root_look_at(&root) != look { crate::store::Store::save_root_look_at(&root, &look)?; }
+    }
     apply(p.clone());
     Ok(())
 }
