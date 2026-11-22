@@ -121,6 +121,7 @@ Whiteboard and history modules in core:
 | Output | `display` (shared backend display list), `export_svg` |
 | `versions.rs` | Directory-indexed document snapshots, throttling, quotas and trash integration |
 | `diff.rs` / `changes.rs` | Dependency-free line LCS and block-level LCS for snapshot highlighting |
+| `merge.rs` | Three-way merge of two versions of a document by block, for sync (docs/design/sync.md §3.2); not wired into the app yet |
 
 ### Application (`src/`)
 

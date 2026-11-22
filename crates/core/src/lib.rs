@@ -11,6 +11,7 @@ pub mod editor;
 pub mod emoji;
 pub mod lang;
 pub mod markdown;
+pub mod merge;
 pub mod model;
 pub mod palette;
 pub mod paste;
