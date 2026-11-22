@@ -11,6 +11,7 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("退出 Quiet.md", "Quitter Quiet.md"),
     ("文件", "Fichier"),
     ("新建文档", "Nouveau document"),
+    ("新建子文档", "Nouvelle sous-page"),
     ("新建笔记窗口", "Nouvelle fenêtre de note"),
     ("打开 Markdown 文件…", "Ouvrir un fichier Markdown…"),
     ("导入为文档…", "Importer comme document…"),

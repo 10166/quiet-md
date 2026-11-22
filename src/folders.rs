@@ -119,11 +119,14 @@ impl Workspace {
 
     pub(crate) fn creation_parent(&self) -> Option<String> {
         if self.view == View::Folder { self.folder_current.clone() }
-        else if self.view == View::Doc { self.current.as_ref().and_then(|id| self.entries.iter().find(|e| &e.id == id)).and_then(|e| e.meta.parent.clone()) }
+        // Beside the open page; beside its folder when it is the folder's 正文 (#357).
+        else if self.view == View::Doc { self.current.as_ref().map(|id| self.row_of(id)).and_then(|id| self.entries.iter().find(|e| e.id == id)).and_then(|e| e.meta.parent.clone()) }
         else { None }
     }
 
     pub(crate) fn open_folder(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        // A folder with a 正文 has no page of its own: it is that document (#357).
+        if let Some(note) = self.entries.iter().find(|e| e.id == id).and_then(|e| e.note.clone()) { return self.try_open(&note, window, cx); }
         let target = id.to_string();
         if !self.save_before(cx, move |w, window, cx| { w.open_folder(&target, window, cx); }) { return false; }
         self.editor = None;

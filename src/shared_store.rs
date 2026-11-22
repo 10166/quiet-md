@@ -60,6 +60,8 @@ impl SharedStore {
     pub fn create_markdown(&mut self, doc: &Document, front: &str) -> Result<String> { self.0.borrow_mut().create_markdown(doc, front) }
     pub fn create_markdown_in(&mut self, doc: &Document, front: &str, parent: Option<&str>) -> Result<String> { self.0.borrow_mut().create_markdown_in(doc, front, parent) }
     pub fn create_from_in(&mut self, doc: &Document, parent: Option<&str>) -> Result<String> { self.0.borrow_mut().create_from_in(doc, parent) }
+    pub fn create_child(&mut self, id: &str, doc: &Document) -> Result<String> { self.0.borrow_mut().create_child(id, doc) }
+    pub fn can_have_children(&self, id: &str) -> bool { self.0.borrow().can_have_children(id) }
     pub fn delete(&mut self, id: &str, root: Option<&str>) -> Result<()> { self.0.borrow_mut().delete(id, root) }
     pub fn mount(&mut self, dir: &std::path::Path) -> Result<String> { self.0.borrow_mut().mount(dir) }
     pub fn mount_dirs(&self) -> Vec<std::path::PathBuf> { self.0.borrow().mount_dirs() }

@@ -132,7 +132,7 @@ Whiteboard and history modules in core:
 | `app.rs` | `Workspace`, the two-pane window, open/create/save/delete actions, save state and reminder scheduling |
 | `html.rs` / `printing.rs` / `transfer.rs` | HTML/PDF export, printing and import/export UI |
 | `clipboard.rs` | System clipboard HTML and the simulated clipboard in script mode |
-| `sidebar.rs` / `tree.rs` | Sidebar and document tree, including child documents and Move to |
+| `sidebar.rs` / `tree.rs` | Sidebar and document tree, including child pages (a folder's own document, see FORMAT.md and core's `subdocs.rs`) and Move to |
 | `home.rs` / `trash.rs` | Home and trash |
 | `search.rs` | Search dialog and advanced search |
 | `docmenu.rs` / `docinfo.rs` / `modes.rs` | More menu, document information, edit/read mode switch and shortcut panel |
