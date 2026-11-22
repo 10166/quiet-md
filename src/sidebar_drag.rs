@@ -217,8 +217,6 @@ impl Workspace {
     }
 
     pub(crate) fn arm_folder_drag(&mut self, id: &str, at: Point<Pixels>, cx: &mut Context<Self>) {
-        // A root's row stays where it is: roots don't move inside one another.
-        if crate::shared_store::root_of_row(id).is_some() { return; }
         let rows = self.drag_rows();
         let Some(index) = rows.iter().position(|r| r.entry.id == id) else { return };
         let Some(bounds) = self.folder_drag.bounds.get() else { return };
@@ -237,7 +235,8 @@ impl Workspace {
     pub(crate) fn move_folder_drag(&mut self, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         let Some(d) = self.folder_drag.active.as_mut() else { return };
         d.at = at;
-        if !d.started && (f32::from(at.x - d.start.x).hypot(f32::from(at.y - d.start.y)) >= 4.) {
+        // A root's row is clicked, never dragged: roots don't move inside one another.
+        if !d.started && crate::shared_store::root_of_row(&d.id).is_none() && (f32::from(at.x - d.start.x).hypot(f32::from(at.y - d.start.y)) >= 4.) {
             d.started = true; d.lift.to = 1.;
             self.folder_drag.icon_press = false;
             self.folder_drag.icon_alt = false;

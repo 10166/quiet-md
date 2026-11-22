@@ -83,8 +83,11 @@ fn canonical(p: &Path) -> PathBuf { plain(p.fs_canonicalize().unwrap_or_else(|_|
 use crate::time::now;
 
 impl Workspace {
-    /// `roots.json`: beside the other things this computer keeps.
+    /// `roots.json`: beside the other things this computer keeps, or where
+    /// `QUIET_MD_ROOTS` says (test runs with several roots, which must not
+    /// touch this computer's list).
     pub fn roots_file() -> PathBuf {
+        if let Some(f) = std::env::var_os("QUIET_MD_ROOTS") { return PathBuf::from(f); }
         dirs::data_local_dir().unwrap_or_else(crate::vfs::temp_dir).join("quiet-md").join("roots.json")
     }
 
@@ -92,6 +95,12 @@ impl Workspace {
     /// builds before it used, and the folders it had opened in place. With
     /// `QUIET_MD_HOME`, that folder alone (test runs touch nothing else).
     pub fn entries() -> (Vec<RootEntry>, bool) {
+        // Several roots in a test run: the list in its own file, `QUIET_MD_HOME` first when it is new.
+        if std::env::var_os("QUIET_MD_ROOTS").is_some() {
+            if let Ok(b) = crate::vfs::read(Self::roots_file()) && let Ok(f) = serde_json::from_slice::<RootsFile>(&b) { return (f.roots, false); }
+            let home = std::env::var_os("QUIET_MD_HOME").map(|h| RootEntry { key: new_key(), path: PathBuf::from(h), bookmark: None, added: now() });
+            return (home.into_iter().collect(), false);
+        }
         if let Some(home) = std::env::var_os("QUIET_MD_HOME") {
             return (vec![RootEntry { key: "home".into(), path: PathBuf::from(home), bookmark: None, added: 0 }], true);
         }
