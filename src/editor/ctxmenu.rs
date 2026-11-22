@@ -18,7 +18,7 @@ use super::view::{BlockAct, CtxKind, CtxSub, Editor, Menu};
 use crate::model::BlockKind;
 use crate::editor_ui::{MENU_PAD_Y, MENU_ROW_H, menu};
 use crate::feishu_theme::Theme;
-use gpui::*;
+use gpui::{prelude::FluentBuilder, *};
 
 /// A separator: a 1px rule in 4px margins.
 const SEP_H: f32 = 9.;
@@ -43,6 +43,10 @@ impl Panel {
     fn rule(mut self) -> Self {
         self.div = self.div.child(separator_h());
         self
+    }
+
+    fn when(self, on: bool, f: impl FnOnce(Self) -> Self) -> Self {
+        if on { f(self) } else { self }
     }
 }
 
@@ -184,7 +188,7 @@ impl Editor {
                         // 转换为 / 对齐 / the two block moves: what a caret can do
                         // to its own paragraph.
                         .push(sub_row(cx, "ctx-turn", "type", crate::settings::text("转换为"), CtxSub::Turn, sub == Some(CtxSub::Turn)))
-                        .push(sub_row(cx, "ctx-align", "align-left", crate::settings::text("对齐"), CtxSub::Align, sub == Some(CtxSub::Align)))
+                        .when(!self.markdown, |p| p.push(sub_row(cx, "ctx-align", "align-left", crate::settings::text("对齐"), CtxSub::Align, sub == Some(CtxSub::Align))))
                         .push(fire_row(cx, "ctx-up", "caret-up", crate::settings::text("上移块"), k::MoveBlockUp))
                         .push(fire_row(cx, "ctx-down", "caret-down", crate::settings::text("下移块"), k::MoveBlockDown));
                 }
@@ -192,14 +196,15 @@ impl Editor {
             CtxKind::Cell { block, row, col } => {
                 // 合并 needs the cell selection the user made: right-clicking
                 // inside it leaves it alone, so it is still there to merge.
-                let merge = self.core.cell_range().is_some_and(|(t, r)| {
+                // Markdown tables have no merged cells.
+                let merge = !self.markdown && self.core.cell_range().is_some_and(|(t, r)| {
                     t == block && r.contains(row, col) && self.core.selected_cells().len() >= 2
                 });
                 let split = self
                     .core
                     .table(block)
                     .and_then(|t| t.rows.get(row).and_then(|r| r.get(col)))
-                    .is_some_and(|c| c.colspan > 1 || c.rowspan > 1);
+                    .is_some_and(|c| !self.markdown && (c.colspan > 1 || c.rowspan > 1));
                 p = p
                     .push(act_row(cx, "ctx-row-above", "row-add", crate::settings::text("上方插入行"), move |e, window, cx| {
                         e.core.table_insert(block, false, row);
@@ -269,7 +274,8 @@ impl Editor {
                     .child(fire_row(cx, "ctx-ins-link", "link", crate::settings::text("链接"), k::Link))
                     .child(fire_row(cx, "ctx-ins-table", "table", crate::settings::text("表格"), k::InsertTable))
                     .child(fire_row(cx, "ctx-ins-divider", "divider", crate::settings::text("分隔线"), k::InsertDivider))
-                    .child(fire_row(cx, "ctx-ins-reminder", "reminder", crate::settings::text("提醒"), k::InsertReminder))
+                    // A Markdown file can't keep a reminder.
+                    .when(!self.markdown, |m| m.child(fire_row(cx, "ctx-ins-reminder", "reminder", crate::settings::text("提醒"), k::InsertReminder)))
                     .into_any_element(),
             ),
             (CtxKind::Caret, Some(CtxSub::Turn)) => {
