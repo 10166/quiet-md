@@ -639,6 +639,8 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("窗口背景", "Pencere arka planı"),
     ("默认让侧栏透出桌面的毛玻璃。开启后整个窗口不透明，背景里动的东西不会透进来。", "Varsayılan olarak kenar çubuğu buzlu cam efektiyle masaüstünü gösterir. Tamamen opak bir pencere için bu seçeneği açın."),
     ("界面字号", "Arayüz boyutu"),
+    ("正文字号", "Metin boyutu"),
+    ("特大", "Çok büyük"),
     ("小", "Küçük"),
     ("标准", "Standart"),
     ("大", "Büyük"),

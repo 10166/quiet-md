@@ -298,8 +298,8 @@ impl R<'_> {
         let st = theme::style();
         let mut spec = TextSpec::body();
         if env.cell {
-            spec.size = st.num("table.size");
-            spec.line_height = st.num("table.line-height");
+            spec.size = theme::doc_len(st.num("table.size"));
+            spec.line_height = theme::doc_len(st.num("table.line-height"));
         }
         if let BlockKind::Heading { level, .. } = b.kind {
             let m = theme::heading_metrics(level);
@@ -780,7 +780,7 @@ impl R<'_> {
         let id = b.id;
         let g = SharedString::from(format!("code-{}", id.0));
         let st = theme::style();
-        let (code_size, code_line, radius) = (st.num("pre.size"), st.num("pre.line"), st.num("pre.radius"));
+        let (code_size, code_line, radius) = (theme::doc_len(st.num("pre.size")), theme::doc_len(st.num("pre.line")), st.num("pre.radius"));
         let gutter_w = if st.flag("pre.numbers") { GUTTER_W } else { 0. };
         // SF Mono 13 on a 20pt line.
         let spec = TextSpec {
@@ -1832,15 +1832,15 @@ fn spec_for_feishu(&self, b: &Block, env: Env) -> TextSpec {
 
         let mut spec = TextSpec::body();
         if env.cell {
-            spec.size = 14.;
-            spec.line_height = 22.;
+            spec.size = crate::themes::doc_len(14.);
+            spec.line_height = crate::themes::doc_len(22.);
         }
         if let BlockKind::Heading { level, .. } = b.kind {
             let m = theme::heading_metrics(level);
-            spec.size = m.size;
-            spec.line_height = m.line_height;
+            spec.size = crate::themes::doc_len(m.size);
+            spec.line_height = crate::themes::doc_len(m.line_height);
             spec.weight = FontWeight::MEDIUM;
-            spec.letter_spacing = m.size * -0.02;
+            spec.letter_spacing = spec.size * -0.02;
         }
         spec.dim_marks = env.quote;
         if let Some(c) = env.color {
@@ -2180,9 +2180,10 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
 
         let id = b.id;
         let g = SharedString::from(format!("code-{}", id.0));
+        let line = crate::themes::doc_len(22.);
         let spec = TextSpec {
-            size: 14.,
-            line_height: 22.,
+            size: crate::themes::doc_len(14.),
+            line_height: line,
             weight: FontWeight::NORMAL,
             color: Theme::text_code(),
             mono: true,
@@ -2438,13 +2439,13 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
                                 .items_end()
                                 .font_family(theme::MONO_FONT)
                                 .text_size(px(14.))
-                                .line_height(px(22.))
+                                .line_height(px(line))
                                 .text_color(Theme::text_caption())
                                 .children(
                                     rows_per_line
                                         .iter()
                                         .enumerate()
-                                        .map(|(i, n)| div().h(px(22. * *n as f32)).child(format!("{}", i + 1))),
+                                        .map(|(i, n)| div().h(px(line * *n as f32)).child(format!("{}", i + 1))),
                                 ),
                         )
                         .child(self.code_column(id, wrap, el, 14.)),

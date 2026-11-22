@@ -600,6 +600,8 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("窗口背景", "Fondo de ventana"),
     ("默认让侧栏透出桌面的毛玻璃。开启后整个窗口不透明，背景里动的东西不会透进来。", "Por defecto, la barra lateral deja ver el escritorio a través de un vidrio esmerilado. Actívalo para que toda la ventana sea opaca y no se transparente lo que se mueve detrás."),
     ("界面字号", "Tamaño de la interfaz"),
+    ("正文字号", "Tamaño del texto"),
+    ("特大", "Muy grande"),
     ("界面字体", "Fuente de la interfaz"),
     ("侧栏、菜单和设置页用这个字体；文档用下面的「文档字体」。", "La barra lateral, los menús y los ajustes usan esta fuente; el documento tiene la suya abajo."),
     ("跟随系统字体", "Fuente del sistema"),

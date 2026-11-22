@@ -130,6 +130,10 @@ pub struct Preferences {
     /// 外观 › 文档字体: the family the note's body text and headings are drawn
     /// in (a system family name); empty follows the document theme.
     pub doc_family: String,
+    /// 外观 › 正文字号: "small", "large" or "xlarge"; empty follows the
+    /// document theme. Headings, tables and code keep the theme's ratio (themes::doc_len).
+    #[serde(default)]
+    pub doc_size: String,
     /// When 稍后 put off moving the library to real folders (Unix seconds; 0 never).
     pub migrate_later: u64,
     /// 查找 › `.*`: the find box takes regular expressions.
@@ -187,7 +191,7 @@ fn system_lang() -> Lang {
 impl Default for Preferences {
     fn default() -> Self {
         let lang = system_lang();
-        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_home: false, browser: String::new(), opaque_window: false, ui_font: String::new(), ui_family: String::new(), doc_family: String::new(), migrate_later: 0, find_regex: false, backspace_to_title: true, cjk_spacing: false, font_favorites: vec![], recent_doc_fonts: vec![], recent_ui_fonts: vec![] }
+        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_home: false, browser: String::new(), opaque_window: false, ui_font: String::new(), ui_family: String::new(), doc_family: String::new(), doc_size: String::new(), migrate_later: 0, find_regex: false, backspace_to_title: true, cjk_spacing: false, font_favorites: vec![], recent_doc_fonts: vec![], recent_ui_fonts: vec![] }
     }
 }
 
@@ -264,6 +268,7 @@ fn apply(p: Preferences) {
     // Before the themes are read (startup) the base comes from `feishu`.
     themes::select(&p.theme_id());
     themes::set_doc_font(&p.doc_family);
+    themes::set_doc_size(&p.doc_size);
     theme::set_ui_family(&p.ui_family);
     *PREFS.write().unwrap() = Some(p);
 }
@@ -808,14 +813,16 @@ fn sample_page(t: &themes::Theme, s: f32) -> Div {
     let st = t.style;
     let sc = |v: f32| px((v * s).max(0.5));
     let text = st.color("page.color").unwrap_or_else(|| st.token("text"));
-    let (body, line) = (st.num("page.size"), st.num("page.line"));
+    // 正文字号 too, by the same ratio as the note (themes::doc_len).
+    let dl = |n: f32| themes::doc_len_in(st, n);
+    let (body, line) = (dl(st.num("page.size")), dl(st.num("page.line")));
     // 文档字体 follows into the sample: what the page shows is what the note looks like.
     let (font, mono): (SharedString, SharedString) = (themes::doc_font_in(st, "page.font").into(), st.font("pre.font").into());
     let gap = sc(st.num("p.gap")).clamp(px(4.), px(9.));
     let p = |c: Div| c.text_size(sc(body)).line_height(sc(line));
     let heading = |l: u8, s: &'static str| {
         let h = format!("h{l}");
-        div().text_size(sc(st.num(&format!("{h}.size")))).line_height(sc(st.num(&format!("{h}.line")))).font_weight(FontWeight(st.num(&format!("{h}.weight"))))
+        div().text_size(sc(dl(st.num(&format!("{h}.size"))))).line_height(sc(dl(st.num(&format!("{h}.line"))))).font_weight(FontWeight(st.num(&format!("{h}.weight"))))
             .text_color(st.color(&format!("{h}.color")).unwrap_or(text)).child(s)
     };
     let link = st.color("a.color").unwrap_or(text);
@@ -873,7 +880,7 @@ fn sample_page(t: &themes::Theme, s: f32) -> Div {
     let row = |a: &'static str, b: &'static str, head: bool, last: bool| div().flex().when(!last, |d| d.border_b_1().border_color(line_c))
         .child(cell(a, head).border_r_1().border_color(line_c)).child(cell(b, head));
     let table = div().w_full().rounded(sc(st.num("table.radius"))).border_1().border_color(line_c).overflow_hidden()
-        .text_size(sc(st.num("table.size"))).line_height(sc(st.num("table.line-height")))
+        .text_size(sc(dl(st.num("table.size")))).line_height(sc(dl(st.num("table.line-height"))))
         .child(row(tr("按键", "Keys"), tr("作用", "Does"), true, false)).child(row(crate::shortcuts::keys("⌘ N"), tr("新建文档", "New document"), false, false)).child(row(crate::shortcuts::keys("⌘ J"), tr("搜索所有文档", "Search documents"), false, true));
     let (hr_c, hr_w) = (st.color("hr.color").unwrap_or_else(|| st.token("separator_dots")), (st.num("hr.width") * s).max(0.6));
     // Painted to the column's width: a row of fixed-size dots would set the
@@ -894,7 +901,7 @@ fn sample_page(t: &themes::Theme, s: f32) -> Div {
         .children(parts);
     let code = div().w_full().overflow_hidden().px(px(10.)).py(px(7.)).rounded(sc(st.num("pre.radius"))).bg(st.color("pre.bg").unwrap_or_else(|| st.token("code_bg")))
         .border_1().border_color(st.color("pre.border").unwrap_or_else(|| st.token("code_border")))
-        .font_family(mono.clone()).text_size(sc(st.num("pre.size"))).line_height(sc(st.num("pre.line"))).text_color(st.color("pre.color").unwrap_or_else(|| st.token("code_text")))
+        .font_family(mono.clone()).text_size(sc(dl(st.num("pre.size")))).line_height(sc(dl(st.num("pre.line")))).text_color(st.color("pre.color").unwrap_or_else(|| st.token("code_text")))
         .child(code_line("1", vec![tok("# ", syn("comment")), tok(tr("备份文档库", "back up your documents"), syn("comment"))]))
         .child(code_line("2", vec![tok("cd ", syn("function")), tok("~/Documents ", text), tok("&& ", syn("keyword")), tok("tar ", syn("function")), tok("-czf ", syn("attr")), tok("\"Quiet.tar.gz\" ", syn("string")), tok("Quiet.md", text)]))
         .child(code_line("3", vec![tok("echo ", syn("function")), tok("\"done\"", syn("string"))]));
@@ -908,7 +915,7 @@ fn sample_page(t: &themes::Theme, s: f32) -> Div {
     div().relative().size_full().flex().justify_center().items_start().bg(paper).rounded_b(px(SAMPLE_RADIUS)).font_family(font).text_color(text).overflow_hidden()
         // min_w_0: the column follows the frame, not its widest unbreakable line.
         .child(div().w_full().min_w_0().overflow_hidden().max_w((sc(st.num("page.width")) * 1.5).min(px(880.))).px(px(40.)).pt(px(28.)).flex().flex_col().gap(gap)
-            .child(div().text_size(sc(st.num("title.size"))).line_height(sc(st.num("title.size") * 1.25)).font_weight(FontWeight(st.num("title.weight")))
+            .child(div().text_size(sc(dl(st.num("title.size")))).line_height(sc(dl(st.num("title.size")) * 1.25)).font_weight(FontWeight(st.num("title.weight")))
                 .font_family(SharedString::from(themes::doc_font_in(st, "title.font"))).text_color(st.color("title.color").unwrap_or(text)).child(tr("开始指南", "Getting started")))
             .child(para)
             .child(long)
@@ -1354,7 +1361,7 @@ impl Workspace {
         if p.appearance != old.appearance { apply_appearance(&p.appearance); }
         if p.doc_family != old.doc_family { crate::fonts::probe(&p.doc_family, cx); }
         if p.ui_family != old.ui_family { crate::fonts::probe(&p.ui_family, cx); }
-        if p.theme_id() != old.theme_id() || p.lang() != old.lang() || p.doc_family != old.doc_family || p.ui_family != old.ui_family || sync_dark(cx) {
+        if p.theme_id() != old.theme_id() || p.lang() != old.lang() || p.doc_family != old.doc_family || p.doc_size != old.doc_size || p.ui_family != old.ui_family || sync_dark(cx) {
             refresh_all(self, cx);
         }
         cx.notify();
@@ -1635,6 +1642,12 @@ impl Workspace {
                     // body text and headings (code keeps the theme's).
                     self.font_row(FontTarget::Doc, tr("文档字体", "Document font"),
                         tr("正文和标题用这个字体，代码块仍用主题的等宽字体。", "Body text and headings use it; code keeps the theme's monospace face."), cx).into_any_element(),
+                    // 正文字号: the note's text, headings and code together (themes::doc_len).
+                    row(tr("正文字号", "Text size"), None, {
+                        let sel = match prefs().doc_size.as_str() { "small" => 0, "large" => 2, "xlarge" => 3, _ => 1 };
+                        segmented("doc-size", &[tr("小", "Small"), tr("标准", "Default"), tr("大", "Large"), tr("特大", "Extra large")], sel,
+                            |w, i, cx| w.set_pref(|p| p.doc_size = ["small", "", "large", "xlarge"][i].into(), cx), cx)
+                    }).into_any_element(),
                     sample.into_any_element(),
                 ].into_iter().chain(THEME_CSS.then(|| {
                     row(tr("主题 CSS", "Theme CSS"), Some(where_),
@@ -2726,5 +2739,7 @@ mod tests {
     fn old_preferences_have_no_fonts() {
         let p: Preferences = serde_json::from_str(r#"{"theme":"craft","ui_font":"large"}"#).unwrap();
         assert_eq!((p.ui_family.as_str(), p.doc_family.as_str(), p.ui_font.as_str()), ("", "", "large"));
+        // …and 正文字号 follows the theme.
+        assert_eq!(p.doc_size, "");
     }
 }
