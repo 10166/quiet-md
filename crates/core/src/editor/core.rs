@@ -2844,6 +2844,7 @@ impl Core {
     /// Line-start trigger for `prefix` (text before the caret, trigger
     /// character included). `enter` is true when the trigger is Enter.
     fn block_trigger(&self, id: BlockId, prefix: &str, enter: bool) -> Option<BlockKind> {
+        let prefix = &ascii_marker(prefix);
         let cur = self.kind_of(id)?;
         let in_cell = self.is_in_table(id);
         let in_quote = self.parent_kind_is(id, |k| matches!(k, BlockKind::Quote));
@@ -3308,6 +3309,31 @@ impl Core {
         }
         out
     }
+}
+
+/// The full-width spellings a Chinese input method types for a line-start
+/// marker (`＃＃ `, `－ `, `—— `, `1． `, `＞ `, `···lang`), as the ASCII
+/// `block_trigger` matches. Only the comparison sees it: the prefix is
+/// removed either way, so ⌘Z still brings back what was typed.
+fn ascii_marker(prefix: &str) -> String {
+    if prefix == "—— " {
+        return "- ".into();
+    }
+    let (fence, rest) = match prefix.strip_prefix("···").or_else(|| prefix.strip_prefix("｀｀｀")) {
+        Some(rest) => ("```", rest),
+        None => ("", prefix),
+    };
+    let ascii = |c| match c {
+        '＃' => '#',
+        '－' => '-',
+        '＋' => '+',
+        '＊' => '*',
+        '＞' => '>',
+        '｜' => '|',
+        '．' => '.',
+        c => c,
+    };
+    fence.chars().chain(rest.chars().map(ascii)).collect()
 }
 
 /// A column goes once its last block does, and the
@@ -4148,11 +4174,75 @@ mod tests {
             typed(&mut c, input);
             assert!(xml(&c).contains(want), "{input:?} -> {}", xml(&c));
         }
+        // Full-width markers from a Chinese input method, then a half-width space.
+        for (input, want) in [
+            ("＃ ", "<h1>"),
+            ("＃＃＃ ", "<h3>"),
+            ("－ ", "<ul>\n  <li></li>\n</ul>"),
+            ("＋ ", "<ul>\n  <li></li>\n</ul>"),
+            ("＊ ", "<ul>\n  <li></li>\n</ul>"),
+            ("—— ", "<ul>\n  <li></li>\n</ul>"),
+            ("1． ", "<ol>\n  <li></li>\n</ol>"),
+            ("3． ", "<ol>\n  <li seq=\"3\"></li>\n</ol>"),
+            ("＞ ", "<blockquote>"),
+            ("｜ ", "<blockquote>"),
+            ("···rust ", "<pre lang=\"rust\""),
+        ] {
+            let mut c = doc("<title>T</title><p></p>");
+            let b = id(&c, 1);
+            c.sel = Selection::caret(Pos::new(b, 0));
+            typed(&mut c, input);
+            assert!(xml(&c).contains(want), "{input:?} -> {}", xml(&c));
+            assert!(!xml(&c).contains(input.trim_end()), "{input:?} -> {}", xml(&c));
+        }
+        // Not a marker: full-width text stays as typed.
+        for input in ["＃标题 ", "——破折号 ", "中＃ ", "1．5 ", "· ", "·· "] {
+            let mut c = doc("<title>T</title><p></p>");
+            c.sel = Selection::caret(Pos::new(id(&c, 1), 0));
+            typed(&mut c, input);
+            assert_eq!(xml(&c), format!("<title>T</title>\n<p>{input}</p>\n"), "{input:?}");
+        }
         // "[x] " stays literal.
         let mut c = doc("<title>T</title><p></p>");
         c.sel = Selection::caret(Pos::new(id(&c, 1), 0));
         typed(&mut c, "[x] ");
         assert!(xml(&c).contains("<p>[x] </p>"), "{}", xml(&c));
+    }
+
+    #[test]
+    fn markdown_full_width_markers() {
+        // Typed in front of existing text: the text stays, ⌘Z brings back the marker as typed.
+        let mut c = doc("<title>T</title><p>a<b>bc</b></p>");
+        let b = id(&c, 1);
+        c.sel = Selection::caret(Pos::new(b, 0));
+        typed(&mut c, "＃＃ ");
+        assert_eq!(xml(&c), "<title>T</title>\n<h2>a<b>bc</b></h2>\n");
+        c.undo();
+        assert_eq!(xml(&c), "<title>T</title>\n<p>＃＃ a<b>bc</b></p>\n");
+        // Mid-paragraph is not a line start.
+        let mut c = doc("<title>T</title><p>中文</p>");
+        let b = id(&c, 1);
+        c.sel = Selection::caret(Pos::new(b, "中".len()));
+        typed(&mut c, "＞ ");
+        assert_eq!(xml(&c), "<title>T</title>\n<p>中＞ 文</p>\n");
+        // "···lang" + Enter, like "```lang" + Enter; the text after the caret stays.
+        let mut c = doc("<title>T</title><p>x</p>");
+        let b = id(&c, 1);
+        c.sel = Selection::caret(Pos::new(b, 0));
+        typed(&mut c, "···java");
+        assert!(c.markdown_enter_shortcut());
+        assert!(matches!(c.kind_of(b), Some(BlockKind::Code { lang, .. }) if lang == "Java"), "{}", xml(&c));
+        assert_eq!(c.text_of(b).unwrap().text, "x");
+        let mut c = doc("<title>T</title><p></p>");
+        c.sel = Selection::caret(Pos::new(id(&c, 1), 0));
+        typed(&mut c, "··java");
+        assert!(!c.markdown_enter_shortcut());
+        // Not in a table cell, as with "| ".
+        let mut c = doc("<title>T</title><table><tr><td></td></tr></table>");
+        let cell = c.units().into_iter().find(|u| u.id != TITLE).unwrap().id;
+        c.sel = Selection::caret(Pos::new(cell, 0));
+        typed(&mut c, "｜ ");
+        assert_eq!(c.text_of(cell).unwrap().text, "｜ ");
     }
 
     #[test]
