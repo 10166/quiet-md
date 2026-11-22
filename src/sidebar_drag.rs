@@ -235,7 +235,8 @@ impl Workspace {
     pub(crate) fn move_folder_drag(&mut self, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         let Some(d) = self.folder_drag.active.as_mut() else { return };
         d.at = at;
-        if !d.started && (f32::from(at.x - d.start.x).hypot(f32::from(at.y - d.start.y)) >= 4.) {
+        // A root's row is clicked, never dragged: roots don't move inside one another.
+        if !d.started && crate::shared_store::root_of_row(&d.id).is_none() && (f32::from(at.x - d.start.x).hypot(f32::from(at.y - d.start.y)) >= 4.) {
             d.started = true; d.lift.to = 1.;
             self.folder_drag.icon_press = false;
             self.folder_drag.icon_alt = false;
@@ -403,16 +404,20 @@ impl Workspace {
         let Some(movement) = self.folder_drag.pending.front().cloned() else { return };
         self.folder_drag.saving = true;
         let history = movement.history;
-        let mut writer = self.store.tree_writer();
+        let Some((key, mut writer)) = self.store.tree_writer(Some(&movement.id)) else { self.folder_drag.saving = false; self.folder_drag.pending.pop_front(); return; };
+        // Moves stay inside a root (W7); a root's row is its top level.
+        let allowed = self.store.same_root(&movement.id, movement.parent.as_deref());
+        let (parent, before) = (self.store.real_parent(movement.parent.as_deref()).map(str::to_string), self.store.real_parent(movement.before.as_deref()).map(str::to_string));
         let task = cx.background_executor().spawn(async move {
             let journal = writer.track_file_changes();
-            let result = writer.move_in_tree(&movement.id, movement.parent.as_deref(), movement.before.as_deref());
+            let result = allowed.and_then(|_| writer.move_in_tree(&movement.id, parent.as_deref(), before.as_deref()));
             let restored = if result.is_err() { Some(writer.list()) } else { None };
             (result, restored, journal.take())
         });
         cx.spawn(async move |this, cx| {
             let (result, restored, changes) = task.await;
             let _ = this.update(cx, |w, cx| {
+                let restored = restored.map(|r| w.store.merge_entries(&key, r));
                 w.folder_drag.pending.pop_front();
                 w.folder_drag.saving = false;
                 if let Err(ref e) = result {

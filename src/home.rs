@@ -485,10 +485,9 @@ impl Workspace {
 
     /// One level of the tree as 主页 shows it (a folder's page uses it too).
     pub(crate) fn level_entries(&self, parent: Option<&str>) -> Vec<Entry> {
-        // Folders under 本机文件 aren't the library's: not on its top level.
         // A folder's 正文 is the folder's own card, not one inside it.
         let notes: std::collections::HashSet<&str> = self.entries.iter().filter_map(|e| e.note.as_deref()).collect();
-        self.sorted_entries(self.entries.iter().filter(|e| e.meta.parent.as_deref() == parent && !(parent.is_none() && e.meta.mounted()) && !notes.contains(e.id.as_str())).cloned().collect())
+        self.sorted_entries(self.entries.iter().filter(|e| e.meta.parent.as_deref() == parent && !notes.contains(e.id.as_str())).cloned().collect())
     }
 
     pub(crate) fn prepare_manual_order(&mut self, cx: &mut Context<Self>) -> bool {

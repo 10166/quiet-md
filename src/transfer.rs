@@ -405,8 +405,9 @@ impl Workspace {
         if !self.save_before(cx, move |w, window, cx| w.import_paths(&again, retry.clone(), open, window, cx)) {
             return;
         }
+        let Some((key, mut writer)) = self.store.tree_writer(parent.as_deref()) else { return self.show_toast_kind(ToastKind::Error, &crate::shared_store::no_root().to_string(), cx) };
         let Some(task_guard) = self.store.begin_file_task() else { return };
-        let mut writer = self.store.tree_writer();
+        let parent = self.store.real_parent(parent.as_deref()).map(str::to_string);
         let paths = paths.to_vec();
         let task = cx.background_executor().spawn(async move {
             let journal = writer.track_file_changes();
@@ -433,6 +434,7 @@ impl Workspace {
             let _task_guard = task_guard;
             let (imported, entries) = task.await;
             let _ = this.update_in(cx, |w, window, cx| {
+                let entries = w.store.merge_entries(&key, entries);
                 w.sync_peers(cx, &entries, None);
                 w.entries = entries;
                 w.sort();
@@ -560,11 +562,12 @@ impl Workspace {
             return;
         }
         let then = held.take();
-        let Some(task_guard) = self.store.begin_file_task() else { return };
         // Scanning and writing hundreds of files takes seconds (an fsync each),
         // so it runs on its own store off the window's thread; the library
         // lock keeps it one write, as `tree_writer` does for drags.
-        let mut writer = self.store.tree_writer();
+        let Some((key, mut writer)) = self.store.tree_writer(parent.as_deref()) else { return self.show_toast_kind(ToastKind::Error, &crate::shared_store::no_root().to_string(), cx) };
+        let Some(task_guard) = self.store.begin_file_task() else { return };
+        let parent = self.store.real_parent(parent.as_deref()).map(str::to_string);
         let dir = dir.to_path_buf();
         let task = cx.background_executor().spawn(async move {
             let imported = match scan_folder(&dir, 0).filter(|t| t.files > 0) {
@@ -591,7 +594,7 @@ impl Workspace {
         cx.spawn_in(window, async move |this, cx| {
             let _task_guard = task_guard;
             let (imported, entries) = task.await;
-            let _ = this.update_in(cx, |w, window, cx| w.finish_import_folder(imported, entries, open, then, window, cx));
+            let _ = this.update_in(cx, |w, window, cx| { let entries = if entries.is_empty() { entries } else { w.store.merge_entries(&key, entries) }; w.finish_import_folder(imported, entries, open, then, window, cx) });
         }).detach();
     }
 

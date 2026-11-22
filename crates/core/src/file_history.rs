@@ -20,6 +20,8 @@ pub struct FileDelta { pub id: String, pub before: Option<FileState>, pub after:
 #[derive(Default)]
 pub struct FileChanges(std::sync::Arc<std::sync::Mutex<Vec<FileDelta>>>, bool);
 impl FileChanges {
+    /// A journal nothing writes to (no library to watch).
+    pub fn none() -> Self { FileChanges(Default::default(), true) }
     pub fn take(self) -> Vec<FileDelta> {
         if self.1 { return vec![]; }
         let mut merged: HashMap<String, FileDelta> = HashMap::new();
@@ -39,6 +41,12 @@ impl Store {
         let changes = FileChanges(Default::default(), !self.file_changes.is_empty());
         self.file_changes.push(std::sync::Arc::downgrade(&changes.0));
         changes
+    }
+
+    /// Record into `changes` too: one journal across the 工作区's roots.
+    pub fn share_file_changes(&mut self, changes: &FileChanges) {
+        self.file_changes.retain(|w| w.strong_count() > 0);
+        self.file_changes.push(std::sync::Arc::downgrade(&changes.0));
     }
 
     pub(super) fn file_state(&self, id: &str) -> Option<FileState> {

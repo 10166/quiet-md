@@ -2,7 +2,6 @@
 //! (see `sidebar.rs`) and the editor on the right, with the
 //! 64px top bar (breadcrumb title + save status) above the page.
 
-use fdl_core::vfs::PathExt as _;
 use crate::docinfo::DocInfo;
 use crate::docmenu::DocSub;
 use crate::editor::view::{Editor, EditorEvent};
@@ -164,29 +163,6 @@ pub fn quit(cx: &mut App) {
     }
 }
 
-/// 更改文档库: open documents are saved first (as for 退出), the folder is
-/// set up as a library if it isn't one, the current preferences go with
-/// it when it has none, and the app restarts into it. The old library
-/// stays where it is. Call it outside any window update (`cx.defer`).
-pub fn switch_library(root: std::path::PathBuf, cx: &mut App) {
-    let ready = cx
-        .windows()
-        .into_iter()
-        .filter_map(|w| w.downcast::<Workspace>())
-        .map(|w| { let again = root.clone(); w.update(cx, |ws, _, cx| ws.save_before(cx, move |_, _, cx| cx.defer(move |cx| switch_library(again, cx)))).unwrap_or(false) })
-        .fold(true, |ready, saved| ready & saved);
-    if !ready { return }
-    let prefs = crate::store::Store::internal_dir().join("preferences.json");
-    let set = crate::guides::initialize(&root).and_then(|_| crate::store::Store::set_root_dir(root.clone()));
-    if let Err(e) = set {
-        let msg = format!("{}{e}", crate::settings::tr("无法在这里创建文档库：", "Couldn't create the library here: "));
-        if let Some(ws) = cx.windows().into_iter().find_map(|w| w.downcast::<Workspace>()) { let _ = ws.update(cx, |w, _, cx| w.show_toast(&msg, cx)); }
-        return;
-    }
-    let mine = crate::store::Store::internal_dir().join("preferences.json");
-    if !mine.fs_exists() { let _ = fdl_core::vfs::create_dir_all(mine.parent().unwrap()).and_then(|_| fdl_core::vfs::copy(&prefs, &mine)); }
-    cx.restart();
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SaveStatus {
@@ -241,8 +217,8 @@ pub enum Confirm {
     /// The library should move to real folders, and the user is asked first
     /// (it is synced, or used from another computer): 改用文件夹 / 稍后.
     Migrate(crate::store::ConsentReason),
-    /// 设置 › 文档库 › 更改…: open this folder as the library (#94), after a restart.
-    SwitchLibrary(std::path::PathBuf),
+    /// 从侧栏移除 a root folder (key, name): the folder and its files stay.
+    RemoveRoot(String, String),
     /// Dropped on the sidebar from outside: import it into the library there?
     Import { what: DropImport, target: crate::sidebar_drop::SidebarDropAt },
 }
@@ -255,7 +231,8 @@ pub enum DropImport { Files(Vec<std::path::PathBuf>), Local(String) }
 pub type AfterSave = Box<dyn FnOnce(&mut Workspace, &mut Window, &mut Context<Workspace>)>;
 
 #[derive(Default)]
-struct ListedDocs { entries: Vec<crate::store::Entry>, trash: Vec<crate::store::TrashEntry>, warnings: Vec<String> }
+/// One root's lists as a background writer left them (`SharedStore::merge_entries`).
+struct ListedDocs { root: String, entries: Vec<crate::store::Entry>, trash: Vec<crate::store::TrashEntry>, warnings: Vec<String> }
 struct DeletedDocs { deleted: Vec<String>, errors: Vec<String>, changes: Vec<crate::store::FileDelta> }
 
 /// Inline 重命名 of a sidebar row.
@@ -368,6 +345,8 @@ pub struct Workspace {
     toast_task: Option<Task<()>>,
     /// Folded sidebar sections: 置顶, 我的文档.
     pub folded: [bool; 3],
+    /// Root folders folded shut in the sidebar, by key.
+    pub folded_roots: std::collections::HashSet<String>,
     /// Expanded pages of the 我的文档 tree.
     pub expanded: HashSet<String>,
     /// Where a drag from outside the tree (the Finder, 本机文件) would land in the sidebar.
@@ -442,7 +421,7 @@ impl Workspace {
         // 文档字体's download list shows progress and what arrived.
         cx.observe_global::<crate::font_downloads::Tick>(|ws, cx| if ws.font_menu.is_some() { cx.notify() }).detach();
         cx.observe_global::<crate::font_downloads::Changed>(|_, cx| cx.notify()).detach();
-        if !cx.has_global::<SharedStore>() { cx.set_global(SharedStore::open().expect("open document library")); }
+        if !cx.has_global::<SharedStore>() { cx.set_global(SharedStore::open()); }
         let mut store = cx.global::<SharedStore>().clone();
         let entries = store.list();
         let search = cx.new(|cx| {
@@ -507,11 +486,11 @@ impl Workspace {
         // A file written into the library from outside (a model writing a
         // note, say) joins it without going away and back: the library's
         // shape is compared every couple of seconds and the list re-read only
-        // when it changed. The folders opened under 本机文件 are watched the same way.
+        // when it changed. Every root folder is watched the same way.
         cx.spawn(async move |this, cx| {
             let bg = cx.background_executor().clone();
-            let shape = |dirs: Vec<std::path::PathBuf>| bg.spawn(async move { (crate::store::Store::shape_at(&crate::store::Store::root_dir()), crate::store::Store::shape_of(&dirs)) });
-            let dirs = |cx: &mut AsyncApp| this.update(cx, |w, _| w.store.mount_dirs()).unwrap_or_default();
+            let shape = |dirs: Vec<std::path::PathBuf>| bg.spawn(async move { dirs.iter().map(|d| crate::store::Store::shape_at(d)).collect::<Vec<u64>>() });
+            let dirs = |cx: &mut AsyncApp| this.update(cx, |w, _| w.store.root_dirs()).unwrap_or_default();
             let mut last = shape(dirs(cx)).await;
             let mut last_file = None;
             loop {
@@ -558,7 +537,7 @@ impl Workspace {
         .detach();
         let settings = store.settings();
         let sidebar_width = settings.sidebar_width.unwrap_or(theme::SIDEBAR_WIDTH);
-        let history_limit = settings.history_limit();
+        let history_limit = store.history_limit();
         let mut ws = Workspace {
             quick_note: quick,
             shortcut_recording: None,
@@ -627,6 +606,7 @@ impl Workspace {
             native_sidebar: Default::default(),
             shortcuts: false,
             folded: [false; 3],
+            folded_roots: Default::default(),
             expanded: HashSet::new(),
             sidebar_drop: None,
             move_dlg: None,
@@ -822,6 +802,8 @@ impl Workspace {
             && self.document_peers(previous, window, cx).is_empty() { self.store.forget_loaded(previous); }
         self.editor = Some(editor);
         self.current = Some(id.to_string());
+        // Pasted images, 数据表 and 画板 belong to this document's root, and it has its own look.
+        if self.store.set_active(id) { cx.defer(crate::settings::root_switched); }
         // Web images pasted earlier whose download landed after it closed (#220).
         if let Some(e) = self.editor.clone() { e.update(cx, |e, cx| e.adopt_remote(cx)); }
         crate::quick_note::used(id, cx);
@@ -856,6 +838,9 @@ impl Workspace {
     /// Move documents to the trash; if the open one goes, open the next.
     pub fn delete_docs(&mut self, ids: &[String], window: &mut Window, cx: &mut Context<Self>) {
         if self.store.file_task_busy() || self.file_history.busy || self.tree_writes_pending() { return; }
+        // A root's row is never deleted this way: it leaves the sidebar (从侧栏移除).
+        let ids: Vec<String> = ids.iter().filter(|id| crate::shared_store::root_of_row(id).is_none()).cloned().collect();
+        let ids = &ids[..];
         // A page goes with its child pages: each topmost page is
         // trashed as one item that carries its subtree.
         let tree = crate::tree::Tree::new(&self.entries);
@@ -889,15 +874,28 @@ impl Workspace {
             }
         }
         let Some(task_guard) = self.store.begin_file_task() else { return };
-        let mut writer = self.store.tree_writer();
+        // A selection may span roots: one writer, and one write, per root.
+        let mut writers: Vec<(String, crate::store::Store, Vec<(String, Option<String>)>)> = vec![];
+        for g in groups {
+            let Some(key) = self.store.root_of(&g.0) else { continue };
+            match writers.iter_mut().find(|(k, _, _)| *k == key) {
+                Some((_, _, v)) => v.push(g),
+                None => if let Some(w) = self.store.root_writer(&key) { writers.push((key, w, vec![g])); },
+            }
+        }
         let task = cx.background_executor().spawn(async move {
-            let journal = writer.track_file_changes();
-            // One write for all of them: each index write waits for the disk.
-            let (deleted, result) = writer.delete_many(&groups);
-            let errors = result.err().map(|e| crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string()))).into_iter().collect();
-            let warnings = writer.take_warnings();
-            let listed = ListedDocs { entries: writer.list(), trash: writer.list_trash(), warnings };
-            (DeletedDocs { deleted, errors, changes: journal.take() }, listed)
+            let (mut done, mut listed) = (DeletedDocs { deleted: vec![], errors: vec![], changes: vec![] }, vec![]);
+            for (key, mut writer, groups) in writers {
+                let journal = writer.track_file_changes();
+                // One write for all of them: each index write waits for the disk.
+                let (deleted, result) = writer.delete_many(&groups);
+                done.deleted.extend(deleted);
+                done.errors.extend(result.err().map(|e| crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string()))));
+                let warnings = writer.take_warnings();
+                listed.push(ListedDocs { root: key, entries: writer.list(), trash: writer.list_trash(), warnings });
+                done.changes.extend(journal.take());
+            }
+            (done, listed)
         });
         // The rows go now; the list read back when the files have moved
         // replaces this, bringing back anything that could not go.
@@ -908,8 +906,14 @@ impl Workspace {
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
             let _task_guard = task_guard;
-            let (done, listed) = task.await;
+            let (done, lists) = task.await;
             let _ = this.update_in(cx, |w, window, cx| {
+                let mut listed = ListedDocs { root: String::new(), entries: w.entries.clone(), trash: w.trash.clone(), warnings: vec![] };
+                for l in lists {
+                    listed.entries = w.store.merge_entries(&l.root, l.entries);
+                    listed.trash = w.store.merge_trash(&l.root, l.trash);
+                    listed.warnings.extend(l.warnings);
+                }
                 if w.current.as_ref().is_some_and(|c| done.deleted.contains(c)) {
                     w.save_task = None;
                     w.unsaved = false;
@@ -1032,6 +1036,7 @@ impl Workspace {
 
     /// 重命名: the row's title turns into an input; Enter or clicking away saves, Esc cancels.
     pub fn start_rename(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if crate::shared_store::root_of_row(id).is_some() { return; }
         let Some(title) = self.entries.iter().find(|e| e.id == id).map(|e| e.title.trim().to_string()) else { return };
         let field = cx.new(|cx| {
             let mut f = TextField::new(crate::model::UNTITLED, cx);
@@ -1213,7 +1218,7 @@ impl Workspace {
         if cx.windows().into_iter().filter(|h| Some(h.window_id()) != on_stack).filter_map(|h| h.downcast::<Workspace>()?.entity(cx).ok())
             .filter(|p| p.entity_id() != cx.entity_id())
             .any(|p| { let w = p.read(cx); w.current.as_ref() == Some(&id) && w.unsaved }) { return }
-        if let Ok(Some(doc)) = self.store.with(|s| s.refresh_markdown(&id)) {
+        if let Ok(Some(doc)) = self.store.with(Some(&id), |s| s.refresh_markdown(&id)) {
             self.adopt_markdown(&id, doc, cx);
         }
     }
@@ -1265,7 +1270,7 @@ impl Workspace {
         };
         let doc = &ed.read(cx).core.doc;
         let (title, icon, body, reminders, links) = (doc.title.text.clone(), doc.icon.clone(), doc.plain_text(), doc.reminders(), doc.doc_links());
-        match self.store.with(|s| s.save_editor(&id, doc)) {
+        match self.store.with(Some(&id), |s| s.save_editor(&id, doc)) {
             Ok(meta) => {
                 if let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
                     e.title = title;
@@ -1324,7 +1329,7 @@ impl Workspace {
         match moved {
             Err(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("没能改为真实文件夹，文档库保持原样：{}", "Couldn't move to real folders; the library is unchanged: {}", crate::settings::diagnostic(&e.to_string())), cx),
             Ok((report, store)) => {
-                self.store.with(|s| *s = store);
+                let _ = self.store.with(None, |s| { *s = store; Ok(()) });
                 crate::changelog::migrated(&report);
                 crate::open_main_window(crate::devtools::scripted(), Some(window.bounds()), cx);
                 window.remove_window();
@@ -1526,14 +1531,17 @@ impl Workspace {
         let chain: Vec<(String, String, Option<String>)> = self
             .current
             .as_ref()
-            .map(|id| self.ancestors(id).iter().map(|e| (e.id.clone(), display_title(&e.title), e.icon.clone())).collect())
+            .map(|id| self.ancestors(id).iter().filter(|e| crate::shared_store::root_of_row(&e.id).is_none()).map(|e| (e.id.clone(), display_title(&e.title), e.icon.clone())).collect())
             .unwrap_or_default();
         let mut crumbs: Vec<AnyElement> = vec![];
         let sep = || div().mx(px(3.)).flex_none().child(icon("chevron-right", 12., Theme::icon())).into_any_element();
         // Every path starts at the library, as a folder page's does; a file
         // under 本机文件 starts there, which has no page of its own.
         let local = self.current.as_ref().and_then(|id| self.entries.iter().find(|e| &e.id == id)).is_some_and(|e| e.meta.local());
-        let start = if local { crate::settings::tr("本机文件", "Files on this computer") } else { crate::settings::tr("我的文档", "My documents") };
+        let start = if local { crate::settings::tr("本机文件", "Files on this computer").to_string() } else {
+            let root = self.current.as_ref().and_then(|id| self.entries.iter().find(|e| &e.id == id)).map(|e| e.root.clone()).unwrap_or_default();
+            self.root_name(&root)
+        };
         if self.current.is_some() {
             crumbs.push(div().id("crumb-library").no_drag().flex_none().px(px(4.)).rounded(px(4.))
                 .whitespace_nowrap().text_color(Theme::text_caption())
@@ -1616,7 +1624,7 @@ impl Workspace {
         let left = if self.sidebar_open { 18. } else { theme::TRAFFIC_LIGHTS_W + 4. + 28. + 4. + 28. + 25. };
         let room = pane_w - left - crate::ui::header_right_inset() - 3. * HEADER_ACTIONS_H - 8. - 16.;
         if room < 360. && !crumbs.is_empty() {
-            let path: Vec<&str> = std::iter::once(start).chain(chain.iter().map(|c| c.1.as_str())).collect();
+            let path: Vec<&str> = std::iter::once(start.as_str()).chain(chain.iter().map(|c| c.1.as_str())).collect();
             crumbs = vec![
                 div().id("crumb-more").no_drag().flex_none().size(px(20.)).flex().items_center().justify_center().rounded(px(4.))
                     .text_color(Theme::text_caption()).tip(&path.join(" / "), None).child("…").into_any_element(),

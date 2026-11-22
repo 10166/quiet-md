@@ -21,3 +21,4 @@ pub mod time;
 pub mod versions;
 pub mod vfs;
 pub mod whiteboard;
+pub mod workspace;

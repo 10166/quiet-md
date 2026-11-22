@@ -342,7 +342,11 @@ pub fn touch() { GENERATION.fetch_add(1, Ordering::Relaxed); }
 pub fn themes() -> std::sync::RwLockReadGuard<'static, Vec<Theme>> { THEMES.read().unwrap() }
 /// Files that could not be read at all, from the last load.
 pub fn errors() -> Vec<String> { ERRORS.read().unwrap().clone() }
-pub fn dir() -> PathBuf { crate::store::Store::internal_dir().join("themes") }
+/// The themes folder: the root in front's (W21), else this computer's.
+pub fn dir() -> PathBuf {
+    let root = crate::store::Store::root_dir();
+    if root.join(crate::store::INTERNAL).exists() { crate::store::Store::themes_dir_of(&root) } else { crate::store::Store::settings_dir().join("themes") }
+}
 
 // ---- CSS
 

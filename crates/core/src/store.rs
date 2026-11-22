@@ -209,10 +209,27 @@ impl PageWidth {
     }
 }
 
+/// A root's own look (W21): its document theme and font, its themes
+/// folder beside them. A field left out falls back to the root's
+/// preferences of builds before 工作区, then to the built-in default. Kept
+/// behind `Store::root_look_at` so FORMAT 5 can store it per device.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct RootLook {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feishu: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc_family: Option<String>,
+}
+
 /// Window-level UI state: `.quiet/settings.json`, except the window sizes,
 /// which belong to this computer.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Settings {
+    /// The root's look (`Store::root_look_at`), kept through other writes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look: Option<RootLook>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quick_note_size: Option<[f32; 2]>,
     /// Dragged sidebar width; `None` is the default.
@@ -297,6 +314,8 @@ pub struct Entry {
     /// A folder's 正文 (#357): the document of the folder's own name inside
     /// it (`方案/方案.xml`), shown as a document with child pages.
     pub note: Option<String>,
+    /// The 工作区 root it is in (`workspace::Root::key`); empty from a lone `Store`.
+    pub root: String,
 }
 
 pub struct Store {
@@ -406,14 +425,17 @@ pub const ASSETS: &str = ".assets";
 
 #[path = "folders.rs"]
 mod folders;
-#[path = "mounts.rs"]
-mod mounts;
 #[path = "subdocs.rs"]
 mod subdocs;
 
 #[derive(Serialize, Deserialize)]
 struct FormatMarker {
     format: u32,
+    /// The library's own id, made with its `.quiet/` and synced with it: what
+    /// tells two roots apart on every device (sync.md 3.6). Older builds
+    /// ignore it; one written without it gets one on opening.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    id: String,
 }
 
 /// An entry of `.quiet/index.json`, keyed by the path relative to the
@@ -704,11 +726,25 @@ fn ext_of(m: &Meta) -> &str {
 }
 
 impl Store {
-    /// `QUIET_MD_HOME`, else the folder picked at first launch (`library.json`
-    /// outside the library, since everything else lives inside it), else a
-    /// folder of its own in the user's Documents, where they can see and back it up.
+    /// The root folder being worked in (工作区: each root is a library of its
+    /// own): the one holding the document in front, which pasted images go to
+    /// and its 数据表 and 画板 files resolve against. Before any is chosen,
+    /// the library builds before 工作区 used (`legacy_root`).
     pub fn root_dir() -> PathBuf {
         if let Some(p) = ROOT.read().unwrap().clone() { return p }
+        Self::legacy_root()
+    }
+
+    /// Make `root` the one `root_dir` names: the root of the document in front.
+    pub fn set_active_root(root: &Path) {
+        let mut r = ROOT.write().unwrap();
+        if r.as_deref() != Some(root) { *r = Some(root.to_path_buf()); }
+    }
+
+    /// The one library of builds before 工作区: `QUIET_MD_HOME`, else the
+    /// folder picked at first launch (`library.json`), else a folder of its
+    /// own in the user's Documents, where they can see and back it up.
+    pub fn legacy_root() -> PathBuf {
         std::env::var_os("QUIET_MD_HOME").map(PathBuf::from)
             .or_else(|| crate::vfs::read(Self::location_file()).ok().and_then(|b| serde_json::from_slice::<Location>(&b).ok()).map(|l| l.path).filter(|p| p.fs_is_absolute()))
             .unwrap_or_else(Self::default_root)
@@ -720,16 +756,69 @@ impl Store {
         dirs::document_dir().or_else(|| dirs::home_dir().map(|h| h.join("Documents"))).unwrap_or_else(|| PathBuf::from(".")).join("Quiet.md")
     }
 
-    /// The library's own data (`.quiet/`): preferences, shortcuts, themes,
-    /// the index and the 回收站. Created on demand.
-    pub fn internal_dir() -> PathBuf {
-        let root = Self::root_dir();
-        // The old layout keeps them at the top, where older builds look.
-        if Self::flat_at(&root) { return root; }
-        let d = root.join(INTERNAL);
-        let _ = crate::vfs::create_dir_all(&d);
+    /// 应用级设置: preferences, shortcuts, themes, emoji and the window's
+    /// state, this computer's and apart from every root (each root keeps its
+    /// own in its `.quiet/`). Test runs (`QUIET_MD_HOME`) and the web build keep
+    /// them beside their library, as before. The first run after 工作区 copies
+    /// them from the library that held them; that copy stays for older builds.
+    pub fn settings_dir() -> PathBuf {
+        let legacy = || { let root = Self::legacy_root(); if Self::flat_at(&root) { root } else { root.join(INTERNAL) } };
+        if std::env::var_os("QUIET_MD_HOME").is_some() || cfg!(target_family = "wasm") {
+            let d = legacy();
+            let _ = crate::vfs::create_dir_all(&d);
+            return d;
+        }
+        let d = dirs::data_local_dir().unwrap_or_else(crate::vfs::temp_dir).join("quiet-md").join("settings");
+        if !d.fs_is_dir() {
+            let from = legacy();
+            let _ = crate::vfs::create_dir_all(&d);
+            for name in ["preferences.json", "shortcuts.json", "emoji.json", "settings.json"] {
+                if from.join(name).fs_is_file() { let _ = crate::vfs::copy(from.join(name), d.join(name)); }
+            }
+            if let Ok(rd) = crate::vfs::read_dir(from.join("themes")) {
+                let _ = crate::vfs::create_dir_all(d.join("themes"));
+                for e in rd.flatten() { if e.path().fs_is_file() { let _ = crate::vfs::copy(e.path(), d.join("themes").join(e.file_name())); } }
+            }
+            // The window's place was this computer's state about that library.
+            let local: Local = reread(&local_file_for(&Self::legacy_root())).unwrap_or_default();
+            let mut s: Settings = reread(&d.join("settings.json")).unwrap_or_default();
+            (s.window_size, s.window_origin, s.window_display, s.quick_note_size) = (local.window_size, local.window_origin, local.window_display, local.quick_note_size.or(s.quick_note_size));
+            if let Ok(b) = serde_json::to_vec_pretty(&s) { let _ = write_atomic(&d.join("settings.json"), &b); }
+        }
         d
     }
+
+    /// Root `root`'s look: its `look` in `.quiet/settings.json`, else what its
+    /// `.quiet/preferences.json` (where builds before 工作区 kept it) says.
+    pub fn root_look_at(root: &Path) -> RootLook {
+        let internal = if Self::flat_at(root) { root.to_path_buf() } else { root.join(INTERNAL) };
+        #[derive(Deserialize, Default)]
+        struct Holder { #[serde(default)] look: Option<RootLook> }
+        if let Some(l) = reread::<Holder>(&internal.join("settings.json")).and_then(|h| h.look) { return l; }
+        #[derive(Deserialize, Default)]
+        struct Old { #[serde(default)] theme: Option<String>, #[serde(default)] feishu: Option<bool>, #[serde(default)] doc_family: Option<String> }
+        let o: Old = reread(&internal.join("preferences.json")).unwrap_or_default();
+        RootLook { theme: o.theme, feishu: o.feishu, doc_family: o.doc_family }
+    }
+
+    pub fn save_root_look_at(root: &Path, look: &RootLook) -> Result<()> {
+        let internal = if Self::flat_at(root) { root.to_path_buf() } else { root.join(INTERNAL) };
+        let path = internal.join("settings.json");
+        let mut v: serde_json::Value = reread(&path).unwrap_or_else(|| serde_json::json!({}));
+        if !v.is_object() { v = serde_json::json!({}); }
+        v["look"] = serde_json::to_value(look)?;
+        crate::vfs::create_dir_all(&internal)?;
+        save_json(&path, &v)
+    }
+
+    /// Root `root`'s themes folder.
+    pub fn themes_dir_of(root: &Path) -> PathBuf { if Self::flat_at(root) { root.join("themes") } else { root.join(INTERNAL).join("themes") } }
+
+    /// The 应用级 part of `Settings` (sidebar width, home view, windows),
+    /// from `settings_dir`.
+    pub fn app_settings() -> Settings { reread(&Self::settings_dir().join("settings.json")).unwrap_or_default() }
+
+    pub fn save_app_settings(s: &Settings) -> Result<()> { save_json(&Self::settings_dir().join("settings.json"), s) }
 
     /// Whether `root` is (still) in the old layout.
     pub fn flat_at(root: &Path) -> bool { !root.join(INTERNAL).join("format.json").fs_is_file() && migrate::legacy(root) }
@@ -943,11 +1032,14 @@ impl Store {
         d
     }
 
-    /// The library at `root_dir`, moved to the new layout first when that
-    /// needs no question (`migration_state` is `Silent`); a library that
-    /// needs the user's consent opens as it is, in the old layout.
-    pub fn open() -> Result<Self> {
-        let root = Self::root_dir();
+    /// The library builds before 工作区 used (`legacy_root`), moved to the
+    /// new layout first when that needs no question (`migration_state` is
+    /// `Silent`); a library that needs the user's consent opens as it is, in
+    /// the old layout. Other roots never move without asking (`open_root`).
+    pub fn open() -> Result<Self> { Self::open_library(Self::legacy_root()) }
+
+    /// `open` for the library at `root`.
+    pub fn open_library(root: PathBuf) -> Result<Self> {
         Self::prune_backups(&root);
         let mut failed = None;
         let report = match Self::migration_state(&root) {
@@ -983,6 +1075,61 @@ impl Store {
     /// The backup of the old layout, while there is one.
     pub fn backup_dir(root: &Path) -> Option<PathBuf> { Some(root.join(INTERNAL).join(migrate::BACKUP)).filter(|p| p.fs_is_dir()) }
 
+    /// A root folder of the 工作区, as it is: one that is not there (an
+    /// unplugged disk, renamed in the Finder) is an error, never made anew.
+    /// A plain folder gets its `.quiet/`; an old layout is not moved.
+    pub fn open_root(root: &Path) -> Result<Self> {
+        anyhow::ensure!(root.fs_is_dir(), "找不到这个文件夹");
+        Self::open_at(root.to_path_buf())
+    }
+
+    /// The folders the library at `root` had opened in place (本机文件夹)
+    /// before 工作区: roots of their own now.
+    pub fn legacy_mounts(root: &Path) -> Vec<PathBuf> {
+        let local: Local = reread(&local_file_for(root)).unwrap_or_default();
+        let mut v: Vec<PathBuf> = local.files.values().filter(|m| m.folder.is_some() && m.parent.is_none()).filter_map(|m| m.path.as_deref().map(PathBuf::from)).collect();
+        v.sort();
+        v
+    }
+
+    /// The library's own id (`format.json`); empty in the old flat layout.
+    pub fn library_id(&self) -> String { reread::<FormatMarker>(&self.internal().join("format.json")).map(|m| m.id).unwrap_or_default() }
+
+    /// A new library id: this folder was copied whole from another root.
+    pub fn renew_library_id(&self) -> Result<()> {
+        if self.flat { return Ok(()); }
+        let path = self.internal().join("format.json");
+        let m: FormatMarker = serde_json::from_slice(&crate::vfs::read(&path)?)?;
+        write_atomic(&path, &serde_json::to_vec_pretty(&FormatMarker { format: m.format, id: uuid::Uuid::new_v4().to_string() })?)
+    }
+
+    /// The folder this library is.
+    pub fn root(&self) -> &Path { &self.root }
+
+    /// Whether `id` is in this library's 回收站.
+    pub fn trashed(&self, id: &str) -> bool { self.trash.contains_key(id) }
+
+    /// Whether `id` is one of this library's documents or folders.
+    pub fn has(&self, id: &str) -> bool { self.index.contains_key(id) }
+
+    /// Every id this library hands out, for the 工作区 to tell roots apart.
+    pub fn ids(&self) -> impl Iterator<Item = &String> { self.index.keys() }
+
+    /// New ids for entries whose ids another root already uses: a folder
+    /// copied whole, `.quiet/` and all, would otherwise share them. Nothing in
+    /// a file names an id, so only the index changes.
+    pub fn rekey(&mut self, taken: &HashSet<String>) -> Result<()> {
+        let clash: Vec<String> = self.index.keys().filter(|k| taken.contains(*k)).cloned().collect();
+        if clash.is_empty() { return Ok(()); }
+        let _lock = self.begin_write()?;
+        for old in clash {
+            let m = self.index.remove(&old).unwrap();
+            self.index.insert(uuid::Uuid::new_v4().to_string(), m);
+        }
+        derive_tree(&mut self.index);
+        self.save_index()
+    }
+
     /// Open the library at `root` in the layout it has; never moves it.
     pub fn open_at(root: PathBuf) -> Result<Self> {
         crate::vfs::create_dir_all(&root)?;
@@ -993,15 +1140,18 @@ impl Store {
         if flat {
             let format = reread::<FormatMarker>(&root.join("format.json")).map_or(0, |m| m.format);
             anyhow::ensure!(format <= FORMAT, "这个文档库由更新版本的 Quiet.md 创建，请升级后再打开");
-            if !root.join("format.json").fs_exists() { write_atomic(&root.join("format.json"), &serde_json::to_vec_pretty(&FormatMarker { format })?)?; }
+            if !root.join("format.json").fs_exists() { write_atomic(&root.join("format.json"), &serde_json::to_vec_pretty(&FormatMarker { format, id: String::new() })?)?; }
         } else {
             match crate::vfs::read(&marker).ok().and_then(|b| serde_json::from_slice::<FormatMarker>(&b).ok()) {
                 Some(m) if m.format > FORMAT => anyhow::bail!("这个文档库由更新版本的 Quiet.md 创建，请升级后再打开"),
                 // Moved to the new layout; what was left of the old one is set aside.
-                Some(_) => if migrate::legacy(&root) { migrate::finish(&root, &mut warnings); },
+                Some(m) => {
+                    if migrate::legacy(&root) { migrate::finish(&root, &mut warnings); }
+                    if m.id.is_empty() { let _ = write_atomic(&marker, &serde_json::to_vec_pretty(&FormatMarker { format: m.format, id: uuid::Uuid::new_v4().to_string() })?); }
+                }
                 None => {
                     crate::vfs::create_dir_all(&internal)?;
-                    write_atomic(&marker, &serde_json::to_vec_pretty(&FormatMarker { format: FORMAT })?)?;
+                    write_atomic(&marker, &serde_json::to_vec_pretty(&FormatMarker { format: FORMAT, id: uuid::Uuid::new_v4().to_string() })?)?;
                 }
             }
         }
@@ -1016,7 +1166,6 @@ impl Store {
             let local = store.read_local();
             store.index = store.from_disk(&disk, &local);
             store.foreign = foreign_of(&disk);
-            store.refresh_mounts();
             store.load_parsed();
         }
         if let Ok(entries) = crate::vfs::read_dir(store.recovery_dir()) {
@@ -1087,7 +1236,8 @@ impl Store {
         }
         derive_tree(&mut index);
         for (id, m) in &local.files {
-            if index.contains_key(id) || m.path.is_none() { continue; }
+            // Folders opened in place before 工作区 are roots of their own now.
+            if index.contains_key(id) || m.path.is_none() || m.folder.is_some() || m.parent.is_some() { continue; }
             let mut m = m.clone();
             m.opened = local.opened.get(id).copied().unwrap_or(m.opened);
             index.insert(id.clone(), m);
@@ -1274,7 +1424,6 @@ impl Store {
             let local = self.read_local();
             self.index = self.from_disk(&disk, &local);
             self.foreign = foreign_of(&disk);
-            self.carry_mounts(&before);
             self.reclaim_open(before);
         }
         if let Some(trash) = reread(&self.trash_index_file()) { self.trash = trash; }
@@ -1416,7 +1565,7 @@ impl Store {
     fn require_markdown_format(&self) -> Result<()> {
         let path = self.internal().join("format.json");
         let format = reread::<FormatMarker>(&path).map_or(0, |m| m.format);
-        if format < 3 { write_atomic(&path, &serde_json::to_vec_pretty(&FormatMarker { format: 3 })?)?; }
+        if format < 3 { write_atomic(&path, &serde_json::to_vec_pretty(&FormatMarker { format: 3, id: String::new() })?)?; }
         Ok(())
     }
 
@@ -1433,7 +1582,7 @@ impl Store {
         migrate::pages_to_folders(&mut index, |id| docs.join(format!("{id}.xml")).fs_is_file(), |id| crate::vfs::read_to_string(docs.join(format!("{id}.xml"))).ok().and_then(|x| docxml::parse(&x).ok()).map(|d| d.title.text));
         self.index = index;
         self.save_index()?;
-        write_atomic(&self.internal().join("format.json"), &serde_json::to_vec_pretty(&FormatMarker { format: 2 })?)
+        write_atomic(&self.internal().join("format.json"), &serde_json::to_vec_pretty(&FormatMarker { format: 2, id: String::new() })?)
     }
 
     /// `list` in the old layout: the files in `docs/` (a `.md` dropped there by
@@ -1479,12 +1628,12 @@ impl Store {
             }
             let Parsed { mut title, icon, body, reminders, links } = parsed;
             if self.index[&id].named_by_file() { title = self.markdown_title(&id); }
-            out.push(Entry { id: id.clone(), meta: self.index[&id].clone(), title, icon, body, reminders, links, note: None });
+            out.push(Entry { id: id.clone(), meta: self.index[&id].clone(), title, icon, body, reminders, links, note: None, root: String::new() });
         }
         let mut folders: Vec<(&String, &Meta)> = self.index.iter().filter(|(_, m)| m.folder.is_some()).collect();
         folders.sort_by(|a, b| a.0.cmp(b.0));
         for (id, meta) in folders {
-            out.push(Entry { id: id.clone(), meta: meta.clone(), title: meta.folder.clone().unwrap_or_default(), icon: None, body: Default::default(), reminders: vec![], links: vec![], note: None });
+            out.push(Entry { id: id.clone(), meta: meta.clone(), title: meta.folder.clone().unwrap_or_default(), icon: None, body: Default::default(), reminders: vec![], links: vec![], note: None, root: String::new() });
         }
         let seen: HashSet<&str> = out.iter().map(|e| e.id.as_str()).collect();
         self.parsed.retain(|id, _| seen.contains(id.as_str()));
@@ -1573,14 +1722,6 @@ impl Store {
             let name = title.replace(['/', '\\', ':'], "_");
             let name = name.trim().trim_start_matches('.');
             if name.is_empty() { return Ok(()); }
-            if m.folder.is_some() {
-                // A folder in (or opened as) 本机文件: renamed on disk, with what is in it.
-                let new = old.with_file_name(name);
-                if new == old || new.fs_try_exists()? { return Ok(()); }
-                crate::vfs::rename(&old, &new)?;
-                self.repath(&old, &new);
-                return Ok(());
-            }
             let ext = old.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "md".into());
             let new = old.with_file_name(format!("{name}.{ext}"));
             if new == old || new.fs_try_exists()? { return Ok(()); }
@@ -1619,7 +1760,7 @@ impl Store {
             Ok(lock) => Some(lock),
             Err(e) => { self.warnings.push(format!("无法锁定文档库：{e}")); None }
         };
-        if self.flat { self.refresh_mounts(); return self.list_flat(_lock.is_some()); }
+        if self.flat { return self.list_flat(_lock.is_some()); }
         let found = layout::scan(&self.root);
         let mut disk = self.to_disk();
         let mut keys: HashSet<String> = found.dirs.iter().map(|d| format!("{d}/")).collect();
@@ -1638,12 +1779,10 @@ impl Store {
         if dirty {
             let local = self.local_state();
             let fresh = self.from_disk(&disk, &local);
-            let before = std::mem::replace(&mut self.index, fresh);
-            self.carry_mounts(&before);
+            self.index = fresh;
             // Paths changed: links parsed before may point elsewhere now.
             self.parsed.clear();
         }
-        self.refresh_mounts();
         let pending: HashSet<&str> = found.pending.iter().map(String::as_str).collect();
         let mut out = vec![];
         let mut reparsed = false;
@@ -1657,7 +1796,7 @@ impl Store {
                 // Not downloaded yet: listed by its name, read once it is here.
                 if let Some(ph) = layout::placeholder(&p) { layout::download(&ph); }
                 let title = stem_of(base_name(&m.rel)).to_string();
-                out.push(Entry { id: id.clone(), meta: m.clone(), title, icon: None, body: Default::default(), reminders: vec![], links: vec![], note: None });
+                out.push(Entry { id: id.clone(), meta: m.clone(), title, icon: None, body: Default::default(), reminders: vec![], links: vec![], note: None, root: String::new() });
                 continue;
             }
             let md = crate::vfs::metadata(&p).ok();
@@ -1677,14 +1816,14 @@ impl Store {
             };
             let Parsed { mut title, icon, body, reminders, links } = parsed;
             if m.named_by_file() { title = self.markdown_title(&id); }
-            out.push(Entry { id, meta: m.clone(), title, icon, body, reminders, links, note: None });
+            out.push(Entry { id, meta: m.clone(), title, icon, body, reminders, links, note: None, root: String::new() });
         }
         // Folders in id order: the index is a HashMap, whose order changes every time it is re-read.
         let mut folders: Vec<(&String, &Meta)> = self.index.iter().filter(|(_, m)| m.folder.is_some()).collect();
         folders.sort_by(|a, b| a.0.cmp(b.0));
         for (id, meta) in folders {
             let title = meta.folder.clone().unwrap_or_default();
-            out.push(Entry { id: id.clone(), meta: meta.clone(), title, icon: None, body: Default::default(), reminders: vec![], links: vec![], note: None });
+            out.push(Entry { id: id.clone(), meta: meta.clone(), title, icon: None, body: Default::default(), reminders: vec![], links: vec![], note: None, root: String::new() });
         }
         subdocs::mark_notes(&self.folder_notes(), &mut out);
         let seen: HashSet<&str> = out.iter().map(|e| e.id.as_str()).collect();
@@ -1874,7 +2013,6 @@ impl Store {
     /// `create_from` into folder `parent` (`None`: the top), as its last
     /// child; the file is written there, never moved there afterwards.
     pub fn create_from_in(&mut self, doc: &Document, parent: Option<&str>) -> Result<String> {
-        if let Some(p) = parent.filter(|p| self.is_mounted(p)) { return self.create_in_mount(p, &doc.title.text, "xml", docxml::serialize(doc).as_bytes()); }
         let id = uuid::Uuid::new_v4().to_string();
         let lock = self.begin_write()?;
         self.validate_folder(None, parent)?;
@@ -1892,10 +2030,6 @@ impl Store {
 
     /// `create_markdown` into folder `parent`, like `create_from_in`.
     pub fn create_markdown_in(&mut self, doc: &Document, front: &str, parent: Option<&str>) -> Result<String> {
-        if let Some(p) = parent.filter(|p| self.is_mounted(p)) {
-            let base = self.mount_dir_of(p);
-            return self.create_in_mount(p, &doc.title.text, "md", format!("{front}{}", crate::markdown::write_file(doc, "", base.as_deref())).as_bytes());
-        }
         let id = uuid::Uuid::new_v4().to_string();
         let lock = self.begin_write()?;
         self.validate_folder(None, parent)?;
@@ -1920,7 +2054,6 @@ impl Store {
     /// A new 画板 in folder `parent`: a `.excalidraw` file named `title`, holding
     /// `board`. Only in the folder layout (the old one is migrated on open).
     pub fn create_board_in(&mut self, title: &str, board: &crate::whiteboard::Board, parent: Option<&str>) -> Result<String> {
-        if let Some(p) = parent.filter(|p| self.is_mounted(p)) { return self.create_in_mount(p, title, DocKind::Board.ext(false), board.file_json().as_bytes()); }
         anyhow::ensure!(!self.flat, "旧格式的文档库不能新建画板");
         let id = uuid::Uuid::new_v4().to_string();
         let lock = self.begin_write()?;
@@ -2032,12 +2165,6 @@ impl Store {
             self.save_local(&self.local_state())?;
             return Ok(id);
         }
-        self.refresh_mounts();
-        if let Some(id) = self.mounted_at(&path) {
-            self.index.get_mut(&id).unwrap().opened = now();
-            self.save_local(&self.local_state())?;
-            return Ok(id);
-        }
         let key = path.to_string_lossy().into_owned();
         let t = now();
         if let Some((id, m)) = self.index.iter_mut().find(|(_, m)| m.path.as_deref() == Some(key.as_str())) {
@@ -2093,7 +2220,7 @@ impl Store {
             if items.iter().any(|(k, _)| k == id) || (!self.index.contains_key(id) && self.trash.contains_key(id)) { gone.push(id.clone()); continue; }
             // 本机文件: only taken off the list; the file is the user's.
             if self.index.get(id).is_some_and(Meta::local) {
-                if self.index[id].parent.is_some() { self.forget_mounted(id); } else { self.index.remove(id); }
+                self.index.remove(id);
                 self.loaded.borrow_mut().remove(id);
                 forgot = true;
                 gone.push(id.clone());
@@ -2117,7 +2244,6 @@ impl Store {
                 None => { items.extend(group); gone.push(id.clone()); }
             }
         }
-        if forgot { self.carry_mounts(&HashMap::new()); }
         let r = if items.is_empty() { Ok(()) } else { self.trash_many(&items, true) };
         // A failed move leaves the rest where they were (and still listed).
         if r.is_err() { gone.retain(|id| !self.index.contains_key(id)); }
@@ -3035,82 +3161,6 @@ mod tests {
         s.delete(&id, None).unwrap();
         assert!(renamed.fs_is_file());
         assert!(s.list().iter().all(|e| e.id != id));
-        assert!(s.list_trash().is_empty());
-    }
-
-    /// 本机文件夹: a folder opened where it is lists what is in it, keeps
-    /// the ids across launches, follows the Finder, and its notes are made,
-    /// renamed and moved on disk; forgetting it leaves every file alone.
-    #[test]
-    fn folders_open_where_they_are() {
-        let lib = Lib::new("mount-lib");
-        let away = Lib::new("mount-away");
-        let vault = away.0.join("Vault");
-        crate::vfs::create_dir_all(vault.join("日记/2026")).unwrap();
-        crate::vfs::write(vault.join("首页.md"), "# 首页\n").unwrap();
-        crate::vfs::write(vault.join("日记/2026/一月.markdown"), "冷\n").unwrap();
-        crate::vfs::write(vault.join("图.png"), "").unwrap();
-        crate::vfs::create_dir_all(vault.join(".obsidian")).unwrap();
-        crate::vfs::write(vault.join(".obsidian/app.md"), "x").unwrap();
-        let mut s = lib.open();
-        let root = s.mount(&vault).unwrap();
-        assert_eq!(s.mount(&vault).unwrap(), root, "opened once");
-        let list = s.list();
-        let by = |list: &[Entry], t: &str| list.iter().find(|e| e.title == t).cloned().unwrap_or_else(|| panic!("{t} not in {:?}", list.iter().map(|e| &e.title).collect::<Vec<_>>()));
-        let r = by(&list, "Vault");
-        assert!(r.meta.folder.is_some() && r.meta.parent.is_none() && r.meta.mounted());
-        let jan = by(&list, "一月");
-        assert!(jan.meta.markdown && jan.meta.mounted());
-        assert_eq!(folders_of(&list, &jan.id), ["Vault", "日记", "2026"]);
-        assert_eq!(list.iter().filter(|e| e.meta.mounted()).count(), 5, "the folder, 日记, 2026, 首页, 一月");
-        assert_eq!(s.mount(&vault.join("日记")).unwrap(), by(&list, "日记").id, "a folder inside is that entry");
-        assert_eq!(s.open_local(&vault.join("首页.md")).unwrap(), by(&list, "首页").id, "and so is a file");
-        // A write re-reads the index from disk: the folder's entries stay.
-        let note = s.create_from(&doc("库里")).unwrap();
-        s.rename(&note, "库里的").unwrap();
-        assert!(s.is_mounted(&jan.id));
-        // Ids follow paths, across launches.
-        drop(s);
-        let mut s = lib.open();
-        let list = s.list();
-        assert_eq!(by(&list, "一月").id, jan.id);
-        // The Finder: new folders and files show, removed ones go.
-        crate::vfs::create_dir_all(vault.join("新夹")).unwrap();
-        crate::vfs::write(vault.join("新夹/新.md"), "x\n").unwrap();
-        crate::vfs::remove_file(vault.join("首页.md")).unwrap();
-        let list = s.list();
-        assert_eq!(folders_of(&list, &by(&list, "新").id), ["Vault", "新夹"]);
-        assert!(list.iter().all(|e| e.title != "首页"));
-        // Made, renamed and moved on disk; an id stays through a rename.
-        let diary = by(&list, "日记").id;
-        let made = s.create_markdown_in(&doc("周记"), "", Some(&diary)).unwrap();
-        assert!(vault.join("日记/周记.md").fs_is_file());
-        let sub = s.create_folder("草稿", Some(&diary)).unwrap();
-        assert!(vault.join("日记/草稿").fs_is_dir());
-        s.rename(&made, "周报").unwrap();
-        assert!(vault.join("日记/周报.md").fs_is_file() && !vault.join("日记/周记.md").fs_exists());
-        s.set_parent(&made, Some(&sub)).unwrap();
-        assert!(vault.join("日记/草稿/周报.md").fs_is_file());
-        s.rename(&diary, "随笔").unwrap();
-        assert!(vault.join("随笔/草稿/周报.md").fs_is_file());
-        let list = s.list();
-        assert_eq!(folders_of(&list, &made), ["Vault", "随笔", "草稿"]);
-        assert_eq!(by(&list, "周报").id, made);
-        assert!(s.load(&made).is_ok());
-        // Between the library and an opened folder only copies go.
-        assert!(s.set_parent(&made, None).is_err());
-        assert!(s.set_parent(&note, Some(&sub)).is_err());
-        // Inside the library, or around it: not opened.
-        assert!(s.mount(&lib.0).is_err());
-        assert!(s.mount(&away.0).is_ok_and(|outer| outer != root), "an outer folder takes the inner one in");
-        let list = s.list();
-        assert!(list.iter().find(|e| e.id == root).is_some_and(|e| e.meta.parent.is_some()), "the inner folder is in it, same id");
-        assert_eq!(folders_of(&list, &made)[1..], ["Vault", "随笔", "草稿"]);
-        // Forgotten: off the list, every file where it was.
-        let outer = list.iter().find(|e| e.meta.mounted() && e.meta.parent.is_none()).unwrap().id.clone();
-        s.delete(&outer, None).unwrap();
-        assert!(s.list().iter().all(|e| !e.meta.mounted()));
-        assert!(vault.join("随笔/草稿/周报.md").fs_is_file() && !vault.join("日记").fs_exists());
         assert!(s.list_trash().is_empty());
     }
 
