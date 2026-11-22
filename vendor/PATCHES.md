@@ -182,7 +182,7 @@ Of 40 checks, 28 passed on macOS (including the macOS portion of 0028), two were
 
 ## Upstream crates omitted
 
-The snapshot omits gpui_ios. Add it to the crates array in upstream.toml if needed. It includes gpui_web for the website's live notebooks. See [Web build](../web/README.md).
+None of the platform backends are omitted. gpui_web serves the website's live notebooks (see [Web build](../web/README.md)). gpui_ios, added on 2026-11-22 at the same snapshot for the iOS/iPadOS work in [docs/design/mobile.md](../docs/design/mobile.md), builds only for `target_os = "ios"`; desktop and web builds do not compile it.
 
 ## Other upstream capabilities and measurements
 
