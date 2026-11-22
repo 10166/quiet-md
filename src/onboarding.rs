@@ -685,8 +685,8 @@ impl Onboarding {
             let all = !can.is_empty() && can.iter().all(|&i| self.chosen.get(i).copied().unwrap_or(false));
             let head = div().w_full().px(px(4.)).flex().items_center().justify_between()
                 .child(lifted(over, 12., 16., false, true, crate::localized_format!("在这台电脑上找到 {} 处笔记", "Notes found on this computer ({})", found.len())))
-                .when(can.len() > 1, |d| d.child(soft_button("onb-all", if all { tr("全不选", "Select none") } else { tr("全选", "Select all") })
-                    .when(over, |b| b.bg(hsla(0., 0., 0., 0.28)).text_color(gpui::white()).hover(|s| s.bg(hsla(0., 0., 0., 0.4))))
+                .when(can.len() > 1, |d| d.child(soft_button_hover("onb-all", if all { tr("全不选", "Select none") } else { tr("全选", "Select all") }, if over { hsla(0., 0., 0., 0.4) } else { Theme::fill_hover_strong() })
+                    .when(over, |b| b.bg(hsla(0., 0., 0., 0.28)).text_color(gpui::white()))
                     .on_click(cx.listener(move |w, _, _, cx| { for &i in &can { if let Some(c) = w.chosen.get_mut(i) { *c = !all; } } cx.notify(); }))));
             (head, rows)
         });
@@ -710,13 +710,15 @@ impl Onboarding {
             (true, true) => gpui::white(), (true, false) => hsla(0., 0., 1., 0.4), (false, true) => Theme::text(), (false, false) => Theme::fill_hover_strong(),
         });
         let soft = if over { hsla(0., 0., 1., 0.9) } else { Theme::text_caption() };
+        // Over the film the links sit on a dark veil that darkens on hover.
+        let veil_hover = if over { hsla(0., 0., 0., 0.4) } else { Theme::fill_hover() };
         div().absolute().inset_0()
             .when(self.importing.is_none(), |d| d.child(div().absolute().top(px(10.)).right(px(16.))
-                .child(crate::settings::link_button("onb-skip", tr("跳过", "Skip")).text_color(soft).when(over, |d| d.bg(hsla(0., 0., 0., 0.28)).hover(|s| s.bg(hsla(0., 0., 0., 0.4)))).on_click(cx.listener(|w, _, window, cx| w.skip(window, cx))))))
+                .child(crate::settings::link_button_hover("onb-skip", tr("跳过", "Skip"), veil_hover).text_color(soft).when(over, |d| d.bg(hsla(0., 0., 0., 0.28))).on_click(cx.listener(|w, _, window, cx| w.skip(window, cx))))))
             .child(div().absolute().left_0().right_0().bottom(px(40.)).flex().justify_center().gap(px(6.))
                 .child(mark(self.page == Page::Setup)).child(mark(self.page == Page::Import)))
             .when(self.page == Page::Import && self.importing.is_none(), |d| d.child(div().absolute().left(px(24.)).bottom(px(30.))
-                .child(crate::settings::link_button("onb-back", tr("‹ 上一步", "‹ Back")).text_size(px(13.)).text_color(soft).when(over, |d| d.bg(hsla(0., 0., 0., 0.28)).hover(|s| s.bg(hsla(0., 0., 0., 0.4))))
+                .child(crate::settings::link_button_hover("onb-back", tr("‹ 上一步", "‹ Back"), veil_hover).text_size(px(13.)).text_color(soft).when(over, |d| d.bg(hsla(0., 0., 0., 0.28)))
                     .on_click(cx.listener(|w, _, _, cx| w.go(Page::Setup, cx))))))
             .child(div().absolute().right(px(24.)).bottom(px(28.)).child(match self.importing {
                 // The label stays (transparent) so the button keeps its width.
@@ -827,9 +829,12 @@ fn card_text(title: SharedString, desc: SharedString, error: bool) -> Div {
 
 /// Every lesser action on these pages: no outline, a grey tint that deepens
 /// under the pointer. The one main action is the dark pill.
-fn soft_button(id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> {
+fn soft_button(id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> { soft_button_hover(id, label, Theme::fill_hover_strong()) }
+
+/// `soft_button` with its own hover fill (one `.hover()` per element, see `link_button_hover`).
+fn soft_button_hover(id: impl Into<ElementId>, label: &'static str, hover: Hsla) -> Stateful<Div> {
     div().id(id).flex_none().h(px(28.)).px(px(12.)).flex().items_center().justify_center().rounded(px(8.)).cursor_pointer()
-        .bg(Theme::fill_hover()).hover(|s| s.bg(Theme::fill_hover_strong()))
+        .bg(Theme::fill_hover()).hover(move |s| s.bg(hover))
         .text_size(px(13.)).line_height(px(18.)).text_color(Theme::text()).child(crate::settings::label(label))
 }
 

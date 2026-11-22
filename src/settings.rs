@@ -729,9 +729,13 @@ pub(crate) fn keycap(id: impl Into<ElementId>, key: &str, recording: bool) -> St
 }
 
 /// A small text button (恢复默认 …).
-pub(crate) fn link_button(id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> {
+pub(crate) fn link_button(id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> { link_button_hover(id, label, Theme::fill_hover()) }
+
+/// `link_button` with its own hover fill: GPUI takes one `.hover()` per
+/// element (a second one asserts in debug builds).
+pub(crate) fn link_button_hover(id: impl Into<ElementId>, label: &'static str, hover: Hsla) -> Stateful<Div> {
     div().id(id).flex_none().h(px(26.)).px(px(10.)).flex().items_center().rounded(px(7.)).cursor_pointer()
-        .text_size(px(theme::ui_font_small())).line_height(px(theme::ui_font_small() + 4.)).text_color(Theme::primary()).hover(|s| s.bg(Theme::fill_hover()))
+        .text_size(px(theme::ui_font_small())).line_height(px(theme::ui_font_small() + 4.)).text_color(Theme::primary()).hover(move |s| s.bg(hover))
         .child(label)
 }
 
