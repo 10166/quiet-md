@@ -2346,7 +2346,8 @@ impl Store {
             if src.fs_is_dir() { crate::vfs::rename(&src, self.abs(&rel))?; } else { crate::vfs::create_dir_all(self.abs(&rel))?; }
             rel
         } else {
-            let base = if !t.meta.rel.is_empty() { layout::unnumbered(stem_of(base_name(&t.meta.rel))).to_string() }
+            let stem = stem_of(base_name(&t.meta.rel));
+            let base = if !t.meta.rel.is_empty() { if meta.named_by_file() { stem } else { layout::unnumbered(stem) }.to_string() }
                 else if meta.named_by_file() { file_name_for(meta.name.as_deref().unwrap_or("")) }
                 else { file_name_for(&text.as_deref().and_then(|x| docxml::parse(x).ok()).map(|d| d.title.text).unwrap_or_default()) };
             let rel = join_rel(&dir, &self.free_name(&dir, &base, Some(ext_of(&meta)), None));
@@ -3925,6 +3926,27 @@ mod tests {
         s.save(&h, &doc("CCC")).unwrap();
         assert_eq!(file(&s, &h), "CCC.xml");
         assert!(s.abs("CCC.xml").fs_is_file() && !s.abs("CCC 2.xml").fs_exists() && !s.abs("CCC (2).xml").fs_exists());
+    }
+
+    /// A name that is its title (Markdown, folders) keeps its number when moved
+    /// or restored: 「报告 (2).md」 is often just what the file is called.
+    #[test]
+    fn titles_that_look_numbered_survive_moves() {
+        let lib = Lib::new("move-numbered");
+        let mut s = lib.open();
+        crate::vfs::write(lib.0.join("报告 (2).md"), "x\n").unwrap();
+        crate::vfs::write(lib.0.join("第 2.md"), "x\n").unwrap();
+        crate::vfs::create_dir_all(lib.0.join("照片 (2)")).unwrap();
+        let f = s.create_folder("夹", None).unwrap();
+        let list = s.list();
+        let ids: Vec<String> = list.iter().filter(|e| e.meta.markdown || e.title == "照片 (2)").map(|e| e.id.clone()).collect();
+        for id in &ids { s.move_in_tree(id, Some(&f), None).unwrap(); }
+        let rels = |s: &mut Store| { let mut r: Vec<String> = s.list().into_iter().filter(|e| ids.contains(&e.id)).map(|e| e.meta.rel).collect(); r.sort(); r };
+        assert_eq!(rels(&mut s), ["夹/报告 (2).md", "夹/照片 (2)", "夹/第 2.md"]);
+        let md = ids.iter().find(|id| s.index[*id].rel == "夹/报告 (2).md").unwrap().clone();
+        s.delete(&md, None).unwrap();
+        s.restore(&md).unwrap();
+        assert_eq!(s.index[&md].rel, "夹/报告 (2).md");
     }
 
     /// D8: a 「 2」 an older version gave a clash keeps its name; new clashes get 「 (2)」.
