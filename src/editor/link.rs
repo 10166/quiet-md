@@ -221,13 +221,22 @@ impl Editor {
     }
 
     pub(super) fn link_input_ok(&self, cx: &App) -> bool {
-        is_link_input(self.link_field.read(cx).text.trim())
+        let link = self.link_field.read(cx).text.trim();
+        is_link_input(link) || self.keeps_file_link(link)
+    }
+
+    /// A link to a file beside the document stays as written: `./` or `../`
+    /// typed, or the one the link already had (a Markdown file's `报告.pdf`),
+    /// not made into `http://`.
+    fn keeps_file_link(&self, link: &str) -> bool {
+        (link.starts_with("./") || link.starts_with("../") || link == self.link_ui.orig.1) && crate::store::file_link(link)
     }
 
     pub(super) fn submit_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(Menu::Link { block, range, only_link }) = self.menu.clone() else { return };
         let link = self.link_field.read(cx).text.trim().to_string();
-        if !is_link_input(&link) {
+        let file = self.keeps_file_link(&link);
+        if !is_link_input(&link) && !file {
             return;
         }
         let (orig_text, orig_link) = self.link_ui.orig.clone();
@@ -239,8 +248,8 @@ impl Editor {
         if text == orig_text && link == orig_link {
             return;
         }
-        let url = normalize(&link);
-        if !contains_url(&url) {
+        let url = if file { link.clone() } else { normalize(&link) };
+        if !file && !contains_url(&url) {
             return self.toast(crate::settings::text("请输入有效的链接。"), cx);
         }
         self.core.sel = Selection { anchor: Pos::new(block, range.start), head: Pos::new(block, range.end) };

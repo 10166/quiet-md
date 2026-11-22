@@ -695,6 +695,20 @@ impl Core {
         hit
     }
 
+    /// Links to files a move rewrote on disk (`Store::follow_moved_links`:
+    /// `to` gives the new URL of one that changed), in the document and across
+    /// the undo / redo history, outside the edit history, so neither writes the
+    /// old path back. Whether the document changed.
+    pub fn relink_files(&mut self, to: &dyn Fn(&str) -> Option<String>) -> bool {
+        let has = |doc: &Document| doc.links().iter().any(|l| to(l).is_some());
+        for s in self.undo.iter_mut().chain(self.redo.iter_mut()) {
+            if has(&s.doc) { std::sync::Arc::make_mut(s).doc.map_links(&mut |l| to(l)); }
+        }
+        let hit = self.doc.map_links(&mut |l| to(l));
+        if hit { self.generation += 1; }
+        hit
+    }
+
     /// Every file source this editor can still bring back: the cover, images,
     /// attachments (inline ones too) and 数据表 files of the open document, and
     /// of the undo and redo snapshots behind it. The unused-asset sweep reads

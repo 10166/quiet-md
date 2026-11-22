@@ -19,7 +19,7 @@ use web_time::UNIX_EPOCH;
 #[path = "file_history.rs"] mod file_history;
 pub use file_history::{FileState, FileDelta, FileChanges};
 #[path = "layout.rs"] mod layout;
-pub use layout::{file_name_for, relative, resolve};
+pub use layout::{file_name_for, relative, resolve, file_link};
 use layout::{parent_rel, base_name, stem_of, join_rel};
 #[path = "migrate.rs"] mod migrate;
 #[path = "meta.rs"] mod meta;
@@ -384,7 +384,9 @@ impl Drop for Store {
 
 /// The parts of an `Entry` that come from the document file.
 #[derive(Clone)]
-struct Parsed { title: String, icon: Option<String>, body: std::sync::Arc<str>, reminders: Vec<crate::model::InlineReminder>, links: Vec<crate::model::DocLink> }
+struct Parsed { title: String, icon: Option<String>, body: std::sync::Arc<str>, reminders: Vec<crate::model::InlineReminder>, links: Vec<crate::model::DocLink>,
+    /// Plain links to files, as written (`layout::file_link`): what a move may have to rewrite.
+    files: Vec<String> }
 
 /// `Store::parsed` kept between launches (#170): reading every document again
 /// on launch took ~0.45 s a file on Windows, where each read is scanned. By
@@ -392,7 +394,7 @@ struct Parsed { title: String, icon: Option<String>, body: std::sync::Arc<str>, 
 /// are this machine's mtimes, so it lives in the cache folder, not in the
 /// (possibly synced) library. Bump `PARSED_CACHE` when what `list` takes from
 /// a file changes; a release discards it anyway.
-const PARSED_CACHE: u32 = 2;
+const PARSED_CACHE: u32 = 3;
 
 #[derive(Serialize, Deserialize)]
 struct ParsedCache { version: String, docs: HashMap<PathBuf, CachedDoc> }
@@ -406,6 +408,16 @@ struct CachedDoc {
     body: String,
     reminders: Vec<(i64, i64, bool, bool)>,
     links: Vec<(String, usize, Vec<(String, Option<String>)>)>,
+    #[serde(default)]
+    files: Vec<String>,
+}
+
+/// A document's plain links to files, each once.
+fn file_links(doc: &Document) -> Vec<String> {
+    let mut out: Vec<String> = doc.links().into_iter().filter(|l| layout::file_link(l)).collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 fn parsed_cache_version() -> String { format!("{}-{PARSED_CACHE}", env!("CARGO_PKG_VERSION")) }
@@ -1718,7 +1730,7 @@ impl Store {
                     let Ok(text) = (if table { Ok(String::new()) } else { crate::vfs::read_to_string(&p) }) else { continue };
                     let doc = if table { Document::default() } else { self.parse_doc(&id, &text).unwrap_or_default() };
                     let body = if table { crate::table::block_text(&self.root, &crate::table::TableRef::new(p.strip_prefix(&self.root).map(|r| r.to_string_lossy().into_owned()).unwrap_or_default())) } else { doc.plain_text() };
-                    let parsed = Parsed { title: doc.title.text.clone(), icon: doc.icon.clone(), body: body.into(), reminders: doc.reminders(), links: doc.doc_links() };
+                    let parsed = Parsed { title: doc.title.text.clone(), icon: doc.icon.clone(), body: body.into(), reminders: doc.reminders(), links: doc.doc_links(), files: file_links(&doc) };
                     if let Some((t, len)) = stamp { self.parsed.insert(id.clone(), (t, len, parsed.clone())); }
                     parsed
                 }
@@ -1728,7 +1740,7 @@ impl Store {
                 self.index.insert(id.clone(), Meta { created: t, modified: t, ..Default::default() });
                 dirty = true;
             }
-            let Parsed { mut title, icon, body, reminders, links } = parsed;
+            let Parsed { mut title, icon, body, reminders, links, .. } = parsed;
             if self.index[&id].named_by_file() { title = self.markdown_title(&id); }
             out.push(Entry { id: id.clone(), meta: self.index[&id].clone(), title, icon, body, reminders, links, note: None, root: String::new() });
         }
@@ -1766,15 +1778,21 @@ impl Store {
         // Documents whose links may change: the moved ones (links out of
         // them are relative to where they are) and those mentioning one.
         let affected: HashSet<&str> = new_rel.keys().map(String::as_str).collect();
+        // Plain links to files (`[报告](附件/报告.pdf)`, in Markdown too) are
+        // paths as well: where what moved went, a document or anything in a moved folder.
+        let old_rel: HashMap<String, String> = new_rel.iter().map(|(k, to)| (self.index[k].rel.clone(), to.clone())).collect();
+        let moved = |p: &str| old_rel.get(p).cloned().or_else(|| dirs.iter().find_map(|(d, to)| p.strip_prefix(d.as_str()).map(|r| format!("{to}/{r}"))));
         let mut docs = vec![];
         for (k, m) in &self.index {
-            if m.folder.is_some() || m.local() || m.named_by_file() { continue; }
-            let mentions = self.parsed.get(k).is_none_or(|p| p.2.links.iter().any(|l| affected.contains(l.target.as_str())));
-            if !affected.contains(k.as_str()) && !mentions { continue; }
+            if m.folder.is_some() || m.local() || !m.kind.is_doc() { continue; }
+            let (here, dir, parsed) = (affected.contains(k.as_str()), parent_rel(&m.rel), self.parsed.get(k).map(|p| &p.2));
+            let mentions = !m.markdown && (here || parsed.is_none_or(|p| p.links.iter().any(|l| affected.contains(l.target.as_str()))));
+            let files = parsed.is_none_or(|p| p.files.iter().any(|h| here || layout::link_path(dir, h).is_some_and(|t| moved(&t).is_some())));
+            if !mentions && !files { continue; }
             let Ok(text) = crate::vfs::read_to_string(self.path(k)) else { continue };
-            if !text.contains("type=\"doc\"") { continue; }
+            if !files && !text.contains("type=\"doc\"") { continue; }
             let Ok(doc) = self.parse_doc(k, &text) else { continue };
-            docs.push((k.clone(), text, doc));
+            docs.push((k.clone(), text, doc, dir.to_string()));
         }
         let mut done: Vec<(PathBuf, PathBuf)> = vec![];
         for (id, to) in moves {
@@ -1799,13 +1817,21 @@ impl Store {
         self.foreign = std::mem::take(&mut self.foreign).into_iter()
             .map(|(k, a)| (dirs.iter().find_map(|(p, to)| k.strip_prefix(p.as_str()).map(|rest| format!("{to}/{rest}"))).unwrap_or(k), a)).collect();
         derive_tree(&mut self.index);
-        for (k, text, doc) in docs {
-            let out = self.serialize_doc(&k, &doc, None);
+        for (k, text, mut doc, was) in docs {
+            let dir = parent_rel(&self.index[&k].rel).to_string();
+            let relinked = doc.map_links(&mut |h| layout::rebase_link(&was, &dir, h, &moved));
+            let markdown = self.is_markdown(&k);
+            if markdown && !relinked { continue; }
+            let out = self.serialize_doc(&k, &doc, markdown.then_some(text.as_str()));
             if out == text { continue; }
             match write_atomic(&self.path(&k), out.as_bytes()) {
                 Ok(()) => {
+                    // An open editor still holds the links as they were; its
+                    // next save follows them (`follow_moved_links`).
                     let mut loaded = self.loaded.borrow_mut();
-                    if loaded.get(&k).is_some_and(|l| *l == text) { loaded.insert(k.clone(), out); }
+                    if !relinked && loaded.get(&k).is_some_and(|l| *l == text) { loaded.insert(k.clone(), out); }
+                    // Its links as read are stale now; `list` reads it again.
+                    self.parsed.remove(&k);
                 }
                 Err(e) => self.warnings.push(format!("未能更新文档中的链接（{}）：{e}", self.index[&k].rel)),
             }
@@ -1918,12 +1944,12 @@ impl Store {
                     let Ok(text) = (if table { Ok(String::new()) } else { crate::vfs::read_to_string(&p) }) else { continue };
                     let doc = if table { Document::default() } else { self.parse_doc(&id, &text).unwrap_or_default() };
                     let body = if table { crate::table::block_text(&self.root, &crate::table::TableRef::new(p.strip_prefix(&self.root).map(|r| r.to_string_lossy().into_owned()).unwrap_or_default())) } else { doc.plain_text() };
-                    let parsed = Parsed { title: doc.title.text.clone(), icon: doc.icon.clone(), body: body.into(), reminders: doc.reminders(), links: doc.doc_links() };
+                    let parsed = Parsed { title: doc.title.text.clone(), icon: doc.icon.clone(), body: body.into(), reminders: doc.reminders(), links: doc.doc_links(), files: file_links(&doc) };
                     if let Some((t, len)) = stamp { self.parsed.insert(id.clone(), (t, len, parsed.clone())); reparsed = true; }
                     parsed
                 }
             };
-            let Parsed { mut title, icon, body, reminders, links } = parsed;
+            let Parsed { mut title, icon, body, reminders, links, .. } = parsed;
             if m.named_by_file() { title = self.markdown_title(&id); }
             out.push(Entry { id, meta: m.clone(), title, icon, body, reminders, links, note: None, root: String::new() });
         }
@@ -1955,7 +1981,7 @@ impl Store {
             let Some(d) = docs.remove(&self.path(&id)) else { continue };
             let reminders = d.reminders.into_iter().map(|(expire, notify, should_notify, whole_day)| crate::model::InlineReminder { expire, notify, should_notify, whole_day }).collect();
             let links = d.links.into_iter().map(|(target, block, line)| crate::model::DocLink { target, block, line }).collect();
-            self.parsed.insert(id, (d.modified, d.len, Parsed { title: d.title, icon: d.icon, body: d.body.into(), reminders, links }));
+            self.parsed.insert(id, (d.modified, d.len, Parsed { title: d.title, icon: d.icon, body: d.body.into(), reminders, links, files: d.files }));
         }
     }
 
@@ -1964,6 +1990,7 @@ impl Store {
             modified: *modified, len: *len, title: p.title.clone(), icon: p.icon.clone(), body: p.body.to_string(),
             reminders: p.reminders.iter().map(|r| (r.expire, r.notify, r.should_notify, r.whole_day)).collect(),
             links: p.links.iter().map(|l| (l.target.clone(), l.block, l.line.clone())).collect(),
+            files: p.files.clone(),
         })).collect();
         let path = parsed_cache_path(&self.root);
         if let Some(dir) = path.parent() { crate::vfs::create_dir_all(dir)?; }
@@ -2012,6 +2039,32 @@ impl Store {
     pub fn save(&mut self, id: &str, doc: &Document) -> Result<Meta> {
         let _lock = self.begin_write()?;
         self.save_now(id, doc)
+    }
+
+    /// A move rewrote the links to files in `id`'s file (`relocate`) while an
+    /// editor held them as they were, and nothing else changed: take the file
+    /// as the editor's baseline, and give each link as it was → as it is now,
+    /// for the editor to follow before it saves. Mentions only compare by
+    /// title: their paths were rewritten too, the editor holds ids.
+    pub fn follow_moved_links(&self, id: &str) -> Option<HashMap<String, String>> {
+        let before = self.loaded.borrow().get(id)?.clone();
+        let disk = self.read_doc_text(id).ok().filter(|d| *d != before)?;
+        let (mut was, mut now) = (self.parse_doc(id, &before).ok()?, self.parse_doc(id, &disk).ok()?);
+        let (a, b) = (was.links(), now.links());
+        if a.len() != b.len() { return None; }
+        let mut map: HashMap<String, String> = HashMap::new();
+        for (x, y) in a.into_iter().zip(b) {
+            if map.entry(x).or_insert_with(|| y.clone()) != &y { return None; }
+        }
+        map.retain(|x, y| x != y);
+        was.map_links(&mut |h| map.get(h).cloned());
+        for d in [&mut was, &mut now] {
+            layout::each_inline(d, &mut |i| if let Some(l) = i.doc_link().cloned() { *i = docxml::to_inline(crate::model::InlineKind::DocLink(crate::model::InlineDocLink { id: String::new(), title: l.title })); });
+        }
+        // Block ids differ between reads: compare what is written.
+        if docxml::serialize(&was) != docxml::serialize(&now) { return None; }
+        self.loaded.borrow_mut().insert(id.to_string(), disk);
+        Some(map)
     }
 
     /// A live Markdown editor writes its current body even after an external save.
@@ -2106,6 +2159,8 @@ impl Store {
         m.modified = t;
         let m = m.clone();
         self.save_index()?;
+        // What `list` read of it is stale (a link added, for `relocate`); it reads it again anyway.
+        if !same { self.parsed.remove(id); }
         self.loaded.borrow_mut().insert(id.to_string(), if same { disk.unwrap_or(xml) } else { xml });
         Ok(m)
     }
@@ -4180,6 +4235,67 @@ mod tests {
         s.apply_file_history(&changes, false).unwrap();
         assert!(s.abs("新夹/乙.xml").fs_is_file() && !s.abs("乙.xml").fs_exists());
         assert!(crate::vfs::read_to_string(s.abs("丙.xml")).unwrap().contains("href=\"新夹/乙.xml\""));
+    }
+
+    /// Plain links to files (#67), in DocxXML and in Markdown, follow a move
+    /// of the file, of what they point at or of a folder holding either; an
+    /// open editor takes the rewritten links before it saves.
+    #[test]
+    fn moves_keep_file_links() {
+        let lib = Lib::new("file-links");
+        let mut s = lib.open();
+        let linked = |text: &str, url: &str| { let mut b = crate::model::Block::text(""); b.text.push(text, crate::model::Marks { link: Some(url.into()), ..Default::default() }); b };
+        let mut x = doc("甲");
+        x.blocks = vec![linked("报告", "附件/报告%201.pdf"), linked("乙", "./乙.md#小节"), linked("网页", "https://example.com/a.pdf"), linked("本页", "#标题")];
+        let a = s.create_from(&x).unwrap();
+        s.load_for_edit(&a, false).unwrap();
+        crate::vfs::create_dir_all(lib.0.join("附件")).unwrap();
+        crate::vfs::write(lib.0.join("附件/报告 1.pdf"), b"%PDF").unwrap();
+        let md = "---\ntags: [x]\n---\n见 [甲](%E7%94%B2.xml)  和 [报告](附件/报告%201.pdf)\n\n* 原样   保留\n";
+        crate::vfs::write(lib.0.join("乙.md"), md).unwrap();
+        let entries = s.list();
+        let id = |rel: &str, s: &Store| s.index.iter().find(|(_, m)| m.rel == rel).map(|(k, _)| k.clone()).unwrap();
+        let (b, files) = (id("乙.md", &s), id("附件", &s));
+        assert!(entries.iter().any(|e| e.id == b));
+        let f = s.create_folder("夹", None).unwrap();
+        s.set_parent(&a, Some(&f)).unwrap();
+        let links = |s: &Store, id: &str| s.load(id).unwrap().links();
+        assert_eq!(links(&s, &a), ["../附件/报告%201.pdf", "../乙.md#小节", "https://example.com/a.pdf", "#标题"]);
+        // Only the link changed in the Markdown file: front matter and the other lines as they were.
+        assert_eq!(crate::vfs::read_to_string(s.abs("乙.md")).unwrap(), md.replace("%E7%94%B2.xml", "夹/甲.xml"));
+        // The open editor of 甲 still has the old links: saving them as they are is refused …
+        assert!(s.save(&a, &x).is_err());
+        // … it follows them first, and then saves.
+        let map = s.follow_moved_links(&a).unwrap();
+        assert_eq!(map.len(), 2);
+        x.map_links(&mut |l| map.get(l).cloned());
+        s.save(&a, &x).unwrap();
+        assert_eq!(links(&s, &a), ["../附件/报告%201.pdf", "../乙.md#小节", "https://example.com/a.pdf", "#标题"]);
+        assert!(s.follow_moved_links(&a).is_none());
+        // A folder holding the target moves: the links into it follow.
+        s.set_parent(&files, Some(&f)).unwrap();
+        assert!(s.abs("夹/附件/报告 1.pdf").fs_is_file());
+        assert_eq!(links(&s, &a)[0], "附件/报告%201.pdf");
+        assert_eq!(links(&s, &b), ["夹/甲.xml", "夹/附件/报告%201.pdf"]);
+        // Renaming the folder holding both: links between them stay, the one from outside follows.
+        s.rename(&f, "新夹").unwrap();
+        assert_eq!(links(&s, &a)[..2], ["附件/报告%201.pdf", "../乙.md#小节"]);
+        assert_eq!(links(&s, &b), ["新夹/甲.xml", "新夹/附件/报告%201.pdf"]);
+    }
+
+    #[test]
+    fn file_link_paths() {
+        assert_eq!(layout::link_path("工作", "../附件/周%20报.pdf#p2").as_deref(), Some("附件/周 报.pdf"));
+        assert_eq!(layout::link_path("", "../外面/a.pdf").as_deref(), Some("../外面/a.pdf"));
+        assert_eq!(layout::link_path("a", "https://x.y/z.pdf"), None);
+        assert_eq!(layout::link_path("a", "#小节"), None);
+        let none = |_: &str| None;
+        // Out of the library: still the same file from the new place.
+        assert_eq!(layout::rebase_link("甲", "乙/丙", "../../外面/a.pdf", &none).as_deref(), Some("../../../外面/a.pdf"));
+        assert_eq!(layout::rebase_link("甲", "甲", "./a.pdf", &none), None);
+        assert_eq!(layout::rebase_link("", "甲", "./a b.pdf?x#y", &none).as_deref(), Some("../a b.pdf?x#y"));
+        let moved = |p: &str| (p == "a b.pdf").then(|| "夹/a b.pdf".to_string());
+        assert_eq!(layout::rebase_link("", "", "./a%20b.pdf", &moved).as_deref(), Some("./夹/a%20b.pdf"));
     }
 
     /// #358: renaming 「AAA (2)」 back to 「AAA」 once 「AAA」 is gone takes the
