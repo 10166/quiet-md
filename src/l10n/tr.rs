@@ -664,6 +664,7 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("下载更新", "İndir"),
     ("重启以更新", "Güncellemek için yeniden başlat"),
     ("检查更新", "Denetle"),
+    ("项目主页", "Proje sayfası"),
     ("删除的文档保留 {} 天后自动清除。", "Silinen belgeler {} gün saklanır, ardından otomatik olarak silinir."),
     ("下载 Quiet.md {}", "Quiet.md {} sürümünü indir"),
     ("正在下载 {}…", "{} indiriliyor…"),

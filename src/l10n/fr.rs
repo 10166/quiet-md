@@ -676,6 +676,7 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("下载更新", "Télécharger"),
     ("重启以更新", "Redémarrer pour mettre à jour"),
     ("检查更新", "Rechercher"),
+    ("项目主页", "Page du projet"),
     ("删除的文档保留 {} 天后自动清除。", "Les documents supprimés sont conservés {} jours, puis effacés automatiquement."),
     ("下载 Quiet.md {}", "Télécharger Quiet.md {}"),
     ("正在下载 {}…", "Téléchargement de {}…"),

@@ -17,6 +17,7 @@ mod grid;
 pub mod image;
 pub mod keymap;
 mod link;
+pub(crate) use link::open as open_link;
 pub mod links;
 pub mod math;
 pub mod menus;
