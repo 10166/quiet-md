@@ -1,7 +1,7 @@
 //! 查找和替换 (⌘F / ⌘⇧H): the floating box at the top right of the page,
 //! match search over every visible text line and the replace commands.
 
-use super::core::{EditKind, Pos, Selection, TITLE};
+use super::core::{Core, EditKind, Pos, Selection, TITLE};
 use super::view::Editor;
 use crate::input::TextField;
 use crate::model::*;
@@ -105,6 +105,12 @@ pub fn find_in(text: &RichText, q: &str) -> Vec<Range<usize>> {
     out
 }
 
+/// The first hit of `q` below the title, on a line the page shows: where a
+/// 搜索 result found in the body opens (#64).
+pub fn first_body_hit(core: &Core, q: &str) -> Option<(BlockId, Range<usize>)> {
+    core.units().iter().filter(|u| u.text && u.id != TITLE).find_map(|u| Some((u.id, find_in(core.text_of(u.id)?, q).into_iter().next()?)))
+}
+
 const BOX_W: f32 = 404.;
 const BTN_W: f32 = 80.;
 
@@ -147,6 +153,23 @@ impl Editor {
         }
         window.focus(&self.focus, cx);
         cx.notify();
+    }
+
+    /// Select the first body hit of `q` and bring it into view (centred like
+    /// a find hit), instead of the remembered reading position; false when
+    /// the page shows none. 搜索 opens a body hit this way (#64).
+    pub fn reveal_body_hit(&mut self, q: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.board_file || self.table_file { return false; }
+        let Some((id, r)) = first_body_hit(&self.core, q) else { return false };
+        self.core.block_sel = None;
+        self.core.cell_sel = None;
+        self.core.sel = Selection { anchor: Pos::new(id, r.start), head: Pos::new(id, r.end) };
+        self.toolbar_hidden = true;
+        self.restore_top = None;
+        self.reveal = Some((super::render::Reveal::Find(Pos::new(id, r.start)), 0));
+        window.refresh();
+        cx.notify();
+        true
     }
 
     /// Recompute hits. `from_caret` picks the first hit at or after the caret,
@@ -529,7 +552,7 @@ impl Editor {
 
 #[cfg(test)]
 mod tests {
-    use super::{compile, expand_all, find_in, find_re, replace_in, MAX_HITS};
+    use super::{compile, expand_all, find_in, find_re, first_body_hit, replace_in, MAX_HITS};
     use crate::model::*;
 
     fn re(q: &str) -> regex::Regex { compile(q).unwrap().unwrap() }
@@ -596,5 +619,18 @@ mod tests {
         assert_eq!(find_in(&t, "中文"), vec![15..21, 21..27]);
         assert!(find_in(&t, "\u{fffc}").is_empty());
         assert_eq!(find_in(&RichText::plain("aaa"), "aa"), vec![0..2]);
+    }
+
+    #[test]
+    fn body_hit_skips_the_title_and_folded_lines() {
+        let doc = crate::docxml::parse("<title>Apple notes</title>\n<h2 folded=\"true\">Fold</h2>\n<p>hidden APPLE</p>\n<h2>Open</h2>\n<p>a <b>red</b> Apple, an apple</p>\n").unwrap();
+        let core = crate::editor::core::Core::new(doc);
+        let (id, r) = first_body_hit(&core, "apple").unwrap();
+        assert_eq!(&core.text_of(id).unwrap().text[r], "Apple");
+        assert_eq!(core.text_of(id).unwrap().text, "a red Apple, an apple");
+        // Only the title or a folded section holds it: no body hit.
+        assert!(first_body_hit(&core, "notes").is_none());
+        assert!(first_body_hit(&core, "hidden").is_none());
+        assert!(first_body_hit(&core, "").is_none());
     }
 }
