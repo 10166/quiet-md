@@ -10,7 +10,7 @@
 |---|---|
 | `gpui_ios` 按 vendor 同一个 rev（`e2f00a41`）加入 | 通过。新增依赖只有一个第三方 crate：`objc2-ui-kit`，另外就是 `gpui_ios` 本身；桌面和 web 构建不编它 |
 | 上游示例跑在 iPad 模拟器上 | 通过，点击计数正常（`01-hello.png`） |
-| 整个应用编成 `aarch64-apple-ios-sim` | 通过。只碰到一处编不过：`trash` crate 不支持 iOS，改成按平台引入 |
+| 整个应用编成 `aarch64-apple-ios-sim` | 通过。spike 时只有 `trash` crate 编不过（它不支持 iOS）；工作区的 #368 已经去掉了这个依赖 |
 | 应用在 iPad 上打开内置指南 | 通过。首页卡片、侧栏、文档、表格、代码高亮、图片、画板缩略图都正常（`02-folder-home.png`、`03-document.png`） |
 
 为了跑起来改的地方（都在本分支上，带说明）：
@@ -18,7 +18,6 @@
 | 位置 | 改动 | 原因 |
 |---|---|---|
 | `src/big_alloc.rs` | `MAP_ANON` 按 `target_vendor = "apple"` 取值 | 原来只有 macOS 用 Apple 的值，iOS 落到 Linux 的 `0x20`，所有 ≥1 MiB 的分配都失败，一启动就崩 |
-| `Cargo.toml`、`src/system_trash.rs` | iOS 不引入 `trash` | iOS 没有废纸篓 |
 | `src/theme.rs` | 系统字体和等宽字体按 Apple 平台取（`.SystemUIFont`） | 原来 iOS 落到 Linux 分支，用的是 Noto Sans |
 | `src/shortcuts.rs` | iOS 用 Mac 的快捷键表（⌘） | iPad 外接键盘用 ⌘ |
 | `src/editor/view.rs`、`src/input.rs` | 实现 `text_length_utf16` | `gpui_ios` 要靠这个值判断输入框能不能编辑，不实现就不弹键盘 |
@@ -79,7 +78,7 @@ iPad 可编辑测试版的总估计维持 **5–7 周**；因为编译和平台�
 | 可执行文件 | 31.9 MB | 35.1 MB |
 | zip -9 压缩后 | 14.9 MB（只压了可执行文件） | 24.3 MB（整个 .app） |
 
-iOS 版比 macOS 版略小：iOS 上不编 Mac 专属的模块，`trash` 也去掉了。App Store 实际的下载大小还要算上图标和 Info.plist，并且是按设备裁剪后再压缩的，大概在 15 MB 左右。
+iOS 版比 macOS 版略小：iOS 上不编 Mac 专属的模块。App Store 实际的下载大小还要算上图标和 Info.plist，并且是按设备裁剪后再压缩的，大概在 15 MB 左右。
 
 ## 5. 第 3 天（按需）
 
