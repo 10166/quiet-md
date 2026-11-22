@@ -136,6 +136,15 @@ define_class!(
     unsafe impl NSObjectProtocol for TextInputView {}
 
     impl TextInputView {
+        // quiet.md: hardware keys GPUI binds (shortcuts with ⌘ or ⌃, arrows,
+        // Return, Delete, Tab, Esc) go to GPUI as key events; plain typing and
+        // anything unhandled continue to UIKit, which calls insertText.
+        #[unsafe(method(pressesBegan:withEvent:))]
+        fn presses_began(&self, presses: &objc2_foundation::NSSet<UIPress>, event: Option<&UIPressesEvent>) {
+            let handled = presses.len() == 1 && presses.iter().next().is_some_and(|press| self.hardware_key(&press));
+            if !handled { let _: () = unsafe { msg_send![super(self), pressesBegan: presses, withEvent: event] }; }
+        }
+
         #[unsafe(method(canBecomeFirstResponder))]
         fn can_become_first_responder(&self) -> bool {
             self.ivars().keyboard_desired.get()
@@ -200,16 +209,21 @@ define_class!(
         }
         #[unsafe(method(insertText:))]
         fn insert_text(&self, text: &NSString) {
+            // quiet.md: the soft keyboard's Return is the Enter key, as on a hardware keyboard.
+            if text.to_string() == "\n" && self.with_handler(|handler| handler.marked_text_range().is_none()).unwrap_or(true) && self.key("enter", gpui::Modifiers::default()) { return; }
             self.edit(|handler| handler.replace_text_in_range(None, &text.to_string()));
         }
         #[unsafe(method(deleteBackward))]
         fn delete_backward(&self) {
+            let mut needs_key = false;
             self.edit(|handler| {
                 let Some(selection) = handler.selected_text_range(false) else { return; };
                 let mut range = selection.range;
                 if range.is_empty() {
                     let start = handler.text_input_editable_range().map_or(0, |range| range.start);
-                    if range.start <= start { return; }
+                    // quiet.md: at the start of the editable text (the caret's block) Delete
+                    // is the Backspace key, so the editor can merge blocks.
+                    if range.start <= start { needs_key = true; return; }
                     let Some(text) = read_text(handler, start..range.start) else { return; };
                     let Some(character) = composed_character_range(&text, text.length().saturating_sub(1)) else { return; };
                     range.start = start + character.start;
@@ -218,6 +232,7 @@ define_class!(
                     handler.replace_text_in_range(Some(range), "");
                 }
             });
+            if needs_key { self.key("backspace", gpui::Modifiers::default()); }
         }
     }
 
@@ -533,6 +548,34 @@ impl TextInputView {
             .window
             .with_window(|window| window.with_input_handler(callback))
             .flatten()
+    }
+
+    fn key(&self, key: &str, modifiers: gpui::Modifiers) -> bool {
+        let keystroke = gpui::Keystroke { modifiers, key: key.into(), key_char: None };
+        self.ivars().window.with_window(|window| window.dispatch_key(keystroke)).unwrap_or(false)
+    }
+
+    fn hardware_key(&self, press: &UIPress) -> bool {
+        let Some(key) = press.key(self.mtm()) else { return false };
+        // Composition owns the keys until it commits.
+        if self.with_handler(|handler| handler.marked_text_range().is_some()).unwrap_or(false) { return false; }
+        let flags = key.modifierFlags();
+        let modifiers = gpui::Modifiers {
+            control: flags.contains(UIKeyModifierFlags::Control), alt: flags.contains(UIKeyModifierFlags::Alternate),
+            shift: flags.contains(UIKeyModifierFlags::Shift), platform: flags.contains(UIKeyModifierFlags::Command), function: false,
+        };
+        let named = match key.keyCode() {
+            UIKeyboardHIDUsage::KeyboardReturnOrEnter => "enter", UIKeyboardHIDUsage::KeyboardDeleteOrBackspace => "backspace",
+            UIKeyboardHIDUsage::KeyboardTab => "tab", UIKeyboardHIDUsage::KeyboardEscape => "escape",
+            UIKeyboardHIDUsage::KeyboardDeleteForward => "delete", UIKeyboardHIDUsage::KeyboardLeftArrow => "left",
+            UIKeyboardHIDUsage::KeyboardRightArrow => "right", UIKeyboardHIDUsage::KeyboardUpArrow => "up",
+            UIKeyboardHIDUsage::KeyboardDownArrow => "down", UIKeyboardHIDUsage::KeyboardHome => "home",
+            UIKeyboardHIDUsage::KeyboardEnd => "end", UIKeyboardHIDUsage::KeyboardPageUp => "pageup",
+            UIKeyboardHIDUsage::KeyboardPageDown => "pagedown", _ => "",
+        };
+        let chars = key.charactersIgnoringModifiers().to_string().to_lowercase();
+        let name = if !named.is_empty() { named.to_string() } else if modifiers.platform || modifiers.control { chars } else { return false };
+        !name.is_empty() && self.key(&name, modifiers)
     }
 
     fn edit(&self, callback: impl FnOnce(&mut PlatformInputHandler)) {

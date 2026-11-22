@@ -311,8 +311,11 @@ impl IosWindow {
         let (window, screen_bounds_cg, scale) = if let Some(scene) = window_scene {
             let screen = scene.screen();
             let bounds = screen.bounds();
+            // quiet.md: the scene sizes its window. iPadOS 26 runs apps in
+            // resizable windows smaller than the screen; a frame set to the
+            // screen's bounds drew past the window and ignored resizing.
             let window = UIWindow::initWithWindowScene(UIWindow::alloc(main_thread), scene);
-            window.setFrame(bounds);
+            let bounds = window.bounds();
             (window, bounds, screen.scale())
         } else {
             let screen = UIScreen::mainScreen(main_thread);
@@ -525,6 +528,16 @@ impl IosWindowState {
     }
 
     /// Delivers a UIKit touch through GPUI's platform-neutral touch API.
+    /// quiet.md: a key press as GPUI key events (hardware keyboard, and the
+    /// soft keyboard's Return and Delete at the edge of the editable text);
+    /// true when something handled the key down.
+    pub(crate) fn dispatch_key(&self, keystroke: gpui::Keystroke) -> bool {
+        let down = PlatformInput::KeyDown(gpui::KeyDownEvent { keystroke: keystroke.clone(), is_held: false, prefer_character_input: false });
+        let handled = self.input_callback.with(|callback| !callback(down).propagate).unwrap_or(false);
+        self.input_callback.with(|callback| callback(PlatformInput::KeyUp(gpui::KeyUpEvent { keystroke })));
+        handled
+    }
+
     pub fn handle_touch(&self, touch: &UITouch, _event: Option<&UIEvent>) {
         // GPUI timestamps delivery itself. Replaying UIKit's historical coalesced
         // samples here would make them appear simultaneous and distort fling velocity.
