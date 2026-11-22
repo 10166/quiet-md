@@ -102,8 +102,8 @@ impl Store {
         let rel = join_rel(&dir, &name);
         crate::vfs::create_dir_all(self.abs(&rel))?;
         let folder = uuid::Uuid::new_v4().to_string();
-        let t = now();
-        self.index.insert(folder.clone(), Meta { folder: Some(String::new()), rel: rel.clone(), created: t, modified: t, order: m.order, root_order: m.root_order, ..Default::default() });
+        // The folder sorts where the document did: its place by hand, else its last change (`Meta::place`).
+        self.index.insert(folder.clone(), Meta { folder: Some(String::new()), rel: rel.clone(), created: m.created, modified: m.modified, order: m.order, root_order: m.root_order, ..Default::default() });
         derive_tree(&mut self.index);
         let to = join_rel(&rel, &format!("{name}.{}", ext_of(&m)));
         if let Err(e) = self.relocate(&[(id.to_string(), to)]) {

@@ -3975,6 +3975,33 @@ mod tests {
         assert!(s.folder_of_note(&lone).is_some());
     }
 
+    /// A page that gets its first child stays where it was among its
+    /// siblings: by its last change, or by the place it was given by hand.
+    #[test]
+    fn a_page_keeps_its_place_when_it_gets_children() {
+        let lib = Lib::new("subdoc-place");
+        let mut s = lib.open();
+        let old = s.create_from(&doc("旧")).unwrap();
+        let mid = s.create_from(&doc("中")).unwrap();
+        let new = s.create_from(&doc("新")).unwrap();
+        for (id, t) in [(&old, 100), (&mid, 200), (&new, 300)] { s.index.get_mut(id).unwrap().modified = t; }
+        s.save_index().unwrap();
+        let order = |s: &mut Store| {
+            let list = s.list();
+            let mut top: Vec<&Entry> = list.iter().filter(|e| e.meta.parent.is_none()).collect();
+            top.sort_by(|a, b| (a.meta.place(), &a.id).cmp(&(b.meta.place(), &b.id)));
+            top.iter().map(|e| e.title.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(order(&mut s), ["新", "中", "旧"]);
+        s.create_child(&mid, &doc("子")).unwrap();
+        assert_eq!(order(&mut s), ["新", "中", "旧"], "by last change, the folder takes the page's");
+        // Placed by hand: the folder takes the page's position.
+        s.move_in_tree(&old, None, Some(&new)).unwrap();
+        assert_eq!(order(&mut s), ["旧", "新", "中"]);
+        s.create_child(&old, &doc("子")).unwrap();
+        assert_eq!(order(&mut s), ["旧", "新", "中"], "a hand-placed page keeps its position");
+    }
+
     /// Undoing 新建子文档 restores the page's place and its links.
     #[test]
     fn undoing_a_child_page_puts_links_back() {
