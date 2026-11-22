@@ -11,10 +11,11 @@
 //! key equivalents).
 
 use super::keymap as k;
-use super::menus::TURN_ITEMS;
+use super::menus::{TURN_ITEMS, TurnItem};
 use super::overlays::{MENU_W, at, row, row_tinted, separator_h};
 use super::table::{CellSel, CellSelKind};
 use super::view::{BlockAct, CtxKind, CtxSub, Editor, Menu};
+use crate::model::BlockKind;
 use crate::editor_ui::{MENU_PAD_Y, MENU_ROW_H, menu};
 use crate::feishu_theme::Theme;
 use gpui::*;
@@ -129,6 +130,11 @@ fn sub_row(cx: &Context<Editor>, id: impl Into<ElementId>, icon_name: &str, labe
     row(id, icon_name, label, Some("›"), open).on_mouse_move(hover(Some(s), cx))
 }
 
+/// 转换为's rows: 正文 through 标题 3, lists, 引用, 代码块 (by kind, not label).
+fn turn_items() -> impl Iterator<Item = (usize, &'static TurnItem)> {
+    TURN_ITEMS.iter().enumerate().filter(|(_, t)| !t.action.is_empty() && !matches!((t.kind)(), BlockKind::Heading { level: 4.., .. }))
+}
+
 impl Editor {
     /// The right-click menu at `pos` (page coordinates).
     pub(super) fn ctx_menu(&self, pos: Point<Pixels>, kind: CtxKind, sub: Option<CtxSub>, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -157,21 +163,31 @@ impl Editor {
                             .on_mouse_down(MouseButton::Left, fire(cx, k::Delete)),
                     );
             }
-            CtxKind::Caret => {
+            CtxKind::ReadOnly { sel } => {
+                if sel {
+                    p = p
+                        .push(fire_row(cx, "ctx-copy", "copy", crate::settings::text("复制"), k::Copy))
+                        .push(fire_row(cx, "ctx-md", "export", crate::settings::text("复制为 Markdown"), k::CopyMarkdown));
+                }
+                p = p.push(fire_row(cx, "ctx-all", "batch", crate::settings::text("全选"), k::SelectAll));
+            }
+            CtxKind::Caret | CtxKind::Title => {
                 p = p
                     .push(fire_row(cx, "ctx-paste", "import", crate::settings::text("粘贴"), k::Paste))
                     .push(fire_row(cx, "ctx-paste-plain", "baseline", crate::settings::text("粘贴为纯文本"), k::PastePlain))
                     .push(fire_row(cx, "ctx-all", "batch", crate::settings::text("全选"), k::SelectAll))
-                    .rule();
-                p = p
-                    .push(sub_row(cx, "ctx-insert", "plus", crate::settings::text("插入"), CtxSub::Insert, sub == Some(CtxSub::Insert)))
                     .rule()
-                    // 转换为 / 对齐 / the two block moves: what a caret can do
-                    // to its own paragraph.
-                    .push(sub_row(cx, "ctx-turn", "type", crate::settings::text("转换为"), CtxSub::Turn, sub == Some(CtxSub::Turn)))
-                    .push(sub_row(cx, "ctx-align", "align-left", crate::settings::text("对齐"), CtxSub::Align, sub == Some(CtxSub::Align)))
-                    .push(fire_row(cx, "ctx-up", "caret-up", crate::settings::text("上移块"), k::MoveBlockUp))
-                    .push(fire_row(cx, "ctx-down", "caret-down", crate::settings::text("下移块"), k::MoveBlockDown));
+                    .push(sub_row(cx, "ctx-insert", "plus", crate::settings::text("插入"), CtxSub::Insert, sub == Some(CtxSub::Insert)));
+                if kind == CtxKind::Caret {
+                    p = p
+                        .rule()
+                        // 转换为 / 对齐 / the two block moves: what a caret can do
+                        // to its own paragraph.
+                        .push(sub_row(cx, "ctx-turn", "type", crate::settings::text("转换为"), CtxSub::Turn, sub == Some(CtxSub::Turn)))
+                        .push(sub_row(cx, "ctx-align", "align-left", crate::settings::text("对齐"), CtxSub::Align, sub == Some(CtxSub::Align)))
+                        .push(fire_row(cx, "ctx-up", "caret-up", crate::settings::text("上移块"), k::MoveBlockUp))
+                        .push(fire_row(cx, "ctx-down", "caret-down", crate::settings::text("下移块"), k::MoveBlockDown));
+                }
             }
             CtxKind::Cell { block, row, col } => {
                 // 合并 needs the cell selection the user made: right-clicking
@@ -248,7 +264,7 @@ impl Editor {
 
         // The open submenu, hung beside the row that opened it.
         let sub_el: Option<AnyElement> = match (kind, sub) {
-            (CtxKind::Caret, Some(CtxSub::Insert)) => Some(
+            (CtxKind::Caret | CtxKind::Title, Some(CtxSub::Insert)) => Some(
                 sub_menu("ctx-insert-sub", insert_y)
                     .child(fire_row(cx, "ctx-ins-link", "link", crate::settings::text("链接"), k::Link))
                     .child(fire_row(cx, "ctx-ins-table", "table", crate::settings::text("表格"), k::InsertTable))
@@ -260,11 +276,7 @@ impl Editor {
                 // 正文 through 标题 3, lists, 引用, 代码块: 标题 4–9 and 高亮块
                 // stay in the handle menu, which can hold a whole grid.
                 let mut m = sub_menu("ctx-turn-sub", turn_y);
-                for (i, it) in TURN_ITEMS
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, t)| !t.action.is_empty() && !matches!(t.label, "四级标题" | "五级标题"))
-                {
+                for (i, it) in turn_items() {
                     let kind = (it.kind)();
                     m = m.child(act_row(cx, ("ctx-turn", i), it.icon, crate::settings::text(it.label), move |e, window, cx| {
                         e.turn(kind.clone(), false, window, cx);
@@ -288,5 +300,18 @@ impl Editor {
             .child(p.div)
             .children(sub_el);
         Some(at(pos, Anchor::TopLeft, el))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BlockKind, turn_items};
+
+    #[test]
+    fn turn_into_leaves_deep_headings_and_callouts_to_the_handle_menu() {
+        let kinds: Vec<BlockKind> = turn_items().map(|(_, t)| (t.kind)()).collect();
+        assert!(kinds.iter().any(|k| matches!(k, BlockKind::Heading { level: 3, .. })));
+        assert!(!kinds.iter().any(|k| matches!(k, BlockKind::Heading { level: 4.., .. } | BlockKind::Callout { .. })));
+        assert!(kinds.iter().any(|k| matches!(k, BlockKind::Code { .. })) && kinds.contains(&BlockKind::Quote));
     }
 }

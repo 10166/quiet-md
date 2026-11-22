@@ -82,6 +82,11 @@ pub enum CtxKind {
     Selection,
     /// A caret in text: paste, insert and turn into.
     Caret,
+    /// A caret in the title: paste and insert; the title is no block to
+    /// turn, align or move.
+    Title,
+    /// A read-only page: copy what is selected (`sel`), or select all.
+    ReadOnly { sel: bool },
     /// A table cell, by slot. Right-clicking does not select the cell.
     Cell { block: BlockId, row: usize, col: usize },
 }
@@ -2519,7 +2524,11 @@ impl Editor {
         self.marked = None;
         self.hide_link_card(cx);
         if self.read_only {
-            return;
+            // Nothing to change, but what is selected can still be copied.
+            let Some((pos, _)) = self.pos_at(ev.position) else { return cx.notify() };
+            let sel = self.core.selection_holds(pos);
+            self.menu = Some(Menu::Ctx { pos: self.rel(ev.position), kind: CtxKind::ReadOnly { sel }, sub: None });
+            return cx.notify();
         }
         self.dragging = false;
         self.gap_press = None;
@@ -2534,7 +2543,8 @@ impl Editor {
         }
         // Nothing to put a caret in (image, file, divider, ...): the block menu
         // already has 剪切 / 复制 / 删除 and 在下方添加 for those.
-        if !self.core.block(pos.block).is_some_and(|b| b.kind.has_text()) {
+        // The title is text too, though no block.
+        if pos.block != TITLE && !self.core.block(pos.block).is_some_and(|b| b.kind.has_text()) {
             return self.open_block_menu(pos.block, false, window, cx);
         }
         let in_sel = self.core.selection_holds(pos);
@@ -2544,7 +2554,7 @@ impl Editor {
             self.caret_row_end = at_row_end.then_some((pos.block, pos.offset));
             self.restart_blink(window, cx);
         }
-        let kind = if in_sel { CtxKind::Selection } else { CtxKind::Caret };
+        let kind = if in_sel { CtxKind::Selection } else if pos.block == TITLE { CtxKind::Title } else { CtxKind::Caret };
         self.menu = Some(Menu::Ctx { pos: self.rel(ev.position), kind, sub: None });
         cx.notify();
     }

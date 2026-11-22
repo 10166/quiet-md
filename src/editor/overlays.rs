@@ -5,7 +5,7 @@
 use super::core::{Pos, TITLE};
 use super::menus::{self, SLASH_ITEMS, TURN_ITEMS};
 use super::table::CellSelKind;
-use super::view::{BlockAct, BlockSub, Editor, Mark, Menu};
+use super::view::{BlockAct, BlockSub, CtxKind, Editor, Mark, Menu};
 use crate::model::*;
 use crate::feishu_theme::{self as theme, Theme};
 use crate::editor_ui::{MENU_INSET, MENU_PAD_Y, MENU_ROW_H, TipExt, icon, menu, panel, popover};
@@ -311,6 +311,10 @@ impl Editor {
         self.callout_zone.borrow_mut().clear();
         let mut out = vec![];
         if self.read_only {
+            // Only the right-click menu's 复制 / 全选.
+            if let Some(Menu::Ctx { pos, kind: kind @ CtxKind::ReadOnly { .. }, sub }) = self.menu.clone() {
+                out.extend(self.ctx_menu(pos, kind, sub, cx));
+            }
             return out;
         }
         let menu_el = match self.menu.clone() {
