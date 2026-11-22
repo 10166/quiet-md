@@ -154,7 +154,7 @@ impl SharedStore {
         }
         for (i, (key, name, _, _)) in self.roots().into_iter().enumerate() {
             let meta = Meta { folder: Some(name.clone()), root_order: Some(i as u64 + 1), ..Default::default() };
-            entries.push(Entry { id: root_row(&key), meta, title: name, icon: None, body: Default::default(), reminders: vec![], links: vec![], root: key });
+            entries.push(Entry { id: root_row(&key), meta, title: name, icon: None, body: Default::default(), reminders: vec![], links: vec![], note: None, root: key });
         }
         entries
     }
