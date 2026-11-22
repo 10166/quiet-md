@@ -1,7 +1,7 @@
 iOS leaves some trait numbers out of CTFont traits: Helvetica and Arial lack them entirely, some CJK fallback faces lack the slant. font-kit's Font::properties() unwraps all four, so load_family skipped those faces ("failed to resolve font 'Arial'") and is_italic panicked during layout. Read the italic bit and the traits with defaults (font_properties) instead. macOS faces report every trait, so their result is unchanged.
 
 diff --git a/crates/gpui_apple/src/text_system.rs b/crates/gpui_apple/src/text_system.rs
-index 430f37fa336d7149a5e1d8797952d254108d8708..66317ac9d8f2260db1de75085b47e2647bbc371c 100644
+index 430f37fa336d7149a5e1d8797952d254108d8708..c3b3c5c412f4081f1e33e2fdfeadad901810b0a2 100644
 --- a/crates/gpui_apple/src/text_system.rs
 +++ b/crates/gpui_apple/src/text_system.rs
 @@ -17,8 +17,7 @@ use core_text::{
@@ -65,9 +65,9 @@ index 430f37fa336d7149a5e1d8797952d254108d8708..66317ac9d8f2260db1de75085b47e264
  
      fn is_italic(&self, font_id: FontId) -> bool {
 -        self.oblique.contains(&font_id) || self.fonts[font_id.0].properties().style != FontkitStyle::Normal
-+        // quiet.md: the italic bit, not font-kit's properties(): iOS leaves the
++        // quiet.md: font_properties, not font-kit's properties(): iOS leaves the
 +        // slant number out of some fallback faces' traits and properties() unwraps it.
-+        self.oblique.contains(&font_id) || self.fonts[font_id.0].native_font().symbolic_traits() & kCTFontItalicTrait != 0
++        self.oblique.contains(&font_id) || font_properties(&self.fonts[font_id.0]).style != FontkitStyle::Normal
      }
  
      fn is_emoji(&self, font_id: FontId) -> bool {

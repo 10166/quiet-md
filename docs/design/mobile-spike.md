@@ -22,7 +22,7 @@
 | `src/theme.rs` | 系统字体和等宽字体按 Apple 平台取（`.SystemUIFont`） | 原来 iOS 落到 Linux 分支，用的是 Noto Sans |
 | `src/shortcuts.rs` | iOS 用 Mac 的快捷键表（⌘） | iPad 外接键盘用 ⌘ |
 | `src/editor/view.rs`、`src/input.rs` | 实现 `text_length_utf16` | `gpui_ios` 要靠这个值判断输入框能不能编辑，不实现就不弹键盘 |
-| `packaging/ios/spike/app/Info.plist` | 加 `UIDeviceFamily` [1, 2] | 不加就以 iPhone 兼容模式（320×480 放大）跑在 iPad 上 |
+| `packaging/ios/Info.plist` | 加 `UIDeviceFamily` [1, 2] | 不加就以 iPhone 兼容模式（320×480 放大）跑在 iPad 上 |
 | vendor 补丁 0039 `ios-font-traits` | 读字体特征时缺失的值用默认值 | iOS 上 Helvetica、Arial 等字体缺少字体特征数值（重量、倾斜等），font-kit 直接 unwrap，结果找不到字体，排版时也会崩 |
 | vendor 补丁 0040 `ios-key-events` | 外接键盘按键（`pressesBegan`）、软键盘回车、块首退格都转成 GPUI 按键事件 | 见第 2 节 |
 | vendor 补丁 0041 `ios-scene-window` | 窗口大小交给 scene 决定 | iPadOS 26 的 App 是可调整大小的窗口；`gpui_ios` 把窗口设成整屏，内容画出了窗口，旋转后也只显示一部分 |
@@ -90,7 +90,7 @@ iOS 版比 macOS 版略小：iOS 上不编 Mac 专属的模块，`trash` 也去�
 ```sh
 rustup target add aarch64-apple-ios-sim aarch64-apple-ios
 python3 shared-mock/guides/build.py <空临时目录>
-LIB=<那个目录> LOG=<日志文件> packaging/ios/spike/run.sh   # 编译、打包、装到模拟器并启动
+QUIET_MD_HOME=<那个目录> packaging/ios/simulator.sh   # 编译、打包、装到已启动的模拟器并运行，控制台输出在 target/ios/console.log
 ```
 
-spike 代码在 `packaging/ios/spike/`：`run.sh`、`bundle.sh`、`app/Info.plist`，以及上游示例 `hello/`。
+构建入口：`packaging/ios/simulator.sh` 和 `packaging/ios/Info.plist`。这不是发版用的流程：没有 Xcode 工程，只做临时签名。上游示例当时单独建了一个 crate 来跑，没有保留在仓库里。

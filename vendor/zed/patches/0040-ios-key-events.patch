@@ -100,10 +100,10 @@ index 5464d6f7c85768147c906f9cd22777a754fae1a0..cf72a35a405b48e62e5c6e222b68a492
          let previous = self.ivars().native_edit.replace(true);
          self.with_handler(|handler| {
 diff --git a/crates/gpui_ios/src/ios/window.rs b/crates/gpui_ios/src/ios/window.rs
-index 3e506946019363df7bd82a88ec37faf485b8bc7a..3e81578a11695cd53145b7174f3531e6a95d6a22 100644
+index 1eed0a14860e3e3ae6e835d43273972964f059b8..6de57d298f68822dea45798f99b58976eddf02b7 100644
 --- a/crates/gpui_ios/src/ios/window.rs
 +++ b/crates/gpui_ios/src/ios/window.rs
-@@ -525,6 +525,16 @@ impl IosWindowState {
+@@ -528,6 +528,16 @@ impl IosWindowState {
      }
  
      /// Delivers a UIKit touch through GPUI's platform-neutral touch API.

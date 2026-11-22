@@ -474,9 +474,9 @@ impl AppleTextSystemState {
     }
 
     fn is_italic(&self, font_id: FontId) -> bool {
-        // quiet.md: the italic bit, not font-kit's properties(): iOS leaves the
+        // quiet.md: font_properties, not font-kit's properties(): iOS leaves the
         // slant number out of some fallback faces' traits and properties() unwraps it.
-        self.oblique.contains(&font_id) || self.fonts[font_id.0].native_font().symbolic_traits() & kCTFontItalicTrait != 0
+        self.oblique.contains(&font_id) || font_properties(&self.fonts[font_id.0]).style != FontkitStyle::Normal
     }
 
     fn is_emoji(&self, font_id: FontId) -> bool {

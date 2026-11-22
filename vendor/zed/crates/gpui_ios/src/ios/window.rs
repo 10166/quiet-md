@@ -310,7 +310,6 @@ impl IosWindow {
         let window_scene = window_scene.as_deref();
         let (window, screen_bounds_cg, scale) = if let Some(scene) = window_scene {
             let screen = scene.screen();
-            let bounds = screen.bounds();
             // quiet.md: the scene sizes its window. iPadOS 26 runs apps in
             // resizable windows smaller than the screen; a frame set to the
             // screen's bounds drew past the window and ignored resizing.
