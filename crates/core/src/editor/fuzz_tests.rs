@@ -35,6 +35,7 @@ b</code></pre></td></tr></tbody></table>
 "#;
 
 const TEXTS: &[&str] = &["a", "中文", "😀", " ", "ab cd", "é", "👍🏽", "x"];
+const MARKERS: &[&str] = &["# ", "＃＃ ", "- ", "—— ", "1. ", "2． ", "> ", "＞ ", "| ", "[] ", "``` ", "```rust", "···py", "*** "];
 const PASTES: &[&str] = &["一\n二", "a\n\nb\nc", "\n", "😀\n中", "line"];
 
 struct Rng(u64);
@@ -120,7 +121,7 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
     }
     let us = c.units();
     let any = |rng: &mut Rng| rng.pick(&us).id;
-    match rng.below(24) {
+    match rng.below(25) {
         0..=2 => {
             let s = *rng.pick(TEXTS);
             c.insert_text(s);
@@ -228,6 +229,20 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
                 c.paste_blocks(images.blocks);
             }
             "paste_image".into()
+        }
+        23 => {
+            // A line-start Markdown marker typed as the editor view does it.
+            let s = *rng.pick(MARKERS);
+            if rng.chance(50) && c.text_of(c.sel.head.block).is_some() {
+                c.sel = Selection::caret(Pos::new(c.sel.head.block, 0));
+            }
+            c.insert_text(s);
+            if s.ends_with(' ') {
+                let _ = c.markdown_block_shortcut() || c.markdown_divider();
+            } else if !c.markdown_enter_shortcut() {
+                c.enter();
+            }
+            format!("markdown({s:?})")
         }
         _ => {
             c.trailing_line();
