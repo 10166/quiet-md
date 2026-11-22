@@ -5,7 +5,8 @@ impl Store {
     /// It takes the parsed documents along, so its `list` reads only files that changed.
     pub fn tree_writer(&self) -> Self {
         Self { file_changes: vec![], root: self.root.clone(), index: self.index.clone(), foreign: self.foreign.clone(), trash: self.trash.clone(), flat: self.flat,
-            loaded: Default::default(), copied: Default::default(), parsed: self.parsed.clone(), warnings: vec![], migrated: None, batch: Default::default(), view: Default::default() }
+            loaded: Default::default(), copied: Default::default(), parsed: self.parsed.clone(), warnings: vec![], migrated: None, batch: Default::default(), view: Default::default(),
+            v5: self.v5, me: self.me.clone(), clock: self.clock.clone(), seen: self.seen.clone(), merged: self.merged.clone() }
     }
 
     pub fn take_warnings(&mut self) -> Vec<String> { std::mem::take(&mut self.warnings) }
