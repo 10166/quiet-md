@@ -196,7 +196,7 @@ impl SidebarDrag {
 fn row_face(e: &Entry, open: bool) -> Div {
     div().h(px(crate::sidebar::ROW_H)).w_full().pl(px(6.)).flex().items_center()
         .child(div().size(px(20.)).flex_none().flex().items_center().justify_center().map(|d| match &e.icon {
-            _ if e.meta.folder.is_some() => d.child(icon(if open { "folder-open" } else { "folder" }, crate::sidebar::ROW_ICON, Theme::icon())),
+            _ if e.meta.folder.is_some() && e.note.is_none() => d.child(icon(if open { "folder-open" } else { "folder" }, crate::sidebar::ROW_ICON, Theme::icon())),
             _ if e.meta.named_by_file() => d.child(icon(crate::search::file_glyph(&e.meta), crate::sidebar::ROW_ICON, Theme::icon())),
             Some(em) => d.text_size(px(13.)).line_height(px(20.)).child(em.clone()),
             None => d.child(icon("doc", crate::sidebar::ROW_ICON, Theme::icon())),
@@ -441,7 +441,7 @@ impl Workspace {
     /// The row the selection pill sits on: the open doc, or the open folder.
     fn sidebar_pick(&self) -> Option<String> {
         match self.view {
-            crate::app::View::Doc => self.current.clone(),
+            crate::app::View::Doc => self.current.as_deref().map(|id| self.row_of(id)),
             crate::app::View::Folder => self.folder_current.clone(),
             _ => None,
         }
@@ -466,7 +466,9 @@ impl Workspace {
         let mut moving = false;
 
         let renaming = self.rename.as_ref().map(|r| r.id.clone());
-        self.folder_drag.parents = self.entries.iter().filter_map(|e| e.meta.parent.clone()).collect();
+        // A folder's 正文 is its own row, not something inside it.
+        let notes: std::collections::HashSet<&str> = self.entries.iter().filter_map(|e| e.note.as_deref()).collect();
+        self.folder_drag.parents = self.entries.iter().filter(|e| !notes.contains(e.id.as_str())).filter_map(|e| e.meta.parent.clone()).collect();
         let high = crate::settings::motion_high();
         // The visible band in this list's coordinates, from last frame's layout. Both edges are
         // measured against the list itself (sections above it scroll too), and padded so a
@@ -823,6 +825,14 @@ impl Workspace {
     fn sidebar_click(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let on_icon = std::mem::take(&mut self.folder_drag.icon_press) && self.folder_drag.has_children(id);
         let all = std::mem::take(&mut self.folder_drag.icon_alt);
+        // A document with children opens; its chevron folds it.
+        if let Some(note) = self.entries.iter().find(|e| e.id == id).and_then(|e| e.note.clone()) {
+            if on_icon {
+                if !self.expanded.remove(id) { self.expanded.insert(id.to_string()); }
+                cx.notify();
+            } else { self.open(&note, window, cx); }
+            return;
+        }
         if self.entries.iter().any(|e| e.id == id && e.meta.folder.is_some()) {
             let shown = self.view == crate::app::View::Folder && self.folder_current.as_deref() == Some(id);
             if on_icon || shown {

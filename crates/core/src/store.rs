@@ -294,6 +294,9 @@ pub struct Entry {
     pub reminders: Vec<crate::model::InlineReminder>,
     /// Its @文档 mentions, for the 反向引用 of the documents they point at.
     pub links: Vec<crate::model::DocLink>,
+    /// A folder's 正文 (#357): the document of the folder's own name inside
+    /// it (`方案/方案.xml`), shown as a document with child pages.
+    pub note: Option<String>,
 }
 
 pub struct Store {
@@ -405,6 +408,8 @@ pub const ASSETS: &str = ".assets";
 mod folders;
 #[path = "mounts.rs"]
 mod mounts;
+#[path = "subdocs.rs"]
+mod subdocs;
 
 #[derive(Serialize, Deserialize)]
 struct FormatMarker {
@@ -1474,12 +1479,12 @@ impl Store {
             }
             let Parsed { mut title, icon, body, reminders, links } = parsed;
             if self.index[&id].named_by_file() { title = self.markdown_title(&id); }
-            out.push(Entry { id: id.clone(), meta: self.index[&id].clone(), title, icon, body, reminders, links });
+            out.push(Entry { id: id.clone(), meta: self.index[&id].clone(), title, icon, body, reminders, links, note: None });
         }
         let mut folders: Vec<(&String, &Meta)> = self.index.iter().filter(|(_, m)| m.folder.is_some()).collect();
         folders.sort_by(|a, b| a.0.cmp(b.0));
         for (id, meta) in folders {
-            out.push(Entry { id: id.clone(), meta: meta.clone(), title: meta.folder.clone().unwrap_or_default(), icon: None, body: Default::default(), reminders: vec![], links: vec![] });
+            out.push(Entry { id: id.clone(), meta: meta.clone(), title: meta.folder.clone().unwrap_or_default(), icon: None, body: Default::default(), reminders: vec![], links: vec![], note: None });
         }
         let seen: HashSet<&str> = out.iter().map(|e| e.id.as_str()).collect();
         self.parsed.retain(|id, _| seen.contains(id.as_str()));
@@ -1590,6 +1595,7 @@ impl Store {
             return Ok(());
         }
         let base = file_name_for(title);
+        if let Some(folder) = self.folder_of_note(id) { return self.follow_note_title(id, &folder, &base); }
         let rel = m.rel.clone();
         let dir = parent_rel(&rel).to_string();
         let name = base_name(&rel);
@@ -1651,7 +1657,7 @@ impl Store {
                 // Not downloaded yet: listed by its name, read once it is here.
                 if let Some(ph) = layout::placeholder(&p) { layout::download(&ph); }
                 let title = stem_of(base_name(&m.rel)).to_string();
-                out.push(Entry { id: id.clone(), meta: m.clone(), title, icon: None, body: Default::default(), reminders: vec![], links: vec![] });
+                out.push(Entry { id: id.clone(), meta: m.clone(), title, icon: None, body: Default::default(), reminders: vec![], links: vec![], note: None });
                 continue;
             }
             let md = crate::vfs::metadata(&p).ok();
@@ -1671,15 +1677,16 @@ impl Store {
             };
             let Parsed { mut title, icon, body, reminders, links } = parsed;
             if m.named_by_file() { title = self.markdown_title(&id); }
-            out.push(Entry { id, meta: m.clone(), title, icon, body, reminders, links });
+            out.push(Entry { id, meta: m.clone(), title, icon, body, reminders, links, note: None });
         }
         // Folders in id order: the index is a HashMap, whose order changes every time it is re-read.
         let mut folders: Vec<(&String, &Meta)> = self.index.iter().filter(|(_, m)| m.folder.is_some()).collect();
         folders.sort_by(|a, b| a.0.cmp(b.0));
         for (id, meta) in folders {
             let title = meta.folder.clone().unwrap_or_default();
-            out.push(Entry { id: id.clone(), meta: meta.clone(), title, icon: None, body: Default::default(), reminders: vec![], links: vec![] });
+            out.push(Entry { id: id.clone(), meta: meta.clone(), title, icon: None, body: Default::default(), reminders: vec![], links: vec![], note: None });
         }
+        subdocs::mark_notes(&self.folder_notes(), &mut out);
         let seen: HashSet<&str> = out.iter().map(|e| e.id.as_str()).collect();
         self.parsed.retain(|id, _| seen.contains(id.as_str()));
         // Files that went only leave stale paths behind, which the next launch skips.
@@ -2562,6 +2569,8 @@ impl Store {
     /// 重命名 a document that isn't open: rewrite its title on disk and its
     /// file name; a folder's name is its folder's.
     pub fn rename(&mut self, id: &str, title: &str) -> Result<Meta> {
+        // A folder with a 正文 is renamed through it, so the two keep one name.
+        if let Some(note) = self.note_of(id) { return self.rename(&note, title); }
         let _lock = self.begin_write()?;
         let before = self.file_state(id);
         if self.index.get(id).is_some_and(|m| m.folder.is_some() || m.named_by_file()) {
@@ -3915,6 +3924,172 @@ mod tests {
         s.save(&h, &doc("CCC")).unwrap();
         assert_eq!(file(&s, &h), "CCC.xml");
         assert!(s.abs("CCC.xml").fs_is_file() && !s.abs("CCC 2.xml").fs_exists());
+    }
+
+    /// 新建子文档 (#357): the page goes into a folder of its name, as its 正文,
+    /// in its place; links to it and out of it follow; undo and redo replay it.
+    #[test]
+    fn child_pages_live_in_a_folder_of_the_pages_name() {
+        let lib = Lib::new("subdoc");
+        let mut s = lib.open();
+        let other = s.create_from(&doc("其他")).unwrap();
+        let plan = s.create_from(&linking("方案", &[(&other, "其他")])).unwrap();
+        s.save(&other, &linking("其他", &[(&plan, "方案")])).unwrap();
+        let journal = s.track_file_changes();
+        let child = s.create_child(&plan, &doc("子页")).unwrap();
+        assert_eq!(journal.take().len(), 3, "the folder, the page's move and the new page");
+        assert!(s.abs("方案/方案.xml").fs_is_file() && s.abs("方案/子页.xml").fs_is_file() && !s.abs("方案.xml").fs_exists());
+        assert!(crate::vfs::read_to_string(s.abs("其他.xml")).unwrap().contains("href=\"方案/方案.xml\""));
+        assert!(crate::vfs::read_to_string(s.abs("方案/方案.xml")).unwrap().contains("href=\"../其他.xml\""));
+        let folder = s.folder_of_note(&plan).expect("the page is its folder's 正文");
+        assert_eq!(s.note_of(&folder).as_deref(), Some(plan.as_str()));
+        assert_eq!(s.index[&child].parent.as_deref(), Some(folder.as_str()));
+        let list = s.list();
+        let f = list.iter().find(|e| e.id == folder).unwrap();
+        assert_eq!((f.note.as_deref(), f.title.as_str()), (Some(plan.as_str()), "方案"));
+        assert!(list.iter().filter(|e| e.id != folder).all(|e| e.note.is_none()));
+        // The page is first inside, the new one last.
+        let mut inside: Vec<&Entry> = list.iter().filter(|e| e.meta.parent.as_deref() == Some(folder.as_str())).collect();
+        inside.sort_by_key(|e| (e.meta.place(), e.id.clone()));
+        assert_eq!(inside.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), [plan.as_str(), child.as_str()]);
+        // A second one goes straight into the folder, under the page or the folder alike.
+        let second = s.create_child(&plan, &doc("子页二")).unwrap();
+        let third = s.create_child(&folder, &doc("子页三")).unwrap();
+        assert!(s.abs("方案/子页二.xml").fs_is_file() && s.abs("方案/子页三.xml").fs_is_file());
+        // Deeper: a child page gets children of its own.
+        let grandchild = s.create_child(&child, &doc("孙页")).unwrap();
+        assert!(s.abs("方案/子页/子页.xml").fs_is_file() && s.abs("方案/子页/孙页.xml").fs_is_file());
+        assert!(s.folder_of_note(&child).is_some() && s.index[&grandchild].parent == s.folder_of_note(&child));
+        assert_eq!(s.index[&second].parent, s.index[&third].parent);
+        // Undo and redo.
+        let lone = s.create_from(&doc("单页")).unwrap();
+        let journal = s.track_file_changes();
+        let kid = s.create_child(&lone, &doc("新页")).unwrap();
+        let changes = journal.take();
+        assert!(s.abs("单页/单页.xml").fs_is_file());
+        s.apply_file_history(&changes, false).unwrap();
+        assert!(s.abs("单页.xml").fs_is_file() && !s.abs("单页").fs_exists() && !s.index.contains_key(&kid));
+        assert!(s.index[&lone].parent.is_none() && s.folder_of_note(&lone).is_none());
+        s.apply_file_history(&changes, true).unwrap();
+        assert!(s.abs("单页/单页.xml").fs_is_file() && s.abs("单页/新页.xml").fs_is_file() && !s.abs("单页.xml").fs_exists());
+        assert!(s.folder_of_note(&lone).is_some());
+    }
+
+    /// Undoing 新建子文档 restores the page's place and its links.
+    #[test]
+    fn undoing_a_child_page_puts_links_back() {
+        let lib = Lib::new("subdoc-undo");
+        let mut s = lib.open();
+        let other = s.create_from(&doc("其他")).unwrap();
+        let plan = s.create_from(&doc("方案")).unwrap();
+        s.save(&other, &linking("其他", &[(&plan, "方案")])).unwrap();
+        let journal = s.track_file_changes();
+        s.create_child(&plan, &doc("子页")).unwrap();
+        let changes = journal.take();
+        s.apply_file_history(&changes, false).unwrap();
+        assert!(s.abs("方案.xml").fs_is_file() && !s.abs("方案").fs_exists());
+        assert!(crate::vfs::read_to_string(s.abs("其他.xml")).unwrap().contains("href=\"方案.xml\""));
+        // Only documents get children: not 画板, not folders without a 正文.
+        let f = s.create_folder("夹", None).unwrap();
+        assert!(!s.can_have_children(&f) && s.create_child(&f, &doc("x")).is_err());
+        let board = s.create_board_in("板", &crate::whiteboard::Board::default(), None).unwrap();
+        assert!(!s.can_have_children(&board));
+    }
+
+    /// Renaming a page with children renames its folder and its file
+    /// together, either way round, and a numbered name goes back (#358 aside).
+    #[test]
+    fn a_page_with_children_keeps_one_name() {
+        let lib = Lib::new("subdoc-rename");
+        let mut s = lib.open();
+        let plan = s.create_from(&doc("方案")).unwrap();
+        let child = s.create_child(&plan, &doc("子页")).unwrap();
+        let folder = s.folder_of_note(&plan).unwrap();
+        let ref_ = s.create_from(&linking("引用", &[(&child, "子页"), (&plan, "方案")])).unwrap();
+        // From the editor: the title is saved.
+        s.save(&plan, &doc("计划")).unwrap();
+        assert!(s.abs("计划/计划.xml").fs_is_file() && s.abs("计划/子页.xml").fs_is_file() && !s.abs("方案").fs_exists());
+        assert_eq!(s.folder_of_note(&plan).as_deref(), Some(folder.as_str()));
+        let text = crate::vfs::read_to_string(s.path(&ref_)).unwrap();
+        assert!(text.contains("href=\"计划/子页.xml\"") && text.contains("href=\"计划/计划.xml\""), "{text}");
+        // From the sidebar, on the folder or on the page.
+        s.rename(&folder, "大计").unwrap();
+        assert!(s.abs("大计/大计.xml").fs_is_file());
+        assert_eq!(s.load(&plan).unwrap().title.text, "大计");
+        let journal = s.track_file_changes();
+        s.rename(&plan, "方略").unwrap();
+        let changes = journal.take();
+        assert!(s.abs("方略/方略.xml").fs_is_file());
+        s.apply_file_history(&changes, false).unwrap();
+        assert!(s.abs("大计/大计.xml").fs_is_file() && !s.abs("方略").fs_exists());
+        assert_eq!(s.note_of(&folder).as_deref(), Some(plan.as_str()));
+        // A taken name is numbered, and comes back when it is free again.
+        let clash = s.create_folder("甲", None).unwrap();
+        s.rename(&plan, "甲").unwrap();
+        assert!(s.abs("甲 2/甲 2.xml").fs_is_file());
+        s.delete(&clash, None).unwrap();
+        s.rename(&plan, "乙").unwrap();
+        s.rename(&plan, "甲").unwrap();
+        assert!(s.abs("甲/甲.xml").fs_is_file(), "back to the plain name");
+        // A child page holding the new name inside makes way.
+        let _kid = s.create_child(&plan, &doc("丙")).unwrap();
+        s.rename(&plan, "丙").unwrap();
+        assert!(s.abs("丙/丙.xml").fs_is_file() && s.abs("丙/丙 2.xml").fs_is_file());
+        assert_eq!(s.note_of(&folder).as_deref(), Some(plan.as_str()));
+    }
+
+    /// Moving or deleting a page with children takes its folder along; its
+    /// last child going leaves the folder as it is (it still reads as the page).
+    #[test]
+    fn a_page_with_children_moves_and_goes_whole() {
+        let lib = Lib::new("subdoc-move");
+        let mut s = lib.open();
+        let plan = s.create_from(&doc("方案")).unwrap();
+        let child = s.create_child(&plan, &doc("子页")).unwrap();
+        let folder = s.folder_of_note(&plan).unwrap();
+        let dest = s.create_folder("归档", None).unwrap();
+        s.set_parent(&folder, Some(&dest)).unwrap();
+        assert!(s.abs("归档/方案/方案.xml").fs_is_file() && s.abs("归档/方案/子页.xml").fs_is_file());
+        assert_eq!(s.note_of(&folder).as_deref(), Some(plan.as_str()));
+        // The last child moved out: the folder stays, still the page's.
+        s.set_parent(&child, Some(&dest)).unwrap();
+        assert!(s.abs("归档/方案/方案.xml").fs_is_file() && s.abs("归档/子页.xml").fs_is_file());
+        assert_eq!(s.note_of(&folder).as_deref(), Some(plan.as_str()));
+        s.delete(&folder, None).unwrap();
+        assert!(!s.abs("归档/方案").fs_exists());
+        s.list();
+        assert!(!s.index.contains_key(&plan));
+    }
+
+    /// A library v0.1.11 moved to real folders reads its old child pages as
+    /// child pages again, and a hand-made `X/X.md` does too.
+    #[test]
+    fn migrated_and_hand_made_pages_have_children() {
+        let lib = Lib::new("subdoc-migrated");
+        let mut old = Old::new(&lib, 1);
+        let p = old.doc("父", Meta::default());
+        let a = old.doc("子一", Meta { parent: Some(p.clone()), created: 100, ..Default::default() });
+        old.write();
+        let mut s = lib.migrated();
+        let list = s.list();
+        let folder = list.iter().find(|e| e.note.as_deref() == Some(p.as_str())).expect("父 is its folder's 正文");
+        assert_eq!(folder.title, "父");
+        assert_eq!(s.index[&a].parent.as_deref(), Some(folder.id.as_str()));
+        crate::vfs::create_dir_all(lib.0.join("手写")).unwrap();
+        crate::vfs::write(lib.0.join("手写/手写.md"), "# 手写\n").unwrap();
+        crate::vfs::write(lib.0.join("手写/别的.md"), "x\n").unwrap();
+        // An XML 正文 wins over a Markdown one of the same name.
+        crate::vfs::create_dir_all(lib.0.join("双")).unwrap();
+        crate::vfs::write(lib.0.join("双/双.md"), "x\n").unwrap();
+        crate::vfs::write(lib.0.join("双/双.xml"), docxml::serialize(&doc("双"))).unwrap();
+        let list = s.list();
+        let by_rel = |rel: &str| list.iter().find(|e| e.meta.rel == rel).unwrap();
+        assert_eq!(by_rel("手写").note.as_deref(), Some(by_rel("手写/手写.md").id.as_str()));
+        assert_eq!(by_rel("双").note.as_deref(), Some(by_rel("双/双.xml").id.as_str()));
+        // A 画板 is never a 正文.
+        crate::vfs::create_dir_all(lib.0.join("板")).unwrap();
+        crate::vfs::write(lib.0.join("板/板.excalidraw"), crate::whiteboard::Board::default().file_json()).unwrap();
+        assert!(s.list().iter().find(|e| e.meta.rel == "板").unwrap().note.is_none());
     }
 
     /// What is done in the Finder shows: new folders and files, removed ones,

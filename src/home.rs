@@ -449,7 +449,7 @@ fn weight3(mut d: Div) -> Div {
 
 /// A document's icon: its emoji, or the monochrome page glyph.
 fn entry_icon(e: &Entry) -> AnyElement {
-    if e.meta.folder.is_some() { return icon("folder", 22., Theme::icon()).mr(px(13.)).into_any_element(); }
+    if e.meta.folder.is_some() && e.note.is_none() { return icon("folder", 22., Theme::icon()).mr(px(13.)).into_any_element(); }
     match &e.icon {
         _ if e.meta.named_by_file() => crate::search::doc_icon_named(crate::search::file_glyph(&e.meta)).mr(px(12.)).into_any_element(),
         Some(em) => div().size(px(24.)).mr(px(12.)).flex_none().flex().items_center().justify_center().text_size(px(18.)).child(em.clone()).into_any_element(),
@@ -486,7 +486,9 @@ impl Workspace {
     /// One level of the tree as 主页 shows it (a folder's page uses it too).
     pub(crate) fn level_entries(&self, parent: Option<&str>) -> Vec<Entry> {
         // Folders under 本机文件 aren't the library's: not on its top level.
-        self.sorted_entries(self.entries.iter().filter(|e| e.meta.parent.as_deref() == parent && !(parent.is_none() && e.meta.mounted())).cloned().collect())
+        // A folder's 正文 is the folder's own card, not one inside it.
+        let notes: std::collections::HashSet<&str> = self.entries.iter().filter_map(|e| e.note.as_deref()).collect();
+        self.sorted_entries(self.entries.iter().filter(|e| e.meta.parent.as_deref() == parent && !(parent.is_none() && e.meta.mounted()) && !notes.contains(e.id.as_str())).cloned().collect())
     }
 
     pub(crate) fn prepare_manual_order(&mut self, cx: &mut Context<Self>) -> bool {
@@ -536,7 +538,9 @@ impl Workspace {
         // A child-page list shows the other pages in the document's folder, as in
         // the open document (`sync_sub_pages`).
         let tree = crate::tree::Tree::new(&self.entries);
-        let children: Vec<&Entry> = tree.children(e.meta.parent.as_deref()).iter().copied().filter(|p| p.id != e.id).collect();
+        // A document with children (a folder's 正文) lists them.
+        let level = if e.note.is_some() { Some(e.id.as_str()) } else { e.meta.parent.as_deref() };
+        let children: Vec<&Entry> = tree.children(level).iter().copied().filter(|p| p.id != e.id).collect();
         let mut full_stamp = rustc_hash::FxHasher::default();
         e.meta.modified.hash(&mut full_stamp);
         file_time.hash(&mut full_stamp);
@@ -561,7 +565,7 @@ impl Workspace {
         }
         let mut budget = 32;
         let mut eqnos = HashMap::new();
-        let doc = self.store.load(&e.id);
+        let doc = self.store.load(e.note.as_deref().unwrap_or(&e.id));
         let loaded = doc.as_ref().map(|doc| {
             let numbers = crate::editor::equation_numbers(doc);
             thumb_blocks(&doc.blocks, &mut budget, 0, &numbers, &mut eqnos)
@@ -902,7 +906,7 @@ impl Workspace {
         let main_w = f32::from(window.viewport_size().width) - if self.sidebar_open { self.sidebar_w(window) } else { 0. };
         let avail = (main_w - 48.).max(1.);
         let entries = entries.to_vec();
-        let mixed = entries.iter().any(|e| e.meta.folder.is_some());
+        let mixed = entries.iter().any(|e| e.meta.folder.is_some() && e.note.is_none());
         // Folders spill past their cell (shadow, tab, the front flaring open), so
         // a level holding them gets more air between cells.
         let gap = if mixed { 24. } else { 16. };
@@ -921,7 +925,8 @@ impl Workspace {
                 div().w_full().h(px(card_h + gap)).px(px(24.)).pb(px(gap))
                     .grid().grid_cols(n as u16).gap(px(gap))
                     .children(entries[start..end].iter().map(|e| {
-                        if e.meta.folder.is_some() { workspace.render_folder_card(e, col_w, card_h, window, cx) }
+                        // A folder with a 正文 is a document with child pages: a document's card (#357).
+                        if e.meta.folder.is_some() && e.note.is_none() { workspace.render_folder_card(e, col_w, card_h, window, cx) }
                         else if mixed { div().w_full().min_w_0().h(px(card_h)).flex().flex_col().justify_end()
                             .child(workspace.render_home_card(e, doc_h, cx)).into_any_element() }
                         else { workspace.render_home_card(e, card_h, cx) }

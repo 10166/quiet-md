@@ -677,6 +677,7 @@ impl Workspace {
     pub(crate) fn sort(&mut self) {
         self.reapply_pending_tree_moves();
         self.entries.sort_by(|a, b| b.meta.modified.cmp(&a.meta.modified).then_with(|| a.id.cmp(&b.id)));
+        self.sync_note_rows();
     }
 
     pub fn query(&self, cx: &App) -> String {
@@ -696,6 +697,8 @@ impl Workspace {
         // 阅读位置: remember where the document being left was, before the
         // editor is swapped out.
         self.remember_scroll(cx);
+        // A folder with a 正文 opens as that document (#357).
+        if let Some(note) = self.entries.iter().find(|e| e.id == id).and_then(|e| e.note.clone()) { return self.try_open(&note, window, cx); }
         if self.entries.iter().any(|e| e.id == id && e.meta.folder.is_some()) { return self.open_folder(id, window, cx); }
         if self.view != View::Doc {
             self.view = View::Doc;
@@ -845,7 +848,8 @@ impl Workspace {
         self.row_menu = None;
         self.doc_menu = false;
         self.doc_sub = None;
-        self.confirm = Some(Confirm::Delete { ids: vec![id.to_string()], batch: false });
+        // A document with children goes with them, folder and all.
+        self.confirm = Some(Confirm::Delete { ids: vec![self.row_of(id)], batch: false });
         cx.notify();
     }
 
@@ -1058,6 +1062,8 @@ impl Workspace {
         let refocus = r.field.read(cx).is_focused(window);
         let title = r.field.read(cx).text.trim().to_string();
         let old = self.entries.iter().find(|e| e.id == r.id).map(|e| e.title.trim().to_string());
+        // A document with children is renamed through its 正文, which renames the folder too.
+        let r = Rename { id: self.note_or(&r.id), ..r };
         if commit && old.is_some_and(|o| o != title) {
             if let Some(peer) = self.document_peers(&r.id, window, cx).first() {
                 peer.update(cx, |e, cx| e.set_title(&title, cx));
@@ -1070,6 +1076,8 @@ impl Workspace {
                             e.title = title.clone();
                             e.meta = meta;
                         }
+                        // The folder of a 正文 was renamed with it: its path, and those inside, changed.
+                        if self.entries.iter().any(|e| e.note.as_deref() == Some(r.id.as_str())) { self.entries = self.store.list(); }
                         self.sort();
                         if self.current.as_deref() == Some(r.id.as_str()) && let Some(ed) = &self.editor {
                             ed.update(cx, |e, cx| e.receive_file_title(&title, cx));
@@ -1409,6 +1417,8 @@ impl Workspace {
         let docs = self
             .entries
             .iter()
+            // A folder with a 正文 is mentioned as that document (#357).
+            .filter(|e| e.note.is_none())
             .map(|e| crate::editor::links::DocRef { id: e.id.clone(), title: e.title.clone(), icon: e.icon.clone(), folder: e.meta.folder.is_some(), modified: e.meta.modified, opened: e.meta.opened })
             .collect();
         let backlinks = self
@@ -1742,6 +1752,7 @@ pub(crate) const HEADER_ACTIONS_H: f32 = 32.;
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_note_rows();
         // Clicks no longer take focus from the editor (see the root's mouse
         // down), so leaving the document hands it back to the window's keys.
         if self.view != View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).focus.is_focused(window)) { window.focus(&self.focus, cx); }
