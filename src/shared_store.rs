@@ -199,12 +199,12 @@ impl SharedStore {
     }
     pub fn restore(&mut self, id: &str) -> Result<bool> {
         let mut sh = self.0.borrow_mut();
-        let s = sh.ws.roots.iter_mut().filter_map(|r| r.store.as_mut()).find(|s| s.trashed(id)).ok_or_else(|| anyhow::anyhow!("回收站里没有这篇文档"))?;
+        let s = sh.ws.roots.iter_mut().filter_map(|r| r.store.as_mut()).find_map(|s| s.trashed(id).then_some(s)).ok_or_else(|| anyhow::anyhow!("回收站里没有这篇文档"))?;
         s.restore(id)
     }
     /// The root whose 回收站 holds `id`.
     pub fn trash_root(&self, id: &str) -> Option<String> {
-        self.0.borrow().ws.roots.iter().find(|r| r.store.as_ref().is_some_and(|s| s.trashed(id))).map(|r| r.key.clone())
+        self.0.borrow_mut().ws.roots.iter_mut().find_map(|r| r.store.as_mut().is_some_and(|s| s.trashed(id)).then(|| r.key.clone()))
     }
     pub fn set_width(&mut self, id: &str, width: PageWidth) -> Result<()> { self.on_res(id, |s| s.set_width(id, width)) }
     pub fn update_meta(&mut self, id: &str, f: impl FnOnce(&mut Meta)) -> Result<()> { self.on_res(id, |s| s.update_meta(id, f)) }
