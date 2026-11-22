@@ -221,7 +221,11 @@ impl Run {
         loop {
             if self.ws(&mut f)? { return Ok(()) }
             self.draw();
-            if Instant::now() > end { return Err(format!("timed out after {secs}s waiting for {what}")) }
+            if Instant::now() > end {
+                // What the window said went wrong, if it did.
+                let said = self.ws(|w, _, _| match &w.status { crate::app::SaveStatus::Failed(m) => format!(" ({m})"), _ => String::new() }).unwrap_or_default();
+                return Err(format!("timed out after {secs}s waiting for {what}{said}"))
+            }
             self.cx.background_executor().timer(Duration::from_millis(20)).await;
         }
     }
