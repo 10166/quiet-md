@@ -218,8 +218,8 @@ pub(crate) fn show_lang(lang: Lang) {
     apply(p);
 }
 
-/// The preferences: this computer's (应用级), the document theme and font
-/// the root in front's own (W21: they go with its folder).
+/// The preferences: this computer's (应用级), the document theme, font and
+/// 正文字号 the root in front's own (W21: they go with its folder).
 pub fn load() {
     let mut p = fdl_core::vfs::read(path()).ok().and_then(|b| serde_json::from_slice::<Preferences>(&b).ok()).unwrap_or_default();
     if let Some(root) = look_root() {
@@ -228,6 +228,7 @@ pub fn load() {
         p.theme = look.theme.unwrap_or(d.theme);
         p.feishu = look.feishu.unwrap_or(d.feishu);
         p.doc_family = look.doc_family.unwrap_or(d.doc_family);
+        p.doc_size = look.doc_size.unwrap_or(d.doc_size);
     }
     apply(p);
 }
@@ -390,9 +391,9 @@ pub(crate) fn save(p: &Preferences) -> anyhow::Result<()> {
     f.write_all(&serde_json::to_vec_pretty(p)?)?;
     f.sync_all()?;
     fdl_core::vfs::rename(tmp, path())?;
-    // The document theme and font are the root in front's (W21).
+    // The document theme, font and 正文字号 are the root in front's (W21).
     if let Some(root) = look_root() {
-        let look = crate::store::RootLook { theme: Some(p.theme.clone()), feishu: Some(p.feishu), doc_family: Some(p.doc_family.clone()) };
+        let look = crate::store::RootLook { theme: Some(p.theme.clone()), feishu: Some(p.feishu), doc_family: Some(p.doc_family.clone()), doc_size: Some(p.doc_size.clone()) };
         if crate::store::Store::root_look_at(&root) != look { crate::store::Store::save_root_look_at(&root, &look)?; }
     }
     apply(p.clone());
