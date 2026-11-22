@@ -25,6 +25,8 @@ const SAVE_MAX_DELAY: Duration = Duration::from_secs(2);
 
 actions!(workspace, [NewDoc, OpenFile, OpenFolder, ImportDoc, ImportFolder, ToggleSidebar, FocusSearch, FindInDoc, ReplaceInDoc, OpenSettings, OpenAbout, CheckForUpdates, GoHome, CloseWindow, Quit,
     ReplayOnboarding, HideApp, HideOthers, ShowAll, Minimize, Zoom, ToggleFullScreen]);
+// A confirmation dialog's keys, in its own key context: ↩ is the action button, Esc 取消.
+actions!(confirm, [ConfirmOk, ConfirmCancel]);
 
 /// The menu bar, in the interface language.
 pub fn set_menus(cx: &mut App) {
@@ -117,6 +119,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-f", FindInDoc, None),
         KeyBinding::new("cmd-shift-h", ReplaceInDoc, None),
         KeyBinding::new("cmd-q", Quit, None),
+        // The dialog takes focus while it is up, so ↩ never reaches the document.
+        KeyBinding::new("enter", ConfirmOk, Some("Confirm")),
+        KeyBinding::new("escape", ConfirmCancel, Some("Confirm")),
     ]);
     // macOS app and window keys. ⌥⌘H (隐藏其他) stays with the editor's
     // 应用上次的颜色, the Feishu shortcut; 隐藏其他 is in the menu. On Windows
@@ -333,6 +338,10 @@ pub struct Workspace {
     pub batch: Option<Vec<String>>,
     /// The open confirmation dialog.
     pub confirm: Option<Confirm>,
+    /// The dialog's focus while it is up, and where focus was before it
+    /// opened (given back when it closes); `None` while no dialog has it.
+    pub confirm_focus: FocusHandle,
+    pub confirm_return: Option<Option<WeakFocusHandle>>,
     /// The first-launch pages laid over the window again (⌘⌥⇧O, Settings › About).
     pub onboarding: Option<Entity<crate::onboarding::Onboarding>>,
     pub view: View,
@@ -594,6 +603,8 @@ impl Workspace {
             row_sub_bounds: Rc::new(Cell::new(None)),
             batch: None,
             confirm: None,
+            confirm_focus: cx.focus_handle(),
+            confirm_return: None,
             onboarding: None,
             view: View::Doc,
             home: Default::default(),
@@ -1766,6 +1777,7 @@ impl Render for Workspace {
         // Clicks no longer take focus from the editor (see the root's mouse
         // down), so leaving the document hands it back to the window's keys.
         if self.view != View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).focus.is_focused(window)) { window.focus(&self.focus, cx); }
+        self.sync_confirm_focus(window, cx);
         crate::editor::image::frame_drawn(window, cx);
         // a 数据表 file renamed or moved (the sidebar, 移动到): its view writes where the file now is
         if let (Some(id), Some(ed)) = (&self.current, &self.editor) && ed.read(cx).table_file && let Some(p) = self.store.file_path(id) { ed.update(cx, |e, cx| e.table_file_at(&p, cx)); }

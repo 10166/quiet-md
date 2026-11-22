@@ -94,7 +94,7 @@ fn random_kind(rng: &mut Rng) -> BlockKind {
         3 => BlockKind::Ordered { seq: None },
         4 => BlockKind::Todo { done: false },
         5 => BlockKind::Quote,
-        _ => BlockKind::Code { lang: "plaintext".into(), caption: None, wrap: false },
+        _ => BlockKind::Code { lang: "plaintext".into(), caption: None, wrap: false, show_code: false },
     }
 }
 

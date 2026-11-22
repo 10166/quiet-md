@@ -2,7 +2,7 @@
 //! Deleted pages wait in the library's `trash/` for 30 days; each row is a
 //! deleted page together with the child pages that went with it.
 
-use crate::app::{Confirm, Workspace};
+use crate::app::{Confirm, ConfirmCancel, ConfirmOk, Workspace};
 use crate::settings::display_title;
 use crate::search::doc_icon;
 use crate::store::{TRASH_DAYS, TrashEntry};
@@ -374,6 +374,64 @@ impl Workspace {
         }
     }
 
+    /// The action button, and ↩ while the dialog is up.
+    pub(crate) fn confirm_ok(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(c) = self.confirm.take() else { return };
+        match c {
+            Confirm::Delete { ids, batch } => {
+                if batch {
+                    self.batch = None;
+                }
+                self.delete_docs(&ids, window, cx);
+            }
+            Confirm::Restore(id) => self.restore_doc(&id, cx),
+            Confirm::Purge(id) => self.purge_doc(&id, cx),
+            Confirm::EmptyTrash => self.empty_trash(cx),
+            Confirm::RemoveUnused(files) => self.remove_unused_assets(files, window, cx),
+            Confirm::Refs { show, no_ask } => {
+                if no_ask {
+                    let mut s = self.store.settings();
+                    s.refs_hide_no_ask = true;
+                    let _ = self.store.save_settings(&s);
+                }
+                self.set_refs_hidden(!show, cx);
+            }
+            Confirm::SaveFailed => self.resolve_save_failed(true, window, cx),
+            Confirm::Migrate(_) => self.migrate_library(window, cx),
+            Confirm::RemoveRoot(key, _) => self.remove_root(&key, window, cx),
+            Confirm::Import { what, target } => self.import_dropped(what, target, window, cx),
+        }
+        cx.notify();
+    }
+
+    /// 取消 and Esc: close the dialog, and drop what was waiting on a save.
+    pub(crate) fn dismiss_confirm(&mut self, cx: &mut Context<Self>) {
+        self.confirm = None;
+        self.after_save = None;
+        cx.notify();
+    }
+
+    /// A dialog takes focus as it opens, so ↩ can't reach the document
+    /// beneath, and gives it back where it was once it closes (unless what
+    /// the dialog did moved it on).
+    pub(crate) fn sync_confirm_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match (self.confirm.is_some(), self.confirm_return.is_some()) {
+            (true, false) => {
+                self.confirm_return = Some(window.focused(cx).map(|f| f.downgrade()));
+                window.focus(&self.confirm_focus, cx);
+            }
+            (false, true) => {
+                let back = self.confirm_return.take().flatten().and_then(|f| f.upgrade());
+                if !self.confirm_focus.is_focused(window) { return }
+                match back.or_else(|| self.editor.as_ref().map(|e| e.read(cx).focus.clone())) {
+                    Some(f) => window.focus(&f, cx),
+                    None => window.focus(&self.focus, cx),
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// The confirmation dialog: a modal (white, radius 16), a 15pt
     /// semibold title, one line of 13pt body, 取消 and the action button on
     /// the right.
@@ -473,7 +531,12 @@ impl Workspace {
         };
         let ok = primary_button("confirm-ok", action);
         let ok = if danger { ok.bg(Theme::danger()).hover(|s| s.bg(theme::c(craft::R600))).active(|s| s.bg(theme::c(craft::R700))) } else { ok };
+        // The dialog holds focus while it is up (`sync_confirm_focus`): ↩ and Esc are its own keys.
         let dialog = dialog("confirm-dialog")
+            .key_context("Confirm")
+            .track_focus(&self.confirm_focus)
+            .on_action(cx.listener(|w, _: &ConfirmOk, window, cx| w.confirm_ok(window, cx)))
+            .on_action(cx.listener(|w, _: &ConfirmCancel, _, cx| w.dismiss_confirm(cx)))
             .w(px(if matches!(c, Confirm::SaveFailed | Confirm::Migrate(_)) { 520. } else { 400. }))
             .px(px(24.))
             .pt(px(20.))
@@ -507,9 +570,7 @@ impl Workspace {
                     .child(secondary_button("confirm-cancel", if matches!(c, Confirm::Migrate(_)) { crate::settings::tr("稍后", "Later") } else { crate::settings::text("取消") }).on_click(cx.listener(|w, _, _, cx| {
                         // 稍后 asks again in a week, not at every launch.
                         if matches!(w.confirm, Some(Confirm::Migrate(_))) { crate::settings::migrate_later(); }
-                        w.confirm = None;
-                        w.after_save = None;
-                        cx.notify();
+                        w.dismiss_confirm(cx);
                     })))
                     .when(matches!(c, Confirm::SaveFailed), |d| {
                         d.child(secondary_button("confirm-save-copy", crate::settings::tr("另存副本", "Save a copy")).on_click(cx.listener(|w, _, window, cx| {
@@ -520,34 +581,7 @@ impl Workspace {
                             w.resolve_save_failed(false, window, cx);
                         })))
                     })
-                    .child(ok.on_click(cx.listener(|w, _, window, cx| {
-                        let Some(c) = w.confirm.take() else { return };
-                        match c {
-                            Confirm::Delete { ids, batch } => {
-                                if batch {
-                                    w.batch = None;
-                                }
-                                w.delete_docs(&ids, window, cx);
-                            }
-                            Confirm::Restore(id) => w.restore_doc(&id, cx),
-                            Confirm::Purge(id) => w.purge_doc(&id, cx),
-                            Confirm::EmptyTrash => w.empty_trash(cx),
-                            Confirm::RemoveUnused(files) => w.remove_unused_assets(files, window, cx),
-                            Confirm::Refs { show, no_ask } => {
-                                if no_ask {
-                                    let mut s = w.store.settings();
-                                    s.refs_hide_no_ask = true;
-                                    let _ = w.store.save_settings(&s);
-                                }
-                                w.set_refs_hidden(!show, cx);
-                            }
-                            Confirm::SaveFailed => w.resolve_save_failed(true, window, cx),
-                            Confirm::Migrate(_) => w.migrate_library(window, cx),
-                            Confirm::RemoveRoot(key, _) => w.remove_root(&key, window, cx),
-                            Confirm::Import { what, target } => w.import_dropped(what, target, window, cx),
-                        }
-                        cx.notify();
-                    }))),
+                    .child(ok.on_click(cx.listener(|w, _, window, cx| w.confirm_ok(window, cx)))),
             );
         Some(
             deferred(

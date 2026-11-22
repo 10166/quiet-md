@@ -222,7 +222,7 @@ fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote:
             return node.relative().p(px(bs::INSET * s)).rounded(px(bs::CALLOUT_RADIUS * s)).border(px(s)).border_color(bs::border(border.as_ref().map(|c| c.0.as_str()))).bg(bs::fill(bg.as_ref().map(|c| c.0.as_str())))
                 .child(div().flex().gap(px(bs::ICON_GAP * s)).child(div().size(px(bs::ICON * s)).mt(px((first_line - bs::ICON) / 2. * s)).text_size(px(20. * s)).line_height(px(22. * s)).flex_none().child(emoji.clone())).child(body)).into_any_element();
         }
-        BlockKind::Code { lang, caption, wrap } => {
+        BlockKind::Code { lang, caption, wrap, .. } => {
             node = node.rounded(px(bs::RADIUS * s)).border(px(s)).border_color(Theme::line_border()).bg(bs::code_surface()).font_family(theme::MONO_FONT)
                 .child(div().h(px(bs::CODE_HEADER * s)).pl(px(28. * s)).pr(px(8. * s)).rounded_t(px((bs::RADIUS - 1.) * s)).bg(bs::code_header()).flex().items_center().font_family(theme::ui_family()).text_size(px(13. * s)).text_color(Theme::text_caption()).child(caption.clone().unwrap_or_else(|| crate::settings::text("代码块").into())));
             let spans = crate::highlight::spans(lang, &b.text.text);

@@ -221,6 +221,9 @@ pub struct RootLook {
     pub feishu: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doc_family: Option<String>,
+    /// 正文字号 ("" is the theme's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc_size: Option<String>,
 }
 
 /// Window-level UI state: `.quiet/settings.json`, except the window sizes,
@@ -798,7 +801,7 @@ impl Store {
         #[derive(Deserialize, Default)]
         struct Old { #[serde(default)] theme: Option<String>, #[serde(default)] feishu: Option<bool>, #[serde(default)] doc_family: Option<String> }
         let o: Old = reread(&internal.join("preferences.json")).unwrap_or_default();
-        RootLook { theme: o.theme, feishu: o.feishu, doc_family: o.doc_family }
+        RootLook { theme: o.theme, feishu: o.feishu, doc_family: o.doc_family, doc_size: None }
     }
 
     pub fn save_root_look_at(root: &Path, look: &RootLook) -> Result<()> {
@@ -4722,6 +4725,20 @@ mod tests {
         let lib = Lib::new("sweep-none");
         page_at(&lib, "note.md", "no pictures here");
         assert!(spare_assets(&lib, vec![]).is_empty());
+    }
+
+    /// 正文字号 goes with the root like its theme and font; a look saved
+    /// before it existed reads as the theme's size.
+    #[test]
+    fn root_look_keeps_doc_size() {
+        let lib = Lib::new("look");
+        lib.migrated();
+        let old = RootLook { theme: Some("craft".into()), feishu: Some(true), doc_family: Some("Songti SC".into()), doc_size: None };
+        Store::save_root_look_at(&lib.0, &old).unwrap();
+        assert_eq!(Store::root_look_at(&lib.0).doc_size, None);
+        let look = RootLook { doc_size: Some("large".into()), ..old };
+        Store::save_root_look_at(&lib.0, &look).unwrap();
+        assert_eq!(Store::root_look_at(&lib.0), look);
     }
 
 }

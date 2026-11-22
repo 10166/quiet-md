@@ -2851,7 +2851,7 @@ impl Core {
         let in_callout = self.parent_kind_is(id, |k| matches!(k, BlockKind::Callout { .. }));
         let code = |lang: &str| -> Option<BlockKind> {
             (!lang.contains(char::is_whitespace) && !in_callout)
-                .then(|| BlockKind::Code { lang: crate::lang::resolve(lang).into(), caption: None, wrap: false })
+                .then(|| BlockKind::Code { lang: crate::lang::resolve(lang).into(), caption: None, wrap: false, show_code: false })
         };
         if enter {
             return prefix.strip_prefix("```").and_then(code);
@@ -3621,7 +3621,7 @@ mod tests {
     fn code_keeps_equations_as_source_and_never_holds_children() {
         let mut c = doc("<title>T</title><p>e <latex>x^2</latex><ul><li>kid</li></ul></p><p>b <b>bold</b></p>");
         let p = id(&c, 1);
-        c.turn_into(&[p], BlockKind::Code { lang: "plaintext".into(), caption: None, wrap: false });
+        c.turn_into(&[p], BlockKind::Code { lang: "plaintext".into(), caption: None, wrap: false, show_code: false });
         assert!(xml(&c).starts_with("<title>T</title>\n<pre lang=\"plaintext\"><code>e x^2</code></pre>\n<ul>"), "{}", xml(&c));
         // Deleting into code merges the tail as plain text, its children after the code block.
         let mut c = doc("<title>T</title><pre lang=\"plaintext\"><code>c</code></pre><p>b <b>bold</b><ul><li>kid</li></ul></p>");
