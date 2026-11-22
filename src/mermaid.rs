@@ -89,6 +89,7 @@ struct State {
     running: bool,
     /// The web view could not start (no WebView2 runtime): every block says so.
     broken: Option<String>,
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
     pruned: bool,
 }
 
@@ -184,7 +185,7 @@ async fn work(cx: &mut AsyncApp) {
                 cx.background_executor().timer(std::time::Duration::from_millis(50)).await;
             }
             if STATE.with(|s| s.borrow().queue.is_empty()) {
-                drop(view.take());
+                view = None;
             }
             continue;
         };
