@@ -509,4 +509,4 @@ Git 依赖的 1a 和 1b 都是共用的，Git 部分在 1d 进行的同时就可
 | 数据表冲突 | 表格上方横幅，逐个查看，一键采用对方的值 | 不另存整表副本 |
 | 设置 | 不用管 | 根级设置跟着根走；应用级设置换电脑时用一次导出 / 导入 |
 
-需要用户（我们）做的准备：在 GitHub 上注册 Quiet.md 的 GitHub App（2.2）；D12 的三项实测；Windows iCloud 客户端实测（1.2、1.3）。
+需要用户（我们）做的准备：在 GitHub 上注册 Quiet.md 的 GitHub App（2.2）；D12 的三项实测；Windows iCloud 客户端实测（1.2、1.3）。前两项的逐步说明见 [sync-setup.md](sync-setup.md)。
