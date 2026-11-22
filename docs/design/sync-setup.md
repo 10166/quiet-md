@@ -59,24 +59,8 @@ GitHub 同步用它来实现「登录 GitHub」：用户在浏览器里确认一
 
 ### 准备（一次）
 
-1. 开发者后台（developer.apple.com → Certificates, Identifiers & Profiles → Identifiers）：
-   - 新建 iCloud Container：`iCloud.com.s1dashu.quietmd`；
-   - 给 iOS 的 App ID 打开 iCloud 能力，勾 iCloud Documents，选上这个容器。
-2. 一个装了这个容器权限的**最小 iOS 测试 app**。移动端会话的验证计划第 3 天就是做这个（`mobile.md`），直接用它就行。它的 Info.plist 里要有：
-
-   ```xml
-   <key>NSUbiquitousContainers</key>
-   <dict>
-     <key>iCloud.com.s1dashu.quietmd</key>
-     <dict>
-       <key>NSUbiquitousContainerIsDocumentScopePublic</key><true/>
-       <key>NSUbiquitousContainerName</key><string>Quiet.md</string>
-       <key>NSUbiquitousContainerSupportedFolderLevels</key><string>Any</string>
-     </dict>
-   </dict>
-   ```
-
-   app 里有一个按钮：往容器的 `Documents/` 写一个 `from-ipad.txt`，内容是当前时间。
+1. 开发者后台建 iCloud 容器 `iCloud.com.s1dashu.quietmd`、给 iOS App ID 打开 iCloud Documents，并在 iPad 上装好**把默认库放在 iCloud 容器里的 Quiet.md iOS 版**：步骤见移动端的真机清单 `docs/design/mobile-device.md`（分支 `claude/ios-device-checklist`）第一节，两份清单写的是同一件事，做一次就行。
+2. 下面"在 iPad 上新建文档"都是在 iPad 上的 Quiet.md 里做；Quiet.md 只显示 `.xml` 和 `.md`，所以 Mac 这边写的测试文件用 `.md`。
 3. iPad（或 iPhone）和 Mac 登录**同一个 Apple ID**，都打开了 iCloud 云盘。
 4. Mac 上**不要装任何带这个容器权限的 app**（现在发布的 Quiet.md 是 Developer ID 签名、没有 iCloud 权限，正好）。
 
@@ -88,13 +72,13 @@ C=~/Library/Mobile\ Documents/iCloud~com~s1dashu~quietmd/Documents
 
 ### 实测 1：容器会不会同步到一台"没装带权限 app"的 Mac 上，并且双向同步
 
-1. 在 iPad 上点测试 app 的按钮，写入 `from-ipad.txt`。
+1. 在 iPad 上的 Quiet.md 里新建一篇文档，标题写 `from-ipad`，随便写一行字。
 2. 在 Mac 上等最多 5 分钟，看两处：
-   - 访达左栏 iCloud 云盘里，是否出现 `Quiet.md` 文件夹，里面有 `from-ipad.txt`；
-   - 终端里 `ls "$C"` 是否列出 `from-ipad.txt`。
-3. 在 Mac 上写一个文件：`date > "$C/from-mac.txt"`。
-4. 在 iPad 的"文件"App → iCloud 云盘 → Quiet.md 里，等最多 5 分钟，看是否出现 `from-mac.txt`，内容对不对。
-5. 重启 Mac，再从 iPad 写一次（按钮会覆盖 `from-ipad.txt`），看 Mac 上的内容是否更新。
+   - 访达左栏 iCloud 云盘里，是否出现 `Quiet.md` 文件夹，里面有 `from-ipad.xml`；
+   - 终端里 `ls "$C"` 是否列出 `from-ipad.xml`。
+3. 在 Mac 上写一个文件：`echo "# from-mac" > "$C/from-mac.md"`。
+4. 在 iPad 的 Quiet.md 里（也可以看"文件"App → iCloud 云盘 → Quiet.md），等最多 5 分钟，看是否出现 `from-mac` 这篇文档，内容对不对。
+5. 重启 Mac，在 iPad 上再改一下 `from-ipad`，看 Mac 上 `cat "$C/from-ipad.xml"` 的内容是否更新。
 
 **通过**：第 2、4、5 步都在 5 分钟内看到。**不通过**：Mac 上一直没有这个文件夹，或者只能单向同步。
 
@@ -119,22 +103,22 @@ C=~/Library/Mobile\ Documents/iCloud~com~s1dashu~quietmd/Documents
    for x in v { print(" -", x.localizedNameOfSavingComputer ?? "?", x.modificationDate ?? Date()) }
    ```
 
-2. Mac 上：`swift ~/conflicts.swift "$C/same.txt" "Mac 第一版"`，等 iPad 的"文件"App 里出现 `same.txt`。
+2. Mac 上：`swift ~/conflicts.swift "$C/same.md" "Mac 第一版"`，等 iPad 的 Quiet.md 里出现 `same` 这篇文档。
 3. **Mac 断网**（关掉 Wi-Fi）。
-4. iPad 上用"文件"App 打开 `same.txt`，随便改一下保存（或者让测试 app 往 `same.txt` 写一次）。
-5. Mac 上（仍然断网）：`swift ~/conflicts.swift "$C/same.txt" "Mac 断网时改的"`。
+4. iPad 上在 Quiet.md 里打开 `same`，随便改一句（等自动保存）。
+5. Mac 上（仍然断网）：`swift ~/conflicts.swift "$C/same.md" "Mac 断网时改的"`。
 6. Mac 重新联网，等 2–5 分钟，然后：
-   - `ls "$C"`：看有没有出现 `same 2.txt`；
-   - `swift ~/conflicts.swift "$C/same.txt"`：看"未解决的冲突版本"是几。
+   - `ls "$C"`：看有没有出现 `same 2.md`；
+   - `swift ~/conflicts.swift "$C/same.md"`：看"未解决的冲突版本"是几。
 
-**通过**：没有 `same 2.txt`，并且冲突版本数 ≥ 1（列出来的设备名是 iPad）。**部分通过**：出现了 `same 2.txt`，冲突版本数是 0。这说明这个路径上 iCloud 不按文件协调处理冲突，我们得走 1.3 的兜底规则（按文件名识别副本），方案仍可行，但要告诉同步会话。**不通过**：脚本写入报错。
+**通过**：没有 `same 2.md`，并且冲突版本数 ≥ 1（列出来的设备名是 iPad）。**部分通过**：出现了 `same 2.md`，冲突版本数是 0。这说明这个路径上 iCloud 不按文件协调处理冲突，我们得走 1.3 的兜底规则（按文件名识别副本），方案仍可行，但要告诉同步会话。**不通过**：脚本写入报错。
 
 ### 实测 3：打开"优化 Mac 存储"后，容器里的文件会不会变成占位
 
 1. 系统设置 → 你的名字 → iCloud → iCloud 云盘 → 打开 **优化 Mac 存储**。
-2. 手动把一个文件清出本地：`brctl evict "$C/from-ipad.txt"`（不想等系统自动清理）。
-3. 看它是不是变成了占位：`ls -lO "$C"`，`from-ipad.txt` 那一行的标志里应有 `dataless`；或者在访达里看，文件名旁边有云朵图标。
-4. 读一次：`cat "$C/from-ipad.txt"`。应该会停顿一下（在下载），然后正常输出内容；再 `ls -lO`，`dataless` 消失。
+2. 手动把一个文件清出本地：`brctl evict "$C/from-ipad.xml"`（不想等系统自动清理）。
+3. 看它是不是变成了占位：`ls -lO "$C"`，`from-ipad.xml` 那一行的标志里应有 `dataless`；或者在访达里看，文件名旁边有云朵图标。
+4. 读一次：`cat "$C/from-ipad.xml"`。应该会停顿一下（在下载），然后正常输出内容；再 `ls -lO`，`dataless` 消失。
 5. 测完可以关掉"优化 Mac 存储"。
 
 **通过**：第 3 步看到占位，第 4 步能读出来。这说明容器里的文件和 iCloud 云盘其他地方一样会被清出本地，sync.md 1.2 的处理（读之前查下载状态、放后台读）同样适用。第 3 步就没变成占位也记下来，不影响 D12，只说明这里不会出现占位。
