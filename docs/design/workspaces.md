@@ -91,6 +91,8 @@ Obsidian Vault      ← 用户打开的 Obsidian 库
 - 根级：每个文件夹可以有自己的外观（比如工作笔记一种、读书笔记一种），换电脑跟着走；代价是要在每个根的 `.quiet/themes/` 存一份自定义主题，跨根切换时外观会变。
 - 折中：应用级为默认，以后加「这个文件夹用自己的主题」的覆盖选项，存在根的 `.quiet/settings.json`。
 
+**根级设置怎么存**（和 sync.md 对齐）：不能是各设备都去改写的一个 `.quiet/settings.json`，否则两台设备各改一项，同步盘就会生成 `settings 2.json`，和 `index.json` 的老问题一样。FORMAT 5（sync 1a）里根级设置放进设备元数据的保留条目：`.quiet/meta/<设备id>.json` 的 `items` 里加 `"_root": { "history_limit": [值, 时间戳], … }`，逐字段后写者胜，和置顶、星标走同一套合并。旧库的 `.quiet/settings.json` 在 FORMAT 4 → 5 升级时转进去，原件留给旧版本。第一步（FORMAT 4）仍读写 `.quiet/settings.json`。将来如果主题这类设置成了根级，带文件的（`themes/*.css`）作为普通文件放 `.quiet/themes/`，按内容命名、只增不改。
+
 **升级时的迁移**：新版本第一次启动，`quiet-md/settings/` 还不存在时，从旧文档库的 `.quiet/` **复制**应用级的部分过来（`preferences.json`、`shortcuts.json`、`themes/`、`emoji.json`，以及 `settings.json` 里的应用级字段）。是复制，不是搬：旧版本还要读原来那份，降级不会丢设置。根级的部分本来就在库里，不用动。
 
 **代码**：`Store::internal_dir()` 这组静态函数拆开：应用级用新的 `settings_dir()`（`quiet-md/settings/`，和根无关）；根级的读写走各自 `Store` 的 `.quiet/`。`Store::settings()` 拆成应用级的 `AppSettings` 和根级的 `RootSettings`。
