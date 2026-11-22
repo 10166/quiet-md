@@ -778,6 +778,12 @@ SOFTWARE.
 
 rough.js, hachure-fill, points-on-curve, points-on-path, path-data-parser, perfect-freehand and nanoid use the same MIT terms. Copyright holders are listed in the table.
 
+## Bundled JavaScript
+
+| Asset | License |
+|---|---|
+| `assets/mermaid/mermaid.min.js.zlib` (Mermaid 11.17.2, `dist/mermaid.min.js` from the npm package, zlib-compressed; macOS and Windows builds only) | MIT (2014-2022 Knut Sveidqvist). See the adjacent `LICENSE`. Unmodified. The bundle includes its npm dependencies (among them d3, dagre-d3-es, cytoscape, KaTeX, marked, roughjs, langium and chevrotain, and DOMPurify) under MIT, ISC, BSD-3-Clause and Apache-2.0 terms, DOMPurify under Apache-2.0 or MPL-2.0; their license comments stay in the file. It runs only in an off-screen system web view to draw diagrams (src/mermaid.rs). |
+
 ## Windows runtime
 
 The Windows installer includes an unmodified Microsoft Visual C++ Runtime, `vcruntime140.dll`, copied from the Visual Studio x64 Redistributable directory. Microsoft's redistribution terms govern this DLL separately from Quiet.md's MIT license. The source repository does not contain the binary. See [Visual Studio 2022 Redistribution](https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution).

@@ -140,6 +140,7 @@ Whiteboard and history modules in core:
 | `theme.rs` | `craft` scale, semantic `Theme::*` colors, named display colors, `shadow_*`, type scale and note panel dimensions |
 | `ui.rs` / `input.rs` | Shared menu shells and rows, white pill buttons, hints, toasts and single-line input |
 | `highlight.rs` | Code highlighting |
+| `mermaid.rs` | Mermaid code blocks drawn as diagrams: bundled mermaid.js in an off-screen web view (macOS, Windows), SVG cached by source and theme |
 | `assets.rs` | Embedded icons, fonts and cover gallery |
 | `fonts.rs` / `font_classes.rs` / `font_downloads.rs` | Installed families for the font settings and what each is (黑体, 宋体 …, scripts covered: read from the font files); fonts fetched on demand (the board's Xiaolai, downloadable document fonts). See [Downloadable fonts](FONTS.md). |
 | `devtools.rs` | Script driver compiled with `--features devtools`. See tools/harness/README.md. |
