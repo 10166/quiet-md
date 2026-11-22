@@ -537,7 +537,7 @@ impl Workspace {
         .detach();
         let settings = store.settings();
         let sidebar_width = settings.sidebar_width.unwrap_or(theme::SIDEBAR_WIDTH);
-        let history_limit = settings.history_limit();
+        let history_limit = store.history_limit();
         let mut ws = Workspace {
             quick_note: quick,
             shortcut_recording: None,

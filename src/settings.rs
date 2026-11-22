@@ -247,7 +247,7 @@ pub(crate) fn root_switched(cx: &mut App) {
     themes::load(&now.theme_id(), themes::all_loaded(), || cx.text_system().all_font_names());
     check_fonts(cx);
     for w in cx.windows() {
-        if let Some(h) = w.downcast::<Workspace>() { let _ = h.update(cx, |ws, _, cx| refresh_all(ws, cx)); }
+        if let Some(h) = w.downcast::<Workspace>() { let _ = h.update(cx, |ws, _, cx| { ws.history_limit = ws.store.history_limit(); refresh_all(ws, cx) }); }
     }
 }
 static THEMES_DIR: std::sync::Mutex<std::path::PathBuf> = std::sync::Mutex::new(std::path::PathBuf::new());
@@ -1642,10 +1642,8 @@ impl Workspace {
     /// 版本历史: the retention count is stored in the library, so every
     /// window sees it; the cached copy only avoids reading a file per frame.
     pub(crate) fn change_history_limit(&mut self, delta: i32, window: &mut Window, cx: &mut Context<Self>) {
-        let mut s = self.store.settings();
-        let next = (s.history_limit() as i32 + delta).clamp(1, 30) as u32;
-        s.set_history_limit(next);
-        if self.store.save_settings(&s).is_err() { return }
+        let next = (self.store.history_limit() as i32 + delta).clamp(1, 30) as u32;
+        if self.store.set_history_limit(next).is_err() { return }
         self.history_limit = next;
         // Other windows cache the number for their settings page; saving
         // always reads the library, so this is display-only.

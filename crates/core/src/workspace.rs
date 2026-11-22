@@ -300,7 +300,7 @@ mod tests {
         s.list();
         drop(s);
         let b = dir("copy");
-        for name in ["one.xml"] { crate::vfs::copy(a.join(name), b.join(name)).unwrap(); }
+        crate::vfs::copy(a.join("one.xml"), b.join("one.xml")).unwrap();
         crate::vfs::create_dir_all(b.join(".quiet")).unwrap();
         for name in ["format.json", "index.json"] { crate::vfs::copy(a.join(".quiet").join(name), b.join(".quiet").join(name)).unwrap(); }
         let mut ws = Workspace { fixed: true, ..Default::default() };
