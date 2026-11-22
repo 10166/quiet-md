@@ -1104,6 +1104,17 @@ impl Editor {
 
     // ---- links, languages, colors
 
+    /// The toolbar's 转为公式 (#192): the selected text becomes an inline
+    /// equation and its editor opens; other selections get a hint.
+    pub(super) fn selection_to_equation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.core.clear_block_sel();
+        let Some(p) = self.core.selection_to_equation() else {
+            return self.toast_kind(crate::editor_ui::ToastKind::Info, crate::settings::text("只有同一段里的文字能转为公式"), cx);
+        };
+        self.changed(window, cx);
+        self.open_equation_editor(p, window, cx);
+    }
+
     /// Open the LaTeX editor of the equation at `p` (its source selected).
     pub fn open_equation_editor(&mut self, p: Pos, window: &mut Window, cx: &mut Context<Self>) {
         let Some(src) = self.core.equation_source(p) else { return };

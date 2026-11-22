@@ -1044,6 +1044,37 @@ impl Core {
         self.insert_object(InlineKind::Equation(src.to_string()))
     }
 
+    /// The selected text as LaTeX source, if it can become an equation (#192):
+    /// within one text block (not the title or a code block), not blank, and
+    /// free of inline objects. Inline code and links are dropped.
+    pub fn selection_equation_source(&self) -> Option<String> {
+        let (s, e) = self.ordered();
+        if s.block != e.block || s.offset >= e.offset || s.block == TITLE || self.is_code(s.block) {
+            return None;
+        }
+        let part = self.text_of(s.block)?.slice(s.offset..e.offset);
+        let src = part.plain_text();
+        (!src.trim().is_empty() && part.runs.iter().all(|r| r.marks.inline.is_none())).then_some(src)
+    }
+
+    /// Turn the selected text into an inline equation with it as the source
+    /// (one undo step); returns the equation's position.
+    pub fn selection_to_equation(&mut self) -> Option<Pos> {
+        let src = self.selection_equation_source()?;
+        let (s, e) = self.ordered();
+        let mut marks = self.text_of(s.block)?.slice(s.offset..e.offset).runs.first()?.marks.clone();
+        marks.code = false;
+        marks.link = None;
+        marks.inline = Some(crate::docxml::to_inline(InlineKind::Equation(src)));
+        self.checkpoint(EditKind::Other);
+        self.break_coalescing();
+        let mut ins = RichText::default();
+        ins.push(EQUATION, marks);
+        self.text_mut(s.block)?.replace(s.offset..e.offset, &ins);
+        self.sel = Selection::caret(Pos::new(s.block, s.offset + EQUATION.len()));
+        Some(s)
+    }
+
     /// Insert a 按钮 at the caret; returns its position.
     pub fn insert_button(&mut self, b: &InlineButton) -> Option<Pos> {
         self.insert_object(InlineKind::Button(b.clone()))
@@ -4566,6 +4597,35 @@ mod tests {
         let p = c.insert_equation("X_t").unwrap();
         c.sel = Selection { anchor: Pos::new(b, 0), head: Pos::new(b, p.offset + EQUATION.len() + 1) };
         assert_eq!(c.selected_text(), "aX_tb");
+    }
+
+    #[test]
+    fn selection_to_equation() {
+        let mut c = doc("<title>T</title><p>a <b>x^2</b><code>+1</code> b</p><p>c</p><pre lang=\"plaintext\"><code>y</code></pre>");
+        let (b, cb, code) = (id(&c, 1), id(&c, 2), id(&c, 3));
+        let before = xml(&c);
+        c.sel = Selection { anchor: Pos::new(b, 7), head: Pos::new(b, 2) };
+        assert_eq!(c.selection_equation_source().as_deref(), Some("x^2+1"));
+        let p = c.selection_to_equation().unwrap();
+        assert_eq!(p, Pos::new(b, 2));
+        assert_eq!(c.equation_source(p).as_deref(), Some("x^2+1"));
+        assert_eq!(c.sel, Selection::caret(Pos::new(b, 2 + EQUATION.len())));
+        let after = xml(&c);
+        assert!(after.contains("<p>a <latex>x^2+1</latex> b</p>"), "{after}");
+        // Markdown keeps it as `$...$`, and reads it back as the same equation.
+        let md = crate::markdown::write_file(&c.doc, "", None);
+        assert!(md.contains("a $x^2+1$ b"), "{md}");
+        let back = crate::markdown::parse_file(&md, "T", None);
+        assert_eq!(crate::markdown::write_file(&back, "", None), md);
+        assert_eq!(back.blocks[0].text.runs.iter().find_map(|r| r.marks.inline.as_ref()?.equation().map(str::to_string)).as_deref(), Some("x^2+1"));
+        // The equation itself, across blocks, blank, in code: refused.
+        for (a, h) in [(Pos::new(b, 2), Pos::new(b, 2 + EQUATION.len())), (Pos::new(b, 0), Pos::new(cb, 1)), (Pos::new(b, 1), Pos::new(b, 2)), (Pos::new(code, 0), Pos::new(code, 1))] {
+            c.sel = Selection { anchor: a, head: h };
+            assert!(c.selection_to_equation().is_none());
+        }
+        assert_eq!(xml(&c), after);
+        c.undo();
+        assert_eq!(xml(&c), before);
     }
 
     #[test]
