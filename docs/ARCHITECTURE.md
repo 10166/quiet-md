@@ -102,6 +102,7 @@ This approach copies the entire document at each history step. A historical benc
 | `paste.rs` | HTML and Markdown to blocks, shared by paste and import |
 | `markdown.rs` | Markdown export |
 | `lang.rs` | Code language table |
+| `spacing.rs` | Where a space goes between 汉字 and Latin letters or digits (盘古之白), for typing with the preference on and Edit › 整理本文空格 |
 | `palette.rs` | RGBA text, background and callout palettes independent of GPUI. `theme.rs` converts them to GPUI colors. |
 | `time.rs` | Date conversion, local timezone and current time |
 | `editor/core.rs` | Editing engine |

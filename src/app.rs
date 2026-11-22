@@ -77,6 +77,8 @@ pub fn set_menus(cx: &mut App) {
                     MenuItem::action(tr("拷贝为 Markdown", "Copy as Markdown"), k::CopyMarkdown),
                     MenuItem::os_action(tr("粘贴", "Paste"), k::Paste, OsAction::Paste),
                     MenuItem::os_action(tr("全选", "Select All"), k::SelectAll, OsAction::SelectAll),
+                    MenuItem::separator(),
+                    MenuItem::action(tr("整理本文空格", "Add Spaces Between Chinese and English"), k::SpaceCjk),
                 ]
             },
             disabled: false,

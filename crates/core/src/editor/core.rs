@@ -2979,6 +2979,47 @@ impl Core {
         true
     }
 
+    /// 中英文之间自动加空格 while typing: the `n` bytes just typed before the
+    /// caret get a space between them and the character before them, and
+    /// among themselves, where `spacing::text_gaps` puts one; not in code.
+    /// Coalesces with the typing, so one 撤销 takes both.
+    pub fn space_typed(&mut self, n: usize) -> bool {
+        let p = self.sel.head;
+        if !self.sel.is_collapsed() || self.is_code(p.block) { return false; }
+        let Some(start) = p.offset.checked_sub(n) else { return false };
+        let Some(t) = self.text_of(p.block) else { return false };
+        let gaps: Vec<usize> = crate::spacing::text_gaps(t).into_iter().filter(|g| (start..p.offset).contains(g)).collect();
+        if gaps.is_empty() { return false; }
+        self.checkpoint(EditKind::Typing);
+        crate::spacing::insert_spaces(self.text_mut(p.block).unwrap(), &gaps);
+        self.sel = Selection::caret(Pos::new(p.block, p.offset + gaps.len()));
+        true
+    }
+
+    /// 整理本文空格: the spaces `space_typed` adds, everywhere in the document
+    /// (title, folded and table text too; not code), as one undo step.
+    /// Returns how many were added.
+    pub fn space_document(&mut self) -> usize {
+        let mut plan = vec![];
+        let title = crate::spacing::text_gaps(&self.doc.title);
+        if !title.is_empty() { plan.push((TITLE, title)); }
+        self.doc.for_each_block(|b| if b.kind.has_text() && !matches!(b.kind, BlockKind::Code { .. }) {
+            let g = crate::spacing::text_gaps(&b.text);
+            if !g.is_empty() { plan.push((b.id, g)); }
+        });
+        if plan.is_empty() { return 0; }
+        self.checkpoint(EditKind::Other);
+        self.break_coalescing();
+        for (id, gaps) in &plan {
+            if let Some(t) = self.text_mut(*id) { crate::spacing::insert_spaces(t, gaps); }
+            // The selection stays on the characters it was on.
+            for p in [&mut self.sel.anchor, &mut self.sel.head] {
+                if p.block == *id { p.offset += gaps.iter().filter(|g| **g < p.offset).count(); }
+            }
+        }
+        plan.iter().map(|(_, g)| g.len()).sum()
+    }
+
     /// Inline Markdown, run after each typed character: the closing delimiter
     /// turns `**x**`, `__x__`, `*x*`, `_x_`, `***x***`, `~~x~~`, `~x~`
     /// (underline) and `` `x` `` into marks, in a fixed priority order.
@@ -3925,6 +3966,39 @@ mod tests {
         c.insert_text("https:// ");
         assert!(!c.autolink());
         assert!(xml(&c).contains("<p>见 <a href=\"https://www.a.com/x\">www.a.com/x</a>). https:// </p>"), "{}", xml(&c));
+    }
+
+    /// 中英文之间自动加空格 (#293): typing, IME commits of several characters,
+    /// code blocks left alone; 整理本文空格 over title, folded, table and nested
+    /// text in one undo step, the caret kept on its character.
+    #[test]
+    fn cjk_spacing_typed_and_whole_document() {
+        let mut c = doc("<title>T</title><p>用</p><pre lang=\"go\"><code>中a</code></pre>");
+        let b = id(&c, 1);
+        c.sel = Selection::caret(Pos::new(b, "用".len()));
+        for s in ["i", "Phone", "拍了3张", " ", "a"] {
+            c.insert_text(s);
+            c.space_typed(s.len());
+        }
+        assert_eq!(c.text_of(b).unwrap().text, "用 iPhone 拍了 3 张 a");
+        assert_eq!(c.sel.head.offset, c.text_of(b).unwrap().len());
+        let code = id(&c, 2);
+        c.sel = Selection::caret(Pos::new(code, "中a".len()));
+        c.insert_text("文");
+        assert!(!c.space_typed("文".len()));
+        assert_eq!(c.text_of(code).unwrap().text, "中a文");
+
+        let mut c = doc("<title>标题v2</title><h2 folded=\"true\">折叠a</h2><p>藏b</p><table><tr><td><p>格c</p></td></tr></table><ul><li>一<ul><li>二d</li></ul></li></ul><pre><code>码e</code></pre>");
+        let b = id(&c, 1);
+        c.sel = Selection::caret(Pos::new(b, "折叠a".len()));
+        let before = xml(&c);
+        assert_eq!(c.space_document(), 5);
+        let after = xml(&c);
+        for t in ["标题 v2", "折叠 a", "藏 b", "格 c", "二 d", "码e"] { assert!(after.contains(t), "{t}: {after}"); }
+        assert_eq!(c.sel.head.offset, "折叠 a".len());
+        assert_eq!(c.space_document(), 0);
+        c.undo();
+        assert_eq!(xml(&c), before);
     }
 
     #[test]

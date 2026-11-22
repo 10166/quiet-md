@@ -34,7 +34,7 @@ b</code></pre></td></tr></tbody></table>
 <p></p>
 "#;
 
-const TEXTS: &[&str] = &["a", "中文", "😀", " ", "ab cd", "é", "👍🏽", "x"];
+const TEXTS: &[&str] = &["a", "中文", "😀", " ", "ab cd", "é", "👍🏽", "x", "汉a字1", "かな"];
 const MARKERS: &[&str] = &["# ", "＃＃ ", "- ", "—— ", "1. ", "2． ", "> ", "＞ ", "| ", "[] ", "``` ", "```rust", "···py", "*** "];
 const PASTES: &[&str] = &["一\n二", "a\n\nb\nc", "\n", "😀\n中", "line"];
 
@@ -121,10 +121,12 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
     }
     let us = c.units();
     let any = |rng: &mut Rng| rng.pick(&us).id;
-    match rng.below(25) {
+    match rng.below(26) {
         0..=2 => {
             let s = *rng.pick(TEXTS);
             c.insert_text(s);
+            // 中英文之间自动加空格, as typing does with it on.
+            if rng.chance(30) && c.space_typed(s.len()) { return format!("insert_text({s:?})+space_typed"); }
             format!("insert_text({s:?})")
         }
         3 => {
@@ -244,6 +246,8 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
             }
             format!("markdown({s:?})")
         }
+        // A miss on the chance guard falls through to trailing_line below.
+        24 if rng.chance(15) => format!("space_document = {}", c.space_document()),
         _ => {
             c.trailing_line();
             "trailing_line".into()
