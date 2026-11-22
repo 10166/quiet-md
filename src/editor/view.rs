@@ -586,6 +586,8 @@ impl Editor {
 
     fn changed_with_scroll(&mut self, intent: ScrollIntent, window: &mut Window, cx: &mut Context<Self>) {
         let reveal = intent == ScrollIntent::RevealCaret;
+        // `$x$` typed delimiters first turns into an equation once the caret leaves it.
+        self.core.equation_on_leave();
         if reveal { self.core.reveal_caret(); }
         // A folded code block opens once the caret is inside it.
         if reveal && !self.core.in_block_mode() && self.core.set_code_folded(self.core.sel.head.block, false) {
@@ -2474,6 +2476,8 @@ impl Editor {
             self.set_caret(pos, false);
             self.caret_row_end = at_row_end.then_some((pos.block, pos.offset));
         }
+        // A click out of a `$x$` typed delimiters first makes it an equation.
+        if self.core.equation_on_leave() { self.changed_preserving_viewport(window, cx); }
         self.dragging = ev.click_count == 1;
         self.restart_blink(window, cx);
         cx.notify();

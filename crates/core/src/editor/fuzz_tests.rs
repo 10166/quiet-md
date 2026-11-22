@@ -248,6 +248,22 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
         }
         // A miss on the chance guard falls through to trailing_line below.
         24 if rng.chance(15) => format!("space_document = {}", c.space_document()),
+        25 if rng.chance(40) => {
+            // `$x$` typed delimiters first (#69), then the caret leaves it.
+            let d = *rng.pick(&["$$", "$$$$"]);
+            c.insert_text(d);
+            let h = c.sel.head;
+            if c.sel.is_collapsed() && h.offset >= d.len() / 2 && c.text_of(h.block).is_some_and(|t| t.text[..h.offset].ends_with(d)) {
+                c.sel = Selection::caret(Pos::new(h.block, h.offset - d.len() / 2));
+            }
+            for ch in ["x", "^", "2"] {
+                c.insert_text(ch);
+                c.markdown_inline_shortcut();
+                c.equation_on_leave();
+            }
+            random_selection(c, rng);
+            format!("equation_on_leave({d:?}) = {}", c.equation_on_leave())
+        }
         _ => {
             c.trailing_line();
             "trailing_line".into()
