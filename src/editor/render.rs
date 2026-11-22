@@ -1842,6 +1842,7 @@ fn spec_for_feishu(&self, b: &Block, env: Env) -> TextSpec {
             spec.line_height = crate::themes::doc_len(m.line_height);
             spec.weight = FontWeight::MEDIUM;
             spec.letter_spacing = spec.size * -0.02;
+            if let Some(c) = crate::editor_theme::heading_color(level) { spec.color = c; }
         }
         spec.dim_marks = env.quote;
         if let Some(c) = env.color {
