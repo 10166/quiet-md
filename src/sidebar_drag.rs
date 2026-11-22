@@ -217,6 +217,8 @@ impl Workspace {
     }
 
     pub(crate) fn arm_folder_drag(&mut self, id: &str, at: Point<Pixels>, cx: &mut Context<Self>) {
+        // A root's row stays where it is: roots don't move inside one another.
+        if crate::shared_store::root_of_row(id).is_some() { return; }
         let rows = self.drag_rows();
         let Some(index) = rows.iter().position(|r| r.entry.id == id) else { return };
         let Some(bounds) = self.folder_drag.bounds.get() else { return };
@@ -403,16 +405,20 @@ impl Workspace {
         let Some(movement) = self.folder_drag.pending.front().cloned() else { return };
         self.folder_drag.saving = true;
         let history = movement.history;
-        let mut writer = self.store.tree_writer();
+        let Some((key, mut writer)) = self.store.tree_writer(Some(&movement.id)) else { self.folder_drag.saving = false; self.folder_drag.pending.pop_front(); return; };
+        // Moves stay inside a root (W7); a root's row is its top level.
+        let allowed = self.store.same_root(&movement.id, movement.parent.as_deref());
+        let (parent, before) = (self.store.real_parent(movement.parent.as_deref()).map(str::to_string), self.store.real_parent(movement.before.as_deref()).map(str::to_string));
         let task = cx.background_executor().spawn(async move {
             let journal = writer.track_file_changes();
-            let result = writer.move_in_tree(&movement.id, movement.parent.as_deref(), movement.before.as_deref());
+            let result = allowed.and_then(|_| writer.move_in_tree(&movement.id, parent.as_deref(), before.as_deref()));
             let restored = if result.is_err() { Some(writer.list()) } else { None };
             (result, restored, journal.take())
         });
         cx.spawn(async move |this, cx| {
             let (result, restored, changes) = task.await;
             let _ = this.update(cx, |w, cx| {
+                let restored = restored.map(|r| w.store.merge_entries(&key, r));
                 w.folder_drag.pending.pop_front();
                 w.folder_drag.saving = false;
                 if let Err(ref e) = result {

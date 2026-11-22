@@ -187,9 +187,17 @@ impl Workspace {
             list = list.child(div().h(px(GROUP_GAP - SECTION_TOP)));
         }
         // Dropped from outside with no tree shown to open a slot in: the heading lights.
-        list = list.child(self.section(1, crate::settings::text("我的文档"), cx).rounded(px(ROW_R)).when(self.sidebar_drop_top(), |d| d.bg(Theme::sidebar_selected())));
-        if !self.folded[1] {
-            list = list.child(self.render_folder_rows(window, cx));
+        // 工作区: one root is headed by its folder's name (W5); several show
+        // as rows of the tree under 文件夹; none, a way to open one.
+        let roots = self.store.roots();
+        if roots.is_empty() {
+            list = list.child(self.empty_roots(cx));
+        } else {
+            let title = if roots.len() == 1 { roots[0].1.clone() } else { crate::settings::tr("文件夹", "Folders").to_string() };
+            list = list.child(self.section(1, title, cx).rounded(px(ROW_R)).when(self.sidebar_drop_top(), |d| d.bg(Theme::sidebar_selected())));
+            if !self.folded[1] {
+                list = list.child(self.render_folder_rows(window, cx));
+            }
         }
         // 本机文件: Markdown files and folders edited where they are, outside the
         // library. Files or folders from the Finder let go here open the same way.
@@ -354,7 +362,7 @@ impl Workspace {
     /// Section header: the title folds the list (an
     /// arrow appears on hover); 我的文档 has "+" and 批量操作 on the right,
     /// laid out so the last one lines up with the rows' "…".
-    fn section(&self, idx: usize, title: &'static str, cx: &mut Context<Self>) -> Div {
+    fn section(&self, idx: usize, title: impl AsRef<str>, cx: &mut Context<Self>) -> Div {
         let group = SharedString::from(format!("section-{idx}"));
         let folded = self.folded[idx];
         let trigger = |id: &'static str, name: &'static str| {
@@ -447,6 +455,7 @@ impl Workspace {
     /// Check or uncheck a 我的文档 row (entering 批量操作 if needed); false
     /// when the 50-page limit blocks it.
     pub(crate) fn toggle_check(&mut self, id: &str) -> bool {
+        if crate::shared_store::root_of_row(id).is_some() { return false; }
         self.folded[1] = false;
         let sel = self.batch.get_or_insert_with(Vec::new);
         if let Some(i) = sel.iter().position(|x| x == id) {
@@ -532,16 +541,6 @@ impl Workspace {
                 let (open, drag) = (e.id.clone(), crate::sidebar_drop::LocalRowDrag { id: e.id.clone(), title: crate::settings::display_title(&e.title), folder: e.meta.folder.is_some() });
                 d.on_click(cx.listener(move |w, _, window, cx| w.open(&open, window, cx)))
                     .on_drag(drag, |d, _, _, cx| cx.new(|_| d.clone()))
-            })
-            // A folder under 本机文件 takes what is let go on it: moved there on disk.
-            .when(key == "local" && e.meta.mounted() && e.meta.folder.is_some(), |d| {
-                let target = e.id.clone();
-                d.drag_over::<crate::sidebar_drop::LocalRowDrag>(|s, _, _, _| s.bg(Theme::sidebar_selected()))
-                    .on_drop(cx.listener(move |w, dragged: &crate::sidebar_drop::LocalRowDrag, _, cx| {
-                        cx.stop_propagation();
-                        w.sidebar_drop = None;
-                        w.move_mounted(&dragged.id, &target, cx);
-                    }))
             })
             .on_mouse_down(
                 MouseButton::Right,
@@ -748,23 +747,13 @@ impl Workspace {
                 let toggle = e.meta.folder.is_some() && key == "doc" && !drop_target && self.folder_drag.has_children(&e.id);
                 let chevron = if toggle { self.folder_drag.reveal(&e.id) } else { 0. };
                 let open = self.expanded.contains(&e.id);
-                // Under 本机文件 a folder folds from its icon too: a click on it, shown by a chevron on hover.
-                let local_toggle = folder && key == "local" && self.mounted_has_children(&e.id);
-                let fold = e.id.clone();
                 div().size(px(20.)).flex_none().flex().items_center().justify_center().relative()
-                    .when(local_toggle, |d| d.rounded(px(5.)).hover(|s| s.bg(Theme::sidebar_hover()))
-                        .on_mouse_down(MouseButton::Left, cx.listener(move |w, _, _, cx| { cx.stop_propagation(); w.toggle_mounted(&fold, cx); })))
                     .when(toggle, |d| d.rounded(px(5.)).hover(|s| s.bg(Theme::sidebar_hover()))
                         .on_mouse_down(MouseButton::Left, cx.listener(|w, ev: &MouseDownEvent, _, _| {
                             w.folder_drag.icon_press = true;
                             w.folder_drag.icon_alt = ev.modifiers.alt;
                         })))
                     .map(|d| match &e.icon {
-                    _ if local_toggle => d
-                        .child(div().absolute().inset_0().flex().items_center().justify_center().group_hover("doc-row", |s| s.opacity(0.))
-                            .child(icon(if open { "folder-open" } else { "folder" }, ROW_ICON, Theme::icon())))
-                        .child(div().absolute().inset_0().flex().items_center().justify_center().opacity(0.).group_hover("doc-row", |s| s.opacity(1.))
-                            .child(icon("disclosure", ROW_ICON, Theme::icon()).with_transformation(Transformation::rotate(radians(if open { std::f32::consts::FRAC_PI_2 } else { 0. }))))),
                     _ if folder => {
                         let s = if key == "doc" { self.folder_drag.pop(&e.id) } else { 1. };
                         d.child(div().absolute().inset_0().flex().items_center().justify_center().opacity(1. - chevron)
@@ -805,7 +794,7 @@ impl Workspace {
 
     pub(crate) fn render_row_menu(&self, window: &Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(m) = self.row_menu.clone() else { return vec![] };
-        if !m.batch && self.entries.iter().any(|e| e.id == m.id && e.meta.mounted()) { return self.mounted_row_menu(m, cx); }
+        if let Some(key) = crate::shared_store::root_of_row(&m.id).map(str::to_string) { return self.root_row_menu(&key, m, cx); }
         if !m.batch && self.entries.iter().any(|e| e.id == m.id && e.meta.folder.is_some() && e.note.is_none()) { return self.folder_row_menu(m, cx); }
         if !m.batch && self.entries.iter().any(|e| e.id == m.id && e.meta.local()) { return self.local_row_menu(m, cx); }
         // A document with children (a folder with a 正文, #357): the document's menu, its

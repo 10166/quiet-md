@@ -201,7 +201,7 @@ impl Preferences {
     }
 }
 
-fn path() -> std::path::PathBuf { crate::store::Store::internal_dir().join("preferences.json") }
+fn path() -> std::path::PathBuf { crate::store::Store::settings_dir().join("preferences.json") }
 
 /// Show the interface in `lang` without saving it (first launch, before the library exists).
 pub(crate) fn show_lang(lang: Lang) {
@@ -337,7 +337,7 @@ pub fn prefs() -> Preferences {
 
 pub(crate) fn save(p: &Preferences) -> anyhow::Result<()> {
     use std::io::Write;
-    let root = crate::store::Store::internal_dir();
+    let root = crate::store::Store::settings_dir();
     fdl_core::vfs::create_dir_all(&root)?;
     let tmp = root.join("preferences.json.tmp");
     let mut f = fdl_core::vfs::File::create(&tmp)?;
@@ -1616,19 +1616,25 @@ impl Workspace {
     }
 
     fn library_page(&self, cx: &mut Context<Self>) -> AnyElement {
-        let root = crate::store::Store::root_dir();
-        let location = if cfg!(target_os = "windows") { root.display().to_string() } else {
+        let reveal = crate::local_folders::show_in_files();
+        let short = |root: &std::path::Path| if cfg!(target_os = "windows") { root.display().to_string() } else {
             dirs::home_dir().and_then(|h| root.strip_prefix(h).ok().map(|r| format!("~/{}", r.display()))).unwrap_or_else(|| root.display().to_string())
         };
-        let reveal = if cfg!(target_os = "macos") { tr("在访达中显示", "Show in Finder") } else if cfg!(target_os = "windows") {
-            tr("在文件资源管理器中显示", "Show in File Explorer")
-        } else { tr("在文件管理器中显示", "Show in File Manager") };
+        // 工作区: every root folder alike, each with its own 回收站 and history.
+        let mut folders: Vec<AnyElement> = self.store.roots().into_iter().map(|(key, name, path, error)| {
+            let (k, n, p) = (key.clone(), name.clone(), path.clone());
+            let sub: SharedString = match error { Some(e) => format!("{} · {}", short(&path), diagnostic(&e)).into(), None => short(&path).into() };
+            row(name, Some(sub), div().flex_none().flex().gap(px(8.))
+                .child(button(SharedString::from(format!("reveal-{key}")), reveal).on_click(move |_, _, cx| cx.reveal_path(&p)))
+                // A test run's one root (`QUIET_MD_HOME`) is fixed.
+                .when(std::env::var_os("QUIET_MD_HOME").is_none(), |d| d.child(button(SharedString::from(format!("remove-{key}")), tr("移除", "Remove")).on_click(cx.listener(move |w, _, _, cx| { w.confirm = Some(crate::app::Confirm::RemoveRoot(k.clone(), n.clone())); cx.notify(); }))))).into_any_element()
+        }).collect();
+        folders.push(row(tr("添加文件夹", "Add a folder"), Some(tr("打开电脑上已有的文件夹，或新建一个，都会显示在侧栏里。", "Open a folder already on your computer, or make a new one; either shows in the sidebar.").into()), div().flex_none().flex().gap(px(8.))
+            .child(button("open-root", tr("打开…", "Open…")).on_click(cx.listener(|w, _, window, cx| w.open_folder_dialog(window, cx))))
+            .child(button("new-root", tr("新建…", "New…")).on_click(cx.listener(|w, _, window, cx| w.new_root_dialog(window, cx))))).into_any_element());
         div().w_full().flex().flex_col().gap(px(8.))
+            .child(group(Some(tr("文件夹", "Folders")), folders))
             .child(group(None, vec![
-                row(tr("文档库文件夹", "Documents folder"), Some(location.into()), div().flex_none().flex().gap(px(8.))
-                    .child(button("reveal-library", reveal).on_click(|_, _, cx| cx.reveal_path(&crate::store::Store::root_dir())))
-                    // A test run's library (`QUIET_MD_HOME`) is fixed: a restart would lose it.
-                    .when(std::env::var_os("QUIET_MD_HOME").is_none(), |d| d.child(button("change-library", tr("更改…", "Change…")).on_click(cx.listener(|w, _, _, cx| w.pick_library(cx)))))).into_any_element(),
                 row(tr("回收站", "Trash"), Some(crate::localized_format!("删除的文档保留 {} 天后自动清除。", "Deleted documents are kept for {} days.", crate::store::TRASH_DAYS).into()),
                     button("open-trash", tr("打开", "Open")).on_click(cx.listener(|w, _, _, cx| w.show_view(View::Trash, cx)))).into_any_element(),
                 // #237: files no document (the Trash included) mentions.
@@ -1653,19 +1659,6 @@ impl Workspace {
                         .child(button("history-plus", "+").on_click(cx.listener(|w, _, window, cx| w.change_history_limit(1, window, cx))))).into_any_element(),
             ]))
             .into_any_element()
-    }
-
-    /// 更改…: a folder picked as the next library, used as it is (see `library_in`).
-    fn pick_library(&mut self, cx: &mut Context<Self>) {
-        let picked = crate::devtools::take_pick();
-        let prompt = picked.is_none().then(|| cx.prompt_for_paths(PathPromptOptions { files: false, directories: true, multiple: false, prompt: Some(tr("选择", "Choose").into()), extensions: None }));
-        cx.spawn(async move |this, cx| {
-            let paths = match prompt { Some(p) => p.await.ok().and_then(Result::ok).flatten(), None => picked };
-            let Some(dir) = paths.and_then(|p| p.into_iter().next()) else { return };
-            let root = crate::onboarding::library_in(dir);
-            if root == crate::store::Store::root_dir() { return }
-            let _ = this.update(cx, |w, cx| { w.confirm = Some(crate::app::Confirm::SwitchLibrary(root)); cx.notify(); });
-        }).detach();
     }
 
     fn about_page(&self, cx: &mut Context<Self>) -> AnyElement {

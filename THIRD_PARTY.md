@@ -4,7 +4,7 @@ Quiet.md is distributed under the [MIT license](LICENSE). The following third-pa
 
 ## Rust dependencies
 
-This table lists 772 packages from `cargo metadata` and their declared licenses, including MPL-2.0. Consult each component's license text for its terms.
+This table lists 767 packages from `cargo metadata` and their declared licenses, including MPL-2.0. Consult each component's license text for its terms.
 
 Run `scripts/licences.sh` to regenerate the table from the full dependency list.
 
@@ -270,9 +270,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | is-wsl | 0.4.0 | MIT |
 | itertools | 0.14.0 | MIT OR Apache-2.0 |
 | itoa | 1.0.18 | MIT OR Apache-2.0 |
-| jiff | 1.0.1 | Unlicense OR MIT |
-| jiff-core | 1.0.1 | Unlicense OR MIT |
-| jiff-static | 1.0.1 | Unlicense OR MIT |
 | jni-sys | 0.3.1 | MIT OR Apache-2.0 |
 | jni-sys | 0.4.1 | MIT OR Apache-2.0 |
 | jni-sys-macros | 0.4.1 | MIT OR Apache-2.0 |
@@ -565,7 +562,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | tracing | 0.1.44 | MIT |
 | tracing-attributes | 0.1.31 | MIT |
 | tracing-core | 0.1.36 | MIT |
-| trash | 5.4.0 | MIT |
 | ttf-parser | 0.25.1 | MIT OR Apache-2.0 |
 | typenum | 1.20.1 | MIT OR Apache-2.0 |
 | uds_windows | 1.2.1 | MIT |
@@ -581,7 +577,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | unicode-vo | 0.1.0 | MIT/Apache-2.0 |
 | unicode-width | 0.2.2 | MIT OR Apache-2.0 |
 | url | 2.5.8 | MIT OR Apache-2.0 |
-| urlencoding | 2.1.3 | MIT |
 | usvg | 0.46.0 | Apache-2.0 OR MIT |
 | utf-8 | 0.7.6 | MIT OR Apache-2.0 |
 | utf8_iter | 1.0.4 | Apache-2.0 OR MIT |

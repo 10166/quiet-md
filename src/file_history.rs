@@ -135,7 +135,10 @@ impl Workspace {
                 if let Some(parent) = &target.meta.parent { self.expanded.insert(parent.clone()); }
             } else { self.entries.retain(|e| e.id != id); }
         }
-        let mut writer = self.store.tree_writer(); let changes = record.changes.clone();
+        // What one step changed is in one root (nothing moves between them).
+        let key = record.changes.iter().find_map(|c| self.store.root_of(&c.id).or_else(|| self.store.trash_root(&c.id)));
+        let Some((key, mut writer)) = key.and_then(|k| Some((k.clone(), self.store.root_writer(&k)?))) else { self.file_history.busy = false; self.entries = previous; self.file_history.requests.clear(); return; };
+        let changes = record.changes.clone();
         let task = cx.background_executor().spawn(async move {
             let result = writer.apply_file_history(&changes, redo);
             let entries = writer.list();
@@ -144,6 +147,7 @@ impl Workspace {
         cx.spawn_in(window, async move |this, cx| {
             let (result, entries) = task.await;
             let _ = this.update_in(cx, |w, window, cx| {
+                let entries = w.store.merge_entries(&key, entries);
                 w.file_history.busy = false;
                 match result {
                     Ok(()) => {

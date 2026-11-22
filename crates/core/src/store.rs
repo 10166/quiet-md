@@ -1047,6 +1047,9 @@ impl Store {
     /// The folder this library is.
     pub fn root(&self) -> &Path { &self.root }
 
+    /// Whether `id` is in this library's 回收站.
+    pub fn trashed(&self, id: &str) -> bool { self.trash.contains_key(id) }
+
     /// Whether `id` is one of this library's documents or folders.
     pub fn has(&self, id: &str) -> bool { self.index.contains_key(id) }
 

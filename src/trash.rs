@@ -13,7 +13,7 @@ use gpui::{prelude::FluentBuilder, *};
 
 pub const TRASH_MENU_W: f32 = 160.;
 
-struct ListedTrash { trash: Vec<TrashEntry>, warnings: Vec<String> }
+struct ListedTrash { lists: Vec<(String, Vec<TrashEntry>)>, warnings: Vec<String> }
 struct PurgedTrash { errors: Vec<String> }
 
 /// 剩余时间: whole days left before the automatic 彻底删除.
@@ -277,14 +277,24 @@ impl Workspace {
     fn purge_trash(&mut self, ids: Vec<String>, success: &'static str, cx: &mut Context<Self>) {
         if self.store.file_task_busy() || self.file_history.busy || self.tree_writes_pending() || ids.is_empty() { return; }
         let Some(task_guard) = self.store.begin_file_task() else { return };
-        let mut writer = self.store.tree_writer();
-        let gone = ids.clone();
+        // Each root's 回收站 is its own: one writer, and one write, per root.
+        let mut writers: Vec<(String, crate::store::Store, Vec<String>)> = vec![];
+        for id in &ids {
+            let Some(key) = self.store.trash_root(id) else { continue };
+            match writers.iter_mut().find(|(k, _, _)| *k == key) {
+                Some((_, _, v)) => v.push(id.clone()),
+                None => if let Some(w) = self.store.root_writer(&key) { writers.push((key, w, vec![id.clone()])); },
+            }
+        }
         let task = cx.background_executor().spawn(async move {
-            // The 回收站's index is written once, not once a page.
-            let errors = writer.purge_many(&gone).err().map(|e| e.to_string()).into_iter().collect();
-            let warnings = writer.take_warnings();
-            let trash = writer.list_trash();
-            (PurgedTrash { errors }, ListedTrash { trash, warnings })
+            let (mut errors, mut lists, mut warnings) = (vec![], vec![], vec![]);
+            for (key, mut writer, gone) in writers {
+                // The 回收站's index is written once, not once a page.
+                errors.extend(writer.purge_many(&gone).err().map(|e| e.to_string()));
+                warnings.extend(writer.take_warnings());
+                lists.push((key, writer.list_trash()));
+            }
+            (PurgedTrash { errors }, ListedTrash { lists, warnings })
         });
         // The rows go now; the 回收站 read back afterwards replaces this.
         let ids: std::collections::HashSet<String> = ids.into_iter().collect();
@@ -295,7 +305,7 @@ impl Workspace {
             let _task_guard = task_guard;
             let (done, listed) = task.await;
             let _ = this.update(cx, |w, cx| {
-                w.trash = listed.trash;
+                for (key, trash) in listed.lists { w.trash = w.store.merge_trash(&key, trash); }
                 let mut errors = done.errors;
                 errors.extend(listed.warnings.iter().map(|s| crate::settings::diagnostic(s)));
                 if errors.is_empty() { w.show_toast(success, cx); }
@@ -430,10 +440,10 @@ impl Workspace {
                     false,
                 )
             }
-            Confirm::SwitchLibrary(root) => (
-                crate::settings::tr("换用这个文档库？", "Switch to this library?").to_string(),
-                crate::localized_format!("Quiet.md 会保存当前文档并重启，然后打开 {}。原来的文档库留在原处，不会移动或删除，之后可以再换回来。", "Quiet.md saves the open document, restarts and opens {}. The current library stays where it is, nothing is moved or deleted, and you can switch back later.", root.display()),
-                crate::settings::tr("切换并重启", "Switch and Restart"),
+            Confirm::RemoveRoot(_, name) => (
+                crate::localized_format!("从侧栏移除「{}」？", "Remove “{}” from the sidebar?", name),
+                crate::settings::tr("只是从侧栏去掉，文件夹里的文件不会删除。以后重新打开这个文件夹，置顶、历史版本和回收站都还在。", "It only leaves the sidebar; nothing in the folder is deleted. Open the folder again later and its pins, history and Trash are still there.").to_string(),
+                crate::settings::tr("移除", "Remove"),
                 false,
             ),
             Confirm::Import { what, target } => {
@@ -464,7 +474,7 @@ impl Workspace {
         let ok = primary_button("confirm-ok", action);
         let ok = if danger { ok.bg(Theme::danger()).hover(|s| s.bg(theme::c(craft::R600))).active(|s| s.bg(theme::c(craft::R700))) } else { ok };
         let dialog = dialog("confirm-dialog")
-            .w(px(if matches!(c, Confirm::SaveFailed | Confirm::Migrate(_) | Confirm::SwitchLibrary(_)) { 520. } else { 400. }))
+            .w(px(if matches!(c, Confirm::SaveFailed | Confirm::Migrate(_)) { 520. } else { 400. }))
             .px(px(24.))
             .pt(px(20.))
             .pb(px(24.))
@@ -533,7 +543,7 @@ impl Workspace {
                             }
                             Confirm::SaveFailed => w.resolve_save_failed(true, window, cx),
                             Confirm::Migrate(_) => w.migrate_library(window, cx),
-                            Confirm::SwitchLibrary(root) => cx.defer(move |cx| crate::app::switch_library(root, cx)),
+                            Confirm::RemoveRoot(key, _) => w.remove_root(&key, window, cx),
                             Confirm::Import { what, target } => w.import_dropped(what, target, window, cx),
                         }
                         cx.notify();

@@ -309,7 +309,7 @@ impl Workspace {
                     .rounded(px(9.))
                     .bg(Theme::fill_hover_strong())
                     .child(icon("library", 15., Theme::icon()))
-                    .child(div().ml(px(8.)).text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).child(crate::settings::tr("我的文档", "My documents"))),
+                    .child(div().ml(px(8.)).text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).child(self.top_name())),
             );
 
         let row = |key: String, selected: bool| {
