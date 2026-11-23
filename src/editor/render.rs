@@ -105,7 +105,7 @@ fn hash_block(b: &Block, orders: &rustc_hash::FxHashMap<BlockId, String>, h: &mu
     b.comment_ids.len().hash(h);
     match &b.kind {
         BlockKind::Heading { level, .. } => (level, orders.get(&b.id)).hash(h),
-        BlockKind::Code { wrap, .. } => wrap.hash(h),
+        BlockKind::Code { wrap, show_code, .. } => (wrap, show_code).hash(h),
         BlockKind::Image { src, width, height, caption, crop, .. } => {
             (src, width.map(f32::to_bits), height.map(f32::to_bits), caption.as_ref().map(String::len), crop.map(|c| c.map(f32::to_bits))).hash(h)
         }
@@ -334,8 +334,8 @@ impl R<'_> {
         let st = theme::style();
         let mut spec = TextSpec::body();
         if env.cell {
-            spec.size = st.num("table.size");
-            spec.line_height = st.num("table.line-height");
+            spec.size = theme::doc_len(st.num("table.size"));
+            spec.line_height = theme::doc_len(st.num("table.line-height"));
         }
         if let BlockKind::Heading { level, .. } = b.kind {
             let m = theme::heading_metrics(level);
@@ -680,7 +680,7 @@ impl R<'_> {
                         .flex()
                         .items_center()
                         .whitespace_nowrap()
-                        .font_family(theme::UI_FONT)
+                        .font_family(theme::DOC_UI_FONT)
                         .font_weight(weight)
                         .text_size(px(size))
                         .text_color(Theme::text_caption())
@@ -709,6 +709,9 @@ impl R<'_> {
         let spec = self.spec_for(b, env);
         let lh = spec.line_height;
         let id = b.id;
+        // An item that reads right to left (see `text::row_starts`) keeps its
+        // marker on the right, beside the text.
+        let rtl = b.align == crate::model::Align::Left && super::bidi::rtl_line(b.text.text.split('\n').next().unwrap_or(""));
         let marker: AnyElement = match b.kind {
             // Drawn rather than typeset so the dot size (5.5) and its centring
             // on the line don't depend on how the font's bullet glyph renders.
@@ -721,7 +724,7 @@ impl R<'_> {
                     1 => dot.rounded_full().border_1().border_color(c),
                     _ => dot.size(px(4.5)).rounded(px(1.)).bg(c),
                 };
-                div().w(px(18.)).pl(px(5.)).mr(px(6.)).flex().child(dot).into_any_element()
+                div().w(px(18.)).when(!rtl, |d| d.pl(px(5.)).mr(px(6.))).when(rtl, |d| d.pr(px(5.)).ml(px(6.)).justify_end()).flex().child(dot).into_any_element()
             }
             BlockKind::Ordered { .. } => div()
                 .id(("ordered-number", id.0))
@@ -734,9 +737,10 @@ impl R<'_> {
                 }))
                 .min_w(px(18.))
                 .px(px(1.))
-                .mr(px(6.))
+                .when(!rtl, |d| d.mr(px(6.)))
+                .when(rtl, |d| d.ml(px(6.)))
                 .whitespace_nowrap()
-                .font_family(theme::UI_FONT)
+                .font_family(theme::DOC_UI_FONT)
                 .text_size(px(spec.size))
                 .text_color(theme::style().color("number.color").unwrap_or_else(Theme::text))
                 .child(core::ordered_marker(core::ordered_number(siblings, idx), env.depth))
@@ -751,7 +755,8 @@ impl R<'_> {
                 div()
                     .id(("todo", id.0))
                     .size(px(box_size))
-                    .mr(px(8.))
+                    .when(!rtl, |d| d.mr(px(8.)))
+                    .when(rtl, |d| d.ml(px(8.)))
                     .rounded(px(st.num("task.radius")))
                     .border_1()
                     .when(!done, |d| d.border_color(Theme::todo_box()).bg(crate::theme::raised(Theme::bg_body())).hover(|s| s.border_color(Theme::primary())))
@@ -783,6 +788,7 @@ impl R<'_> {
                 div()
                     .id(("row", id.0))
                     .flex()
+                    .when(rtl, |d| d.flex_row_reverse())
                     .when(todo, |d| {
                         d.mx(px(-3.))
                             .px(px(3.))
@@ -843,7 +849,7 @@ impl R<'_> {
         let id = b.id;
         let g = SharedString::from(format!("code-{}", id.0));
         let st = theme::style();
-        let (code_size, code_line, radius) = (st.num("pre.size"), st.num("pre.line"), st.num("pre.radius"));
+        let (code_size, code_line, radius) = (theme::doc_len(st.num("pre.size")), theme::doc_len(st.num("pre.line")), st.num("pre.radius"));
         let gutter_w = if st.flag("pre.numbers") { GUTTER_W } else { 0. };
         let avail_w = if env.width > 0. { env.width } else { self.ed.content_width() };
         let svg_preview = matches!(lang, "XML" | "HTML" | "Plain Text" | "SVG")
@@ -886,8 +892,14 @@ impl R<'_> {
         // Header: fold triangle, caption at x 29, then the toolbar (22 tall,
         // right-aligned), revealed on hover / while editing.
         let editing = self.focused && self.ed.core.sel.head.block == id;
-        let folded = self.ed.code_folded.contains(&id);
-        let show_code = svg_preview.is_none() || editing || self.ed.svg_code_open.contains(&id);
+        let folded = b.folded;
+        let show_code = matches!(b.kind, BlockKind::Code { show_code: true, .. });
+        let mermaid = !folded && lang == crate::mermaid::LANG && crate::mermaid::SUPPORTED;
+        // A Mermaid block shows its diagram, under the code while the caret is in it.
+        let reveal = editing && !self.ed.read_only;
+        let diagram = if mermaid && !show_code { self.diagram(b, reveal, 36., 16., cx) } else { None };
+        // An SVG block may show only its preview: its code is drawn while edited, or opened.
+        let code_shown = svg_preview.is_none() || editing || self.ed.svg_code_open.contains(&id);
         // Handle hovered / its menu open (`.hovered`): light blue ring
         // over a clear body so the block tint shows; block-selected: blue
         // border on the gray body.
@@ -988,16 +1000,13 @@ impl R<'_> {
             )
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |e, _, _, cx| {
+                cx.listener(move |e, _, window, cx| {
                     cx.stop_propagation();
-                    if !e.code_folded.remove(&id) {
-                        e.code_folded.insert(id);
-                        // Leave the hidden code (it opens again if the caret comes back).
-                        if e.core.sel.head.block == id || e.core.sel.anchor.block == id {
-                            e.core.select_block(id);
-                        }
-                    }
-                    cx.notify();
+                    // Saved with the document; a caret in the hidden code leaves for the
+                    // block (it opens again if the caret comes back).
+                    e.core.set_code_folded(id, !folded);
+                    e.keep_read_only_fold();
+                    e.changed_preserving_viewport(window, cx);
                 }),
             );
         let border = if menu_on {
@@ -1019,7 +1028,7 @@ impl R<'_> {
             .when(menu_on, |d| {
                 d.child(outer_ring(Theme::code_hover_ring()))
             })
-            .when(!folded && !menu_on && gutter_w > 0. && show_code && svg_preview.is_none(), |d| {
+            .when(!folded && !menu_on && gutter_w > 0. && code_shown && svg_preview.is_none(), |d| {
                 d.child(
                     div()
                         .absolute()
@@ -1046,7 +1055,7 @@ impl R<'_> {
                     .pr(px(6.))
                     .flex()
                     .items_center()
-                    .font_family(theme::UI_FONT)
+                    .font_family(theme::DOC_UI_FONT)
                     .children(caption)
                     .child(
                         div()
@@ -1058,13 +1067,13 @@ impl R<'_> {
                             .when(!folded && svg_preview.is_some(), |d| {
                                 d.child(
                                     header_btn("code-svg-toggle")
-                                        .child(if show_code { crate::settings::tr("仅预览", "Preview") } else { crate::settings::tr("源码", "Code") })
+                                        .child(if code_shown { crate::settings::tr("仅预览", "Preview") } else { crate::settings::tr("源码", "Code") })
                                         .child(sep(-8.))
                                         .on_mouse_down(
                                             MouseButton::Left,
                                             cx.listener(move |e, _, window, cx| {
                                                 cx.stop_propagation();
-                                                if show_code {
+                                                if code_shown {
                                                     e.svg_code_open.remove(&id);
                                                     if e.core.sel.head.block == id || e.core.sel.anchor.block == id {
                                                         e.core.select_block(id);
@@ -1083,7 +1092,7 @@ impl R<'_> {
                                 )
                             })
                             .child(lang_btn)
-                            .when(!folded && show_code, |d| {
+                            .when(!folded && code_shown, |d| {
                                 d.child(
                                     header_btn("code-wrap")
                                         .child(icon("wrap-text", 14., Theme::icon()))
@@ -1104,6 +1113,18 @@ impl R<'_> {
                                         ),
                                 )
                             })
+                            .when(mermaid, |d| {
+                                d.child(
+                                    header_btn("code-view")
+                                        .child(icon(if show_code { "view-preview" } else { "code" }, 14., Theme::icon()))
+                                        .child(if show_code { crate::settings::tr("显示图表", "Show diagram") } else { crate::settings::tr("隐藏图表", "Hide diagram") })
+                                        .child(sep(-3.))
+                                        .on_mouse_down(MouseButton::Left, cx.listener(move |e, _, window, cx| {
+                                            cx.stop_propagation();
+                                            e.toggle_diagram(id, window, cx);
+                                        })),
+                                )
+                            })
                             .child(
                                 header_btn("code-copy")
                                     .child(icon("copy", 14., Theme::icon()))
@@ -1120,7 +1141,7 @@ impl R<'_> {
             )
             .child(fold_btn)
             .when(folded, |d| d.child(div().h(px(36.))))
-            .when(!folded && show_code, |d| {
+            .when(!folded && code_shown && (diagram.is_none() || reveal), |d| {
                 d.child(
                     div()
                         .pt(px(36.))
@@ -1153,14 +1174,93 @@ impl R<'_> {
                 )
             })
             .when_some((!folded).then_some(svg_preview).flatten(), |d, (im, dims)| {
-                d.child(self.svg_code_preview_box(id, im, dims, avail_w, show_code, radius, cx))
+                d.child(self.svg_code_preview_box(id, im, dims, avail_w, code_shown, radius, cx))
             })
+            .children(diagram)
             .into_any_element()
     }
 }
 
 /// Code blocks: SF Mono 13 / 20, a 36pt line-number gutter.
 const GUTTER_W: f32 = 36.;
+
+impl R<'_> {
+    /// A Mermaid block's diagram (mermaid.rs) with its state: below the code
+    /// (`below`) while the caret is in the block, else in its place (`top`
+    /// clears the toolbar), where a click puts the caret in the code.
+    fn diagram(&self, b: &Block, below: bool, top: f32, side: f32, cx: &mut Context<Editor>) -> Option<AnyElement> {
+        if b.text.text.trim().is_empty() { return None; }
+        let id = b.id;
+        let (shown, note) = match crate::mermaid::look(id.0, &b.text.text, cx) {
+            crate::mermaid::Look::Ready(d) => (Some(d), None),
+            crate::mermaid::Look::Pending(d) => {
+                let note = d.is_none().then(|| crate::settings::tr("正在绘制图表…", "Drawing the diagram…").to_string());
+                (d, note)
+            }
+            crate::mermaid::Look::Failed(m, d) => {
+                let m: Vec<&str> = m.lines().take(6).collect();
+                (d, Some(format!("{}{}", crate::settings::tr("图表有误：", "Diagram error: "), m.join("\n"))))
+            }
+        };
+        let pic = shown.map(|d| {
+            // Shrunk to the text column (inside columns or cells it may still clip).
+            let avail = (self.ed.content_width() - 2. * side - 2.).max(40.);
+            let k = (avail / d.size.0).min(1.);
+            div().w(px(d.size.0 * k)).h(px(d.size.1 * k)).max_w_full().child(img(d.image).size_full().object_fit(ObjectFit::Contain))
+        });
+        Some(
+            div()
+                .id(("code-diagram", id.0))
+                .when(below, |d| d.mt(px(-4.)).pt(px(12.)).border_t_1().border_color(Theme::line_divider()))
+                .when(!below, |d| d.pt(px(top)))
+                .pb(px(12.))
+                .px(px(side))
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(8.))
+                .children(pic)
+                .children(note.map(|n| {
+                    div().w_full().font_family(theme::MONO_FONT).text_size(px(12.)).line_height(px(18.)).text_color(Theme::text_caption()).child(n)
+                }))
+                .when(!below && !self.ed.read_only, |d| {
+                    d.cursor_text().on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |e, _, window, cx| {
+                            cx.stop_propagation();
+                            e.core.clear_block_sel();
+                            e.menu = None;
+                            e.core.caret_to_end_of(id);
+                            window.focus(&e.focus, cx);
+                            cx.notify();
+                        }),
+                    )
+                })
+                .into_any_element(),
+        )
+    }
+}
+
+impl Editor {
+    /// 隐藏图表 / 显示图表 on a Mermaid block: a saved property, like 自动换行.
+    fn toggle_diagram(&mut self, id: BlockId, window: &mut Window, cx: &mut Context<Self>) {
+        self.core.checkpoint(core::EditKind::Other);
+        if let Some(b) = self.core.block_mut(id)
+            && let BlockKind::Code { show_code, .. } = &mut b.kind
+        {
+            *show_code = !*show_code;
+        }
+        self.changed_preserving_viewport(window, cx);
+    }
+
+    /// The row of a Mermaid block the caret is in shows its code too.
+    fn diagram_nonce(&self, focused: bool) -> Option<(BlockId, u64)> {
+        let id = self.core.sel.head.block;
+        let on = crate::mermaid::SUPPORTED && focused && !self.read_only
+            && matches!(self.core.kind_of(id), Some(BlockKind::Code { lang, show_code: false, .. }) if lang == crate::mermaid::LANG);
+        on.then(|| (id, 0x6d65_726d_u64.wrapping_mul(id.0 | 1)))
+    }
+}
 
 pub(super) const TOP: Env = Env { depth: 0, cell: false, color: None, in_callout: false, root: true, column: false, quote: false, width: 0. };
 
@@ -1172,7 +1272,7 @@ impl Editor {
         let mut items = vec![Item::Header];
         let mut h = FxHasher::default();
         // Every row re-measures when the text column changes width.
-        let seed = (self.layout.ml.to_bits(), self.layout.mr.to_bits(), self.column_max().map(f32::to_bits), self.img.generation, crate::themes::generation(), &self.sub_pages, self.links.generation);
+        let seed = (self.layout.ml.to_bits(), self.layout.mr.to_bits(), self.column_max().map(f32::to_bits), self.img.generation, crate::themes::generation(), &self.sub_pages, self.links.generation, crate::mermaid::generation());
         seed.hash(&mut h);
         let seed = h.finish();
         self.core.doc.title.text.len().hash(&mut h);
@@ -1183,8 +1283,6 @@ impl Editor {
         let links = self.links_key();
         // Rows whose look depends on editor state, not the document.
         let mut nonces = self.grid_overrides();
-        // A folded code block is a 40px row.
-        nonces.extend(self.code_folded.iter().map(|&id| (id, id.0.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1)));
         // SVG code blocks change height when toggling between preview-only and code+preview.
         nonces.extend(self.svg_code_open.iter().map(|&id| (id, id.0.wrapping_mul(0x517c_c1b7_2722_0a95) ^ 0x5f67)));
         if focused && !self.core.in_block_mode() {
@@ -1197,7 +1295,7 @@ impl Editor {
                 nonces.push((h, h.0.wrapping_mul(0x517c_c1b7_2722_0a95) ^ 0x5f68));
             }
         }
-        nonces.extend(self.image_nonces(focused).into_iter().chain(self.button_nonce()));
+        nonces.extend(self.image_nonces(focused).into_iter().chain(self.button_nonce()).chain(self.diagram_nonce(focused)));
         // Walking a long document costs ~1.5ms (1M chars): skip it when
         // nothing the rows depend on changed, as on every scrolling frame.
         let mut fh = FxHasher::default();
@@ -1310,7 +1408,7 @@ impl Editor {
                 spec.line_height = theme::title().line_height;
                 spec.weight = FontWeight(theme::style().num("title.weight"));
                 if let Some(c) = theme::style().color("title.color") { spec.color = c; }
-                let tf = theme::style().font("title.font");
+                let tf = theme::title_font();
                 if tf != theme::body_font() { spec.font = Some(tf); }
                 cover = self.cover_el(window, cx);
                 div()
@@ -1641,6 +1739,15 @@ impl Editor {
                         }
                     });
                 }
+                // Touch screens (iOS): long press to select.
+                {
+                    let e = entity.clone();
+                    window.on_mouse_event(move |ev: &LongPressEvent, phase, window, cx| {
+                        if phase == DispatchPhase::Bubble && (ev.phase != TouchPhase::Started || bounds.contains(&ev.start_position)) {
+                            e.update(cx, |ed, cx| ed.on_long_press(ev, window, cx));
+                        }
+                    });
+                }
                 if dragging {
                     let e = entity.clone();
                     window.on_mouse_event(move |ev: &MouseMoveEvent, phase, _, cx| {
@@ -1778,7 +1885,7 @@ impl Editor {
             .size_full()
             .relative()
             // No fill of its own: the note panel behind it is white and rounded.
-            .font_family(theme::UI_FONT)
+            .font_family(theme::ui_family())
             .text_color(Theme::text())
             .on_mouse_move(cx.listener(Self::on_hover_move))
             .on_mouse_up(
@@ -1799,8 +1906,12 @@ impl Editor {
                 div()
                     .id("editor-page")
                     .size_full()
+                    // The note's own labels (list numbers, captions) keep the
+                    // platform face; the menus over it follow 界面字体.
+                    .font_family(theme::DOC_UI_FONT)
                     .cursor(CursorStyle::IBeam)
                     .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+                    .on_mouse_down(MouseButton::Right, cx.listener(Self::on_right_click))
                     .on_drag_move(cx.listener(Self::file_drag_move))
                     .on_drop(cx.listener(Self::drop_files))
                     .child(list(self.list.clone(), cx.processor(Self::render_item)).size_full()),
@@ -1896,15 +2007,16 @@ fn spec_for_feishu(&self, b: &Block, env: Env) -> TextSpec {
 
         let mut spec = TextSpec::body();
         if env.cell {
-            spec.size = 14.;
-            spec.line_height = 22.;
+            spec.size = crate::themes::doc_len(14.);
+            spec.line_height = crate::themes::doc_len(22.);
         }
         if let BlockKind::Heading { level, .. } = b.kind {
             let m = theme::heading_metrics(level);
-            spec.size = m.size;
-            spec.line_height = m.line_height;
+            spec.size = crate::themes::doc_len(m.size);
+            spec.line_height = crate::themes::doc_len(m.line_height);
             spec.weight = FontWeight::MEDIUM;
-            spec.letter_spacing = m.size * -0.02;
+            spec.letter_spacing = spec.size * -0.02;
+            if let Some(c) = crate::editor_theme::heading_color(level) { spec.color = c; }
         }
         spec.dim_marks = env.quote;
         if let Some(c) = env.color {
@@ -2142,6 +2254,9 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
         let spec = self.spec_for(b, env);
         let lh = spec.line_height;
         let id = b.id;
+        // An item that reads right to left (see `text::row_starts`) keeps its
+        // marker on the right, beside the text.
+        let rtl = b.align == crate::model::Align::Left && super::bidi::rtl_line(b.text.text.split('\n').next().unwrap_or(""));
         let marker: AnyElement = match b.kind {
             // Drawn rather than typeset so the dot size (5.5) and its centring
             // on the line don't depend on how the font's bullet glyph renders.
@@ -2152,7 +2267,7 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
                     1 => dot.rounded_full().border_1().border_color(Theme::primary()),
                     _ => dot.size(px(5.)).bg(Theme::primary()),
                 };
-                div().w(px(18.)).pl(px(4.)).mr(px(6.)).flex().child(dot).into_any_element()
+                div().w(px(18.)).when(!rtl, |d| d.pl(px(4.)).mr(px(6.))).when(rtl, |d| d.pr(px(4.)).ml(px(6.)).justify_end()).flex().child(dot).into_any_element()
             }
             BlockKind::Ordered { .. } => div()
                 .id(("ordered-number", id.0))
@@ -2165,7 +2280,8 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
                 }))
                 .min_w(px(18.))
                 .px(px(2.))
-                .mr(px(6.))
+                .when(!rtl, |d| d.mr(px(6.)))
+                .when(rtl, |d| d.ml(px(6.)))
                 .whitespace_nowrap()
                 .font_family(crate::theme::NUMERAL_FONT)
                 .text_size(px(spec.size))
@@ -2177,7 +2293,8 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
                 div()
                     .id(("todo", id.0))
                     .size(px(16.))
-                    .mr(px(8.))
+                    .when(!rtl, |d| d.mr(px(8.)))
+                    .when(rtl, |d| d.ml(px(8.)))
                     .rounded(px(4.))
                     .border_1()
                     .border_color(Theme::text())
@@ -2210,6 +2327,7 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
                 div()
                     .id(("row", id.0))
                     .flex()
+                    .when(rtl, |d| d.flex_row_reverse())
                     .when(todo, |d| {
                         d.mx(px(-2.))
                             .px(px(2.))
@@ -2242,9 +2360,10 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, env: Env, cx: &mu
         let svg_preview = matches!(lang, "XML" | "HTML" | "Plain Text" | "SVG")
             .then(|| self.ed.img.svg_code_preview(&b.text.text, avail_w))
             .flatten();
+        let line = crate::themes::doc_len(22.);
         let spec = TextSpec {
-            size: 14.,
-            line_height: 22.,
+            size: crate::themes::doc_len(14.),
+            line_height: line,
             weight: FontWeight::NORMAL,
             color: Theme::text_code(),
             mono: true,
@@ -2278,8 +2397,14 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, env: Env, cx: &mu
         // Header: fold triangle, caption at x 29, then the toolbar (22 tall,
         // right-aligned), revealed on hover / while editing.
         let editing = self.focused && self.ed.core.sel.head.block == id;
-        let folded = self.ed.code_folded.contains(&id);
-        let show_code = svg_preview.is_none() || editing || self.ed.svg_code_open.contains(&id);
+        let folded = b.folded;
+        let show_code = matches!(b.kind, BlockKind::Code { show_code: true, .. });
+        let mermaid = !folded && lang == crate::mermaid::LANG && crate::mermaid::SUPPORTED;
+        // A Mermaid block shows its diagram, under the code while the caret is in it.
+        let reveal = editing && !self.ed.read_only;
+        let diagram = if mermaid && !show_code { self.diagram(b, reveal, 40., 20., cx) } else { None };
+        // An SVG block may show only its preview: its code is drawn while edited, or opened.
+        let code_shown = svg_preview.is_none() || editing || self.ed.svg_code_open.contains(&id);
         // Handle hovered / its menu open (`.hovered`): light blue ring
         // over a clear body so the block tint shows; block-selected: blue
         // border on the gray body.
@@ -2379,16 +2504,13 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, env: Env, cx: &mu
             )
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |e, _, _, cx| {
+                cx.listener(move |e, _, window, cx| {
                     cx.stop_propagation();
-                    if !e.code_folded.remove(&id) {
-                        e.code_folded.insert(id);
-                        // Leave the hidden code (it opens again if the caret comes back).
-                        if e.core.sel.head.block == id || e.core.sel.anchor.block == id {
-                            e.core.select_block(id);
-                        }
-                    }
-                    cx.notify();
+                    // Saved with the document; a caret in the hidden code leaves for the
+                    // block (it opens again if the caret comes back).
+                    e.core.set_code_folded(id, !folded);
+                    e.keep_read_only_fold();
+                    e.changed_preserving_viewport(window, cx);
                 }),
             );
         let border = if menu_on {
@@ -2422,7 +2544,7 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, env: Env, cx: &mu
                     .pr(px(8.))
                     .flex()
                     .items_center()
-                    .font_family(theme::UI_FONT)
+                    .font_family(theme::DOC_UI_FONT)
                     .children(caption)
                     .child(
                         div()
@@ -2434,13 +2556,13 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, env: Env, cx: &mu
                             .when(!folded && svg_preview.is_some(), |d| {
                                 d.child(
                                     header_btn("code-svg-toggle")
-                                        .child(if show_code { crate::settings::tr("仅预览", "Preview") } else { crate::settings::tr("源码", "Code") })
+                                        .child(if code_shown { crate::settings::tr("仅预览", "Preview") } else { crate::settings::tr("源码", "Code") })
                                         .child(sep(-8.))
                                         .on_mouse_down(
                                             MouseButton::Left,
                                             cx.listener(move |e, _, window, cx| {
                                                 cx.stop_propagation();
-                                                if show_code {
+                                                if code_shown {
                                                     e.svg_code_open.remove(&id);
                                                     if e.core.sel.head.block == id || e.core.sel.anchor.block == id {
                                                         e.core.select_block(id);
@@ -2459,7 +2581,7 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, env: Env, cx: &mu
                                 )
                             })
                             .child(lang_btn)
-                            .when(!folded && show_code, |d| {
+                            .when(!folded && code_shown, |d| {
                                 d.child(
                                     header_btn("code-wrap")
                                         .child(icon("wrap-text", 16., Theme::icon()))
@@ -2480,6 +2602,18 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, env: Env, cx: &mu
                                         ),
                                 )
                             })
+                            .when(mermaid, |d| {
+                                d.child(
+                                    header_btn("code-view")
+                                        .child(icon(if show_code { "view-preview" } else { "code" }, 16., Theme::icon()))
+                                        .child(if show_code { crate::settings::tr("显示图表", "Show diagram") } else { crate::settings::tr("隐藏图表", "Hide diagram") })
+                                        .child(sep(-9.))
+                                        .on_mouse_down(MouseButton::Left, cx.listener(move |e, _, window, cx| {
+                                            cx.stop_propagation();
+                                            e.toggle_diagram(id, window, cx);
+                                        })),
+                                )
+                            })
                             .child(
                                 header_btn("code-copy")
                                     .child(icon("copy", 16., Theme::icon()))
@@ -2496,7 +2630,7 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, env: Env, cx: &mu
             )
             .child(fold_btn)
             .when(folded, |d| d.child(div().h(px(38.))))
-            .when(!folded && show_code, |d| {
+            .when(!folded && code_shown && (diagram.is_none() || reveal), |d| {
                 d.child(
                     div()
                         .pt(px(40.))
@@ -2514,21 +2648,22 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, env: Env, cx: &mu
                                 .items_end()
                                 .font_family(theme::MONO_FONT)
                                 .text_size(px(14.))
-                                .line_height(px(22.))
+                                .line_height(px(line))
                                 .text_color(Theme::text_caption())
                                 .children(
                                     rows_per_line
                                         .iter()
                                         .enumerate()
-                                        .map(|(i, n)| div().h(px(22. * *n as f32)).child(format!("{}", i + 1))),
+                                        .map(|(i, n)| div().h(px(line * *n as f32)).child(format!("{}", i + 1))),
                                 ),
                         )
                         .child(self.code_column(id, wrap, el, 14.)),
                 )
             })
             .when_some((!folded).then_some(svg_preview).flatten(), |d, (im, dims)| {
-                d.child(self.svg_code_preview_box(id, im, dims, avail_w, show_code, 8., cx))
+                d.child(self.svg_code_preview_box(id, im, dims, avail_w, code_shown, 8., cx))
             })
+            .children(diagram)
             .into_any_element()
     }
 }

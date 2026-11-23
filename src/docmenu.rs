@@ -1,5 +1,6 @@
 //! The header "…" menu: page width, find & replace, move, pin, star,
-//! duplicate, 下载为 PDF / Markdown, 打印, document info and delete.
+//! 新建子文档, duplicate, 下载为 PDF / Markdown, 复制为 Markdown, 打印, document info,
+//! 阅读模式 and 显示引用列表 switches, delete.
 
 use crate::app::Workspace;
 use crate::settings::display_title;
@@ -12,8 +13,6 @@ use gpui::{prelude::FluentBuilder, *};
 pub enum DocSub {
     Width,
     Download,
-    /// 更多: 显示引用列表.
-    More,
 }
 
 const MENU_W: f32 = 200.;
@@ -42,6 +41,20 @@ fn menu_item(id: &'static str, ic: &'static str, label: impl Into<SharedString>,
 /// 下载为's text-only items.
 pub(crate) fn sub_item(id: &'static str, label: &'static str) -> Stateful<Div> {
     crate::ui::menu_row(id, SharedString::from(id)).mx(px(0.)).child(crate::ui::menu_label(label, SharedString::from(id), gpui::white()))
+}
+
+/// A row's on/off switch.
+fn switch(on: bool) -> Div {
+    div()
+        .flex_none()
+        .w(px(28.))
+        .h(px(16.))
+        .rounded_full()
+        .p(px(2.))
+        .flex()
+        .when(on, |d| d.justify_end())
+        .bg(if on { Theme::primary_500() } else { Theme::block_placeholder() })
+        .child(div().size(px(12.)).rounded_full().bg(crate::theme::raised(Theme::bg_body())))
 }
 
 /// Native-menu separator: 1px, 5px either side, inset 13px.
@@ -113,7 +126,9 @@ impl Workspace {
         match made {
             Ok(new) => {
                 let _ = self.store.set_width(&new, width);
-                let parent = self.entries.iter().find(|e| e.id == id).filter(|e| !e.meta.local()).and_then(|e| e.meta.parent.clone());
+                // A document with children is copied alone, beside its folder.
+                let row = self.row_of(id);
+                let parent = self.entries.iter().find(|e| e.id == row).filter(|e| !e.meta.local()).and_then(|e| e.meta.parent.clone());
                 if let Some(parent) = parent { let _ = self.store.set_parent(&new, Some(&parent)); }
                 Some(new)
             }
@@ -148,6 +163,7 @@ impl Workspace {
         // editor shortcuts; a standalone board file has no Markdown or
         // references either
         let (board, board_file) = self.editor.as_ref().map_or((false, false), |e| { let e = e.read(cx); (e.board_open(), e.board_file) });
+        let reading = self.reading();
         let sub = self.doc_sub;
         let hover_sub = |s: Option<DocSub>| {
             cx.listener(move |w: &mut Workspace, hovered: &bool, _, cx| {
@@ -167,6 +183,9 @@ impl Workspace {
             canvas(move |b, _, _| record.set(Some(f32::from(b.size.width))), |_, _, _, _| {}).absolute().inset_0()
         };
         let (pin_id, star_id, mv_id, del_id, dup_id, print_id) = (id.clone(), id.clone(), id.clone(), id.clone(), id.clone(), id.clone());
+        // 新建子文档 (#357): under a document of the library.
+        let child = !board_file && self.takes_children(&id);
+        let child_id = id.clone();
         let menu = popover()
             .id("doc-menu")
             .occlude()
@@ -220,6 +239,11 @@ impl Workspace {
                     .on_click(cx.listener(move |w, _, _, cx| w.toggle_star(&star_id, cx))),
             )
             .child(divider())
+            .when(child, |d| d.child(
+                menu_item("dm-child", "plus", crate::settings::tr("新建子文档", "New child page"), false, false)
+                    .on_hover(hover_sub(None))
+                    .on_click(cx.listener(move |w, _, window, cx| { w.close_doc_menu(cx); w.new_child(&child_id, window, cx); })),
+            ))
             .child(
                 menu_item("dm-copy", "copy", crate::settings::text("创建副本"), false, false)
                     .on_hover(hover_sub(None))
@@ -229,6 +253,17 @@ impl Workspace {
                 menu_item("dm-download", "export", crate::settings::text("下载为"), true, sub == Some(DocSub::Download))
                     .on_hover(hover_sub(Some(DocSub::Download))),
             )
+            .when(!board_file, |d| d.child(
+                menu_item("dm-copy-md", "doc-md", crate::settings::text("复制为 Markdown"), false, false)
+                    .on_hover(hover_sub(None))
+                    .on_click(cx.listener(|w, _, _, cx| {
+                        w.close_doc_menu(cx);
+                        if let Some(ed) = w.editor.clone() {
+                            ed.update(cx, |e, cx| e.copy_markdown(cx));
+                            w.show_toast(crate::settings::text("已复制为 Markdown"), cx);
+                        }
+                    })),
+            ))
             .child(divider())
             .when(crate::printing::SUPPORTED, |d| d.child(
                 menu_item("dm-print", "printer", crate::settings::text("打印"), false, false)
@@ -249,8 +284,26 @@ impl Workspace {
                     })),
             )
             .child(divider())
-            // 更多 and 删除 share the last group.
-            .when(!board_file, |d| d.child(menu_item("dm-more", "ellipsis", crate::settings::text("更多"), true, sub == Some(DocSub::More)).on_hover(hover_sub(Some(DocSub::More)))))
+            // (a board file has no reading mode or references)
+            .when(!board_file, |d| d.child(
+                menu_item("dm-read", "eye-open", crate::settings::text("阅读模式"), false, false)
+                    .child(switch(reading))
+                    .on_hover(hover_sub(None))
+                    .on_click(cx.listener(move |w, _, window, cx| {
+                        w.close_doc_menu(cx);
+                        w.set_mode(!reading, window, cx);
+                    })),
+            )
+            .child(
+                menu_item("dm-refs", "list", crate::settings::text("显示引用列表"), false, false)
+                    .child(switch(refs_shown))
+                    .on_hover(hover_sub(None))
+                    .on_click(cx.listener(move |w, _, _, cx| {
+                        w.close_doc_menu(cx);
+                        w.ask_refs(!refs_shown, cx);
+                    })),
+            )
+            .child(divider()))
             .child(
                 menu_item("dm-delete", "bin", crate::settings::text("删除"), false, false)
                     .on_hover(hover_sub(None))
@@ -291,7 +344,7 @@ impl Workspace {
             Some(DocSub::Width) => Some((item_top(0, 0) - 1. - PAD, self.width_panel(width, cx).child(recorder()).into_any_element())),
             // Level the submenu's first item with 下载为.
             Some(DocSub::Download) => Some((
-                item_top(6 - hidden.0, 3 - hidden.1) - 1. - PAD,
+                item_top(6 - hidden.0 + usize::from(child), 3 - hidden.1) - 1. - PAD,
                 {
                     let pdf = id.clone();
                     popover()
@@ -305,44 +358,6 @@ impl Workspace {
                         .child(sub_item("dm-md", "Markdown").on_click(cx.listener(move |w, _, _, cx| w.open_export_md(&id, cx))))
                         .into_any_element()
                 },
-            )),
-            Some(DocSub::More) => Some((
-                if crate::printing::SUPPORTED { item_top(10 - hidden.0, 6 - hidden.1) } else { item_top(9 - hidden.0, 5 - hidden.1) } - 1. - PAD,
-                popover()
-                    .id("dm-more-menu")
-                    .occlude()
-                    .min_w(px(210.))
-                    .px(px(5.))
-                    .py(px(PAD))
-                    .child(recorder())
-                    .child(sub_item("dm-copy-md", crate::settings::text("复制为 Markdown")).on_click(cx.listener(|w, _, _, cx| {
-                        w.close_doc_menu(cx);
-                        if let Some(ed) = w.editor.clone() {
-                            ed.update(cx, |e, cx| e.copy_markdown(cx));
-                            w.show_toast(crate::settings::text("已复制为 Markdown"), cx);
-                        }
-                    })))
-                    .child(
-                        sub_item("dm-refs", crate::settings::text("显示引用列表"))
-                            .justify_between()
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .w(px(28.))
-                                    .h(px(16.))
-                                    .rounded_full()
-                                    .p(px(2.))
-                                    .flex()
-                                    .when(refs_shown, |d| d.justify_end())
-                                    .bg(if refs_shown { Theme::primary_500() } else { Theme::block_placeholder() })
-                                    .child(div().size(px(12.)).rounded_full().bg(crate::theme::raised(Theme::bg_body()))),
-                            )
-                            .on_click(cx.listener(move |w, _, _, cx| {
-                                w.close_doc_menu(cx);
-                                w.ask_refs(!refs_shown, cx);
-                            })),
-                    )
-                    .into_any_element(),
             )),
             None => None,
         };

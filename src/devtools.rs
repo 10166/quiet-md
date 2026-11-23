@@ -12,6 +12,7 @@
 //! For profiling: bench <n> <step> (runs the step n times, drawing a frame
 //!   synchronously after each, and prints step / frame / editor-render times) |
 //!   wheel x y dy [dx] (one scroll-wheel event; dx: sideways component).
+//!   pinch x y delta (one trackpad pinch event; delta 0.1 zooms in 10%).
 //! For demo videos: glide x y ms (eased pointer move from the last position) |
 //!   scroll x y dy ms (eased wheel scroll) | record <file.mp4> | record stop |
 //!   caption <text> (a timed note in the pointer track, for titles).
@@ -31,7 +32,7 @@ fn fps() -> f64 {
 }
 
 /// A script drives this run: other apps, dialogs and the updater stay out of it.
-pub fn scripted() -> bool { std::env::var_os("FDL_SCRIPT").is_some() }
+pub fn scripted() -> bool { std::env::var_os("FDL_SCRIPT").is_some() || crate::selftest::active() }
 
 /// Time spent in the editor's `render` during the last benched frame.
 pub static RENDER_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -685,6 +686,8 @@ fn run(cmd: &str, rest: &str, window: &mut Window, cx: &mut App) {
             let cur = fake.get_or_insert_with(Default::default);
             match kind {
                 "clear" => *cur = Default::default(),
+                // what a copy put there (its text), for the script to check
+                "save" => { let _ = std::fs::write(path.trim(), &cur.text); }
                 "image" => {
                     let bytes = std::fs::read(path.trim()).expect("clip image file");
                     let format = image::guess_format(&bytes).ok().and_then(|f| ImageFormat::from_mime_type(f.to_mime_type())).expect("clip image format");
@@ -733,6 +736,13 @@ fn run(cmd: &str, rest: &str, window: &mut Window, cx: &mut App) {
                     ..Default::default()
                 };
                 window.dispatch_event(PlatformInput::Scroll(event), cx);
+            }
+        }
+        "pinch" => {
+            let n = nums(rest);
+            if n.len() >= 3 {
+                let event = PinchEvent { position: point(px(n[0]), px(n[1])), delta: n[2], ..Default::default() };
+                window.dispatch_event(PlatformInput::Pinch(event), cx);
             }
         }
         "resize" => {

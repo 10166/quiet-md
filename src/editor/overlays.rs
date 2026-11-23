@@ -5,7 +5,7 @@
 use super::core::{Pos, TITLE};
 use super::menus::{self, SLASH_ITEMS, TURN_ITEMS};
 use super::table::CellSelKind;
-use super::view::{BlockAct, BlockSub, Editor, Mark, Menu};
+use super::view::{BlockAct, BlockSub, CtxKind, Editor, Mark, Menu};
 use crate::model::*;
 use crate::feishu_theme::{self as theme, Theme};
 use crate::editor_ui::{MENU_INSET, MENU_PAD_Y, MENU_ROW_H, TipExt, icon, menu, panel, popover};
@@ -14,13 +14,13 @@ use gpui::{prelude::FluentBuilder, *};
 const SLASH_W: f32 = 247.;
 const SLASH_MAX_H: f32 = 351.;
 const SCROLLBAR_GUTTER: f32 = 15.;
-const MENU_W: f32 = 247.;
-/// Text toolbar: 1px border, padding 8, T▾ 44, sep, ≡▾ 44, sep, six 24px
-/// marks, A▾ 44 (gap 8), a full-height divider 12px either side, 更多 24.
+pub(super) const MENU_W: f32 = 247.;
+/// Text toolbar: 1px border, padding 8, T▾ 44, sep, ≡▾ 44, sep, seven 24px
+/// marks, A▾ 44, 评论 24 (gap 8), a full-height divider 12px either side, 更多 24.
 /// Table handle: 44.5 left of the grid, centred on the column-dot row 16.5 above it.
 const TABLE_HANDLE_DX: f32 = 44.5;
 const TABLE_HANDLE_DY: f32 = 16.5 + 13.;
-const TOOLBAR_W: f32 = 1. + 8. + 44. + 17. + 44. + 17. + 6. * 32. + 44. + 32. + 25. + 24. + 8. + 1.;
+const TOOLBAR_W: f32 = 1. + 8. + 44. + 17. + 44. + 17. + 7. * 32. + 44. + 32. + 25. + 24. + 8. + 1.;
 /// Callout hover bar: one 24px palette button in 10px padding, 1px border;
 /// it floats 9px above the callout, centred on it.
 const CALLOUT_BAR_W: f32 = 10. + 24. + 10. + 2.;
@@ -107,12 +107,12 @@ pub fn kind_color(k: &BlockKind) -> Hsla {
 }
 
 /// 32-tall menu row: icon, label, optional right hint.
-fn row(id: impl Into<ElementId>, icon_name: &str, label: impl Into<SharedString>, right: Option<&str>, highlighted: bool) -> Stateful<Div> {
+pub(super) fn row(id: impl Into<ElementId>, icon_name: &str, label: impl Into<SharedString>, right: Option<&str>, highlighted: bool) -> Stateful<Div> {
     row_tinted(id, icon_name, label, right, highlighted, Theme::text(), Theme::icon())
 }
 
 /// `row` with explicit label / icon colours (active and disabled items).
-fn row_tinted(
+pub(super) fn row_tinted(
     id: impl Into<ElementId>,
     icon_name: &str,
     label: impl Into<SharedString>,
@@ -203,7 +203,7 @@ fn grid_rows<T>(cells: Vec<(menus::SlashKind, T)>) -> Vec<Vec<T>> {
     rows
 }
 
-fn separator_h() -> Div {
+pub(super) fn separator_h() -> Div {
     div().flex_none().mx(px(MENU_INSET + 8.)).my(px(4.)).h(px(1.)).bg(Theme::line_border())
 }
 
@@ -311,9 +311,14 @@ impl Editor {
         self.callout_zone.borrow_mut().clear();
         let mut out = vec![];
         if self.read_only {
+            // Only the right-click menu's 复制 / 全选.
+            if let Some(Menu::Ctx { pos, kind: kind @ CtxKind::ReadOnly { .. }, sub }) = self.menu.clone() {
+                out.extend(self.ctx_menu(pos, kind, sub, cx));
+            }
             return out;
         }
         let menu_el = match self.menu.clone() {
+            Some(Menu::Ctx { pos, kind, sub }) => self.ctx_menu(pos, kind, sub, cx),
             Some(Menu::OrderedNumber { block, pos, edit, depth }) => self.ordered_number_menu(block, pos, edit, depth, cx),
             Some(Menu::Block { block, sub }) => self.block_menu(block, sub, cx),
             Some(Menu::Link { block, range, only_link }) => self.link_panel(block, range, only_link, window, cx),
@@ -352,6 +357,9 @@ impl Editor {
             return None;
         }
         match &self.menu {
+            // A right-click menu brings no handle: the pointer is not there
+            // to drag anything.
+            Some(Menu::Ctx { .. }) => None,
             Some(Menu::Block { block, .. }) | Some(Menu::Add { block, .. }) => Some(*block),
             _ => self.hover.filter(|_| !self.hover_clipped && !self.typing),
         }
@@ -693,7 +701,7 @@ impl Editor {
             .border_color(Theme::line_border())
             .rounded(px(6.))
             .shadow(theme::shadow_panel())
-            .font_family(theme::UI_FONT)
+            .font_family(theme::ui_family())
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
@@ -1388,7 +1396,7 @@ impl Editor {
         let x_align = x_turn + 44. + 8. + 1. + 8.;
         // The colour panel is wider than the bar's right-hand section, so it is
         // right-aligned inside the bar instead of hanging past its edge (#95).
-        let x_color = f32::min(x_align + 44. + 8. + 1. + 8. + 6. * (24. + 8.), TOOLBAR_W - CALLOUT_PANEL_W - 2.).max(0.);
+        let x_color = f32::min(x_align + 44. + 8. + 1. + 8. + 7. * (24. + 8.), TOOLBAR_W - CALLOUT_PANEL_W - 2.).max(0.);
         let bar = div()
             .h(px(40.))
             .px(px(8.))
@@ -1435,6 +1443,20 @@ impl Editor {
                     ),
             )
             .child(mark_btn("tb-code", "code", crate::settings::text("代码"), crate::shortcuts::hint("editor::InlineCode", "⌘ + Control + C"), Some(crate::settings::text("`代码`")), Mark::Code, |m| m.code))
+            .child(
+                btn("tb-equation")
+                    .w(px(24.))
+                    .tip_md(crate::settings::text("转为公式"), None, Some(crate::settings::text("$$文字$$")))
+                    .child(icon("sigma", 18., Theme::icon()))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|e, _, window, cx| {
+                            cx.stop_propagation();
+                            e.menu = None;
+                            e.selection_to_equation(window, cx);
+                        }),
+                    ),
+            )
             .when(!self.markdown, |d| {
                 d.child(color_btn).child(
                     btn("tb-comment")

@@ -17,6 +17,23 @@ const REAL_FOLDERS: &str = "文档库改为真实文件夹，以标题命名，�
 /// Each version's notes: (version, [(中文, English)]). Only the running
 /// version's are shown; a version without notes shows nothing.
 const NOTES: &[(&str, &[(&str, &str)])] = &[
+    // Upstream's notes for its 0.1.14, merged in after this fork's 0.1.17: the release that
+    // carries them shows them.
+    ("0.1.18", &[
+        ("查找替换支持正则表达式", "Find and replace supports regular expressions"),
+        ("Obsidian 的 [[双链]] 可以点击打开对应的笔记", "Obsidian [[wikilinks]] open the note they point to"),
+        ("新增土耳其语界面，阿拉伯语从右往左排版", "Turkish interface; Arabic lays out right to left"),
+        ("设置里可以选择界面字体和文档字体", "Choose the interface and document fonts in Settings"),
+        ("文档字体可选霞鹜文楷和朱雀仿宋，选中时才下载；画板的手写字体也在第一次用到时下载", "LXGW WenKai and Zhuque Fangsong can be the document font, downloaded when you pick them; the board's handwriting font downloads the first time a board needs it"),
+        ("字体列表按类别分组，可以搜索，悬停即预览，支持收藏和最近使用", "Font lists are grouped by kind, searchable, preview on hover, and keep favorites and recent picks"),
+        ("设置 › 文档库可以清理没有笔记用到的图片和文件", "Settings › Documents clears out images and files no note uses"),
+        ("新增「退格键回到标题」开关（设置 › 通用）", "New setting: Backspace returns to title (Settings › General)"),
+        ("文档很多时搜索不再卡顿，批量删除和清空回收站更快", "Search keeps up with large libraries; deleting many notes and emptying the Trash are faster"),
+        ("Windows 和 Linux：复制为 Markdown 改为 Ctrl+Shift+M", "Windows and Linux: Copy as Markdown is now Ctrl+Shift+M"),
+        ("「…」菜单直接列出全部选项，阅读模式和显示引用列表改为开关", "The … menu lists every item directly; Reading mode and Show references are switches"),
+        ("画板支持触控板双指缩放；窗口变窄时收起的侧栏，放宽后自动展开", "Pinch to zoom boards on a trackpad; a sidebar hidden by a narrow window comes back when it widens"),
+        ("修复切换文档卡顿、代码块折叠不保存、画板选背景色时崩溃和深色模式下按钮看不清", "Fix lag when switching documents, code block folds not saving, a crash in the board's background picker, and hard-to-read buttons in dark mode"),
+    ]),
     ("0.1.17", &[
         ("评论与多行输入框修复：超长评论、回复与公式输入支持内部滚动、自动跟随光标并严格裁剪边界，不再溢出遮挡底部按钮；宽屏浮动卡片长回复列表支持独立滚动", "Comments and multiline inputs: long comments, replies, and formula editors now scroll smoothly inside their bounds, keep the caret in view, and clip cleanly without overlapping buttons; long reply lists in floating margin cards scroll independently"),
     ]),
@@ -147,12 +164,26 @@ pub fn card(on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> 
     let title: String = if notes.is_some() { crate::localized_format!("已更新到 {}", "Updated to {}", VERSION) } else { crate::settings::tr("文档库已改为真实文件夹", "Your library now uses real folders").into() };
     let line = |text: String| div().w_full().min_w_0().flex().gap(px(6.)).text_size(px(12.)).line_height(px(18.)).text_color(Theme::text_caption())
         .child(div().flex_none().child("·")).child(div().flex_1().min_w_0().child(text));
-    let mut list = div().mt(px(6.)).w_full().min_w_0().flex().flex_col().gap(px(4.));
+    // Padding, not margin: the scroll area's extent leaves a child's margin
+    // out, so scrolled to the end the last line lost its bottom 6pt.
+    let mut list = div().pt(px(6.)).w_full().min_w_0().flex().flex_col().gap(px(4.));
     if let Some((docs, folders)) = moved {
         let s = |n: usize| if n == 1 { "" } else { "s" };
-        list = list.child(line(crate::settings::localized(crate::settings::lang(), "文档库改为真实文件夹：访达里看到的就是侧栏，文件以标题命名（{docs} 篇文档、{folders} 个文件夹）",
-            || format!("文档库改为真实文件夹：访达里看到的就是侧栏，文件以标题命名（{docs} 篇文档、{folders} 个文件夹）"),
-            || format!("The library now uses real folders: Finder shows what the sidebar shows, files named by title ({docs} document{}, {folders} folder{})", s(docs), s(folders)))));
+        let lang = crate::settings::lang();
+        let text = if cfg!(target_os = "macos") {
+            crate::settings::localized(lang, "文档库改为真实文件夹：访达里看到的就是侧栏，文件以标题命名（{docs} 篇文档、{folders} 个文件夹）",
+                || format!("文档库改为真实文件夹：访达里看到的就是侧栏，文件以标题命名（{docs} 篇文档、{folders} 个文件夹）"),
+                || format!("The library now uses real folders: Finder shows what the sidebar shows, files named by title ({docs} document{}, {folders} folder{})", s(docs), s(folders)))
+        } else if cfg!(target_os = "windows") {
+            crate::settings::localized(lang, "文档库改为真实文件夹：文件资源管理器里看到的就是侧栏，文件以标题命名（{docs} 篇文档、{folders} 个文件夹）",
+                || format!("文档库改为真实文件夹：文件资源管理器里看到的就是侧栏，文件以标题命名（{docs} 篇文档、{folders} 个文件夹）"),
+                || format!("The library now uses real folders: File Explorer shows what the sidebar shows, files named by title ({docs} document{}, {folders} folder{})", s(docs), s(folders)))
+        } else {
+            crate::settings::localized(lang, "文档库改为真实文件夹：文件管理器里看到的就是侧栏，文件以标题命名（{docs} 篇文档、{folders} 个文件夹）",
+                || format!("文档库改为真实文件夹：文件管理器里看到的就是侧栏，文件以标题命名（{docs} 篇文档、{folders} 个文件夹）"),
+                || format!("The library now uses real folders: your file manager shows what the sidebar shows, files named by title ({docs} document{}, {folders} folder{})", s(docs), s(folders)))
+        };
+        list = list.child(line(text));
     }
     for &(zh, en) in notes.unwrap_or_default() {
         if moved.is_some() && zh == REAL_FOLDERS { continue }

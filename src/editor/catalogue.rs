@@ -406,7 +406,7 @@ impl Editor {
         let collapsed = self.cat_collapsed.clone();
         let text_w = width - 11.;
         let mut style = window.text_style();
-        style.font_family = theme::UI_FONT.into();
+        style.font_family = theme::ui_family().into();
         let entity = cx.entity();
         let n = rows.len();
         let rows = Rc::new(rows);
@@ -492,7 +492,8 @@ impl Editor {
         // A list that scrolls ends 44 below its last row: GPUI 0.2's
         // uniform_list counted the bottom padding twice.
         .pb(px(if scrolls { 44. } else { 22. }));
-        div().w(px(width)).child(list).into_any_element()
+        // A list that scrolls keeps the wheel: the page under it stays put.
+        div().w(px(width)).when(scrolls, |d| d.on_scroll(|_, _, cx| cx.stop_propagation())).child(list).into_any_element()
     }
 }
 

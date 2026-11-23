@@ -35,7 +35,7 @@ impl SidebarDropAt {
 }
 
 fn importable(p: &std::path::Path) -> bool {
-    p.fs_is_dir() || crate::local_files::is_markdown_path(p) || p.extension().is_some_and(|x| x.eq_ignore_ascii_case("xml"))
+    p.fs_is_dir() || crate::local_files::is_markdown_path(p) || p.extension().is_some_and(|x| x.eq_ignore_ascii_case("xml")) || crate::transfer::is_csv_path(p)
 }
 
 impl Workspace {
@@ -76,7 +76,7 @@ impl Workspace {
     /// The place a drop goes, for the dialog and the toast.
     pub(crate) fn drop_place(&self, target: &SidebarDropAt) -> String {
         target.parent.as_ref().and_then(|t| self.entries.iter().find(|e| &e.id == t)).map(|e| crate::settings::display_title(&e.title))
-            .unwrap_or_else(|| tr("我的文档", "My documents").to_string())
+            .unwrap_or_else(|| self.top_name())
     }
 
     /// 导入 confirmed: bring it in where it was dropped.

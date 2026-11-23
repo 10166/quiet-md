@@ -12,6 +12,8 @@ const PITCH: f32 = 31.;
 /// dropping an open folder keep their drawers either way.
 fn animate_folding() -> bool { crate::settings::motion_high() }
 const INDENT: f32 = 18.;
+/// Indent guides (#329) run down a folder's rows under the middle of its icon (6 + 20 / 2), centred on a 1pt line.
+const GUIDE_X: f32 = 15.5;
 
 #[derive(Clone)]
 struct Row { entry: Entry, depth: usize }
@@ -196,7 +198,7 @@ impl SidebarDrag {
 fn row_face(e: &Entry, open: bool) -> Div {
     div().h(px(crate::sidebar::ROW_H)).w_full().pl(px(6.)).flex().items_center()
         .child(div().size(px(20.)).flex_none().flex().items_center().justify_center().map(|d| match &e.icon {
-            _ if e.meta.folder.is_some() => d.child(icon(if open { "folder-open" } else { "folder" }, crate::sidebar::ROW_ICON, Theme::icon())),
+            _ if e.meta.folder.is_some() && e.note.is_none() => d.child(icon(if open { "folder-open" } else { "folder" }, crate::sidebar::ROW_ICON, Theme::icon())),
             _ if e.meta.named_by_file() => d.child(icon(crate::search::file_glyph(&e.meta), crate::sidebar::ROW_ICON, Theme::icon())),
             Some(em) => d.text_size(px(13.)).line_height(px(20.)).child(em.clone()),
             None => d.child(icon("doc", crate::sidebar::ROW_ICON, Theme::icon())),
@@ -235,7 +237,8 @@ impl Workspace {
     pub(crate) fn move_folder_drag(&mut self, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         let Some(d) = self.folder_drag.active.as_mut() else { return };
         d.at = at;
-        if !d.started && (f32::from(at.x - d.start.x).hypot(f32::from(at.y - d.start.y)) >= 4.) {
+        // A root's row is clicked, never dragged: roots don't move inside one another.
+        if !d.started && crate::shared_store::root_of_row(&d.id).is_none() && (f32::from(at.x - d.start.x).hypot(f32::from(at.y - d.start.y)) >= 4.) {
             d.started = true; d.lift.to = 1.;
             self.folder_drag.icon_press = false;
             self.folder_drag.icon_alt = false;
@@ -403,16 +406,20 @@ impl Workspace {
         let Some(movement) = self.folder_drag.pending.front().cloned() else { return };
         self.folder_drag.saving = true;
         let history = movement.history;
-        let mut writer = self.store.tree_writer();
+        let Some((key, mut writer)) = self.store.tree_writer(Some(&movement.id)) else { self.folder_drag.saving = false; self.folder_drag.pending.pop_front(); return; };
+        // Moves stay inside a root (W7); a root's row is its top level.
+        let allowed = self.store.same_root(&movement.id, movement.parent.as_deref());
+        let (parent, before) = (self.store.real_parent(movement.parent.as_deref()).map(str::to_string), self.store.real_parent(movement.before.as_deref()).map(str::to_string));
         let task = cx.background_executor().spawn(async move {
             let journal = writer.track_file_changes();
-            let result = writer.move_in_tree(&movement.id, movement.parent.as_deref(), movement.before.as_deref());
+            let result = allowed.and_then(|_| writer.move_in_tree(&movement.id, parent.as_deref(), before.as_deref()));
             let restored = if result.is_err() { Some(writer.list()) } else { None };
             (result, restored, journal.take())
         });
         cx.spawn(async move |this, cx| {
             let (result, restored, changes) = task.await;
             let _ = this.update(cx, |w, cx| {
+                let restored = restored.map(|r| w.store.merge_entries(&key, r));
                 w.folder_drag.pending.pop_front();
                 w.folder_drag.saving = false;
                 if let Err(ref e) = result {
@@ -441,7 +448,7 @@ impl Workspace {
     /// The row the selection pill sits on: the open doc, or the open folder.
     fn sidebar_pick(&self) -> Option<String> {
         match self.view {
-            crate::app::View::Doc => self.current.clone(),
+            crate::app::View::Doc => self.current.as_deref().map(|id| self.row_of(id)),
             crate::app::View::Folder => self.folder_current.clone(),
             _ => None,
         }
@@ -466,7 +473,9 @@ impl Workspace {
         let mut moving = false;
 
         let renaming = self.rename.as_ref().map(|r| r.id.clone());
-        self.folder_drag.parents = self.entries.iter().filter_map(|e| e.meta.parent.clone()).collect();
+        // A folder's 正文 is its own row, not something inside it.
+        let notes: std::collections::HashSet<&str> = self.entries.iter().filter_map(|e| e.note.as_deref()).collect();
+        self.folder_drag.parents = self.entries.iter().filter(|e| !notes.contains(e.id.as_str())).filter_map(|e| e.meta.parent.clone()).collect();
         let high = crate::settings::motion_high();
         // The visible band in this list's coordinates, from last frame's layout. Both edges are
         // measured against the list itself (sections above it scroll too), and padded so a
@@ -746,6 +755,10 @@ impl Workspace {
             if !on_screen(*y) { continue; }
             let el = div().id(SharedString::from(format!("fclose-{}", r.entry.id))).h(row_h).opacity(*a).text_color(Theme::sidebar_text())
                 .child(row_face(&r.entry, self.expanded.contains(&r.entry.id)));
+            for k in 0..r.depth {
+                let g = div().id(SharedString::from(format!("fcguide-{}-{k}", r.entry.id))).h(px(PITCH)).bg(Theme::sidebar_guide()).opacity(*a);
+                container = container.child(clipped(g, k as f32 * INDENT + GUIDE_X, *y - 4. * (1. - a), 1., Some(*band)));
+            }
             container = container.child(clipped(el, *x, *y - 4. * (1. - a), *w, Some(*band)));
         }
         if let Some((s, a)) = &fd.zone {
@@ -790,6 +803,13 @@ impl Workspace {
             if band.is_some_and(|(lo, hi)| hi - lo < 0.5 || y >= hi || y + PITCH <= lo) { continue; }
             if !on_screen(y) { continue; }
             let a = reveal[i];
+            // Indent guides, one per level above the row; they bridge the gap to the next row while it is still inside.
+            for k in 0..r.depth {
+                let on = rows.get(i + 1).is_some_and(|n| n.depth > k) && slot.is_none_or(|(s, _)| s != i + 1);
+                let g = div().id(SharedString::from(format!("fguide-{id}-{k}"))).h(px(if on { PITCH } else { crate::sidebar::ROW_H }))
+                    .bg(Theme::sidebar_guide()).opacity(fx.show.unit() * a);
+                container = container.child(clipped(g, k as f32 * INDENT + GUIDE_X, y - 4. * (1. - a), 1., band));
+            }
             let hid = id.clone();
             let el = div().id(SharedString::from(format!("frow-{id}"))).h(row_h)
                 .opacity(fx.show.unit() * a)
@@ -823,6 +843,14 @@ impl Workspace {
     fn sidebar_click(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let on_icon = std::mem::take(&mut self.folder_drag.icon_press) && self.folder_drag.has_children(id);
         let all = std::mem::take(&mut self.folder_drag.icon_alt);
+        // A document with children opens; its chevron folds it.
+        if let Some(note) = self.entries.iter().find(|e| e.id == id).and_then(|e| e.note.clone()) {
+            if on_icon {
+                if !self.expanded.remove(id) { self.expanded.insert(id.to_string()); }
+                cx.notify();
+            } else { self.open(&note, window, cx); }
+            return;
+        }
         if self.entries.iter().any(|e| e.id == id && e.meta.folder.is_some()) {
             let shown = self.view == crate::app::View::Folder && self.folder_current.as_deref() == Some(id);
             if on_icon || shown {

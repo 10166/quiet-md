@@ -134,7 +134,9 @@ fn find_open_doc(doc_id: &str, cx: &App) -> Option<Document> {
 }
 
 fn load_doc_live_or_disk(store: &SharedStore, doc_id: &str, cx: &App) -> Result<(Document, bool, String), AgentError> {
-    let entries = store.with(|s| s.list());
+    // Every open root's documents, as the sidebar lists them.
+    let mut store = store.clone();
+    let entries = store.list();
     let entry = entries.iter().find(|e| e.id == doc_id).ok_or_else(|| {
         AgentError::new("DOC_NOT_FOUND", format!("document {doc_id:?} not found"))
     })?;

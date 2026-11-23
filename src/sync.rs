@@ -55,7 +55,7 @@ pub fn notify_purged_trash(ids: &[String]) {
 }
 
 pub fn init(cx: &mut App) { imp::init(cx); }
-pub fn reinit_for_library(cx: &mut App) { imp::reinit_for_library(cx); }
+pub fn roots_changed(cx: &mut App) { imp::roots_changed(cx); }
 pub fn flush_before_quit(cx: &mut App) { imp::flush_before_quit(cx); }
 pub fn set_active_doc(doc_id: Option<String>, cx: &App) { imp::set_active_doc(doc_id, cx); }
 pub fn status_pill(cx: &mut Context<Workspace>) -> Option<AnyElement> { imp::status_pill(cx) }
@@ -76,7 +76,7 @@ mod imp {
     pub fn notify_hints(_: Vec<Hint>) {}
     pub fn notify_user_activity() {}
     pub fn init(_: &mut App) {}
-    pub fn reinit_for_library(_: &mut App) {}
+    pub fn roots_changed(_: &mut App) {}
     pub fn flush_before_quit(_: &mut App) {}
     pub fn set_active_doc(_: Option<String>, _: &App) {}
     pub fn status_pill(_: &mut Context<Workspace>) -> Option<AnyElement> { None }
@@ -330,8 +330,8 @@ mod imp {
 
     pub fn init(cx: &mut App) {
         let Some(store) = cx.try_global::<SharedStore>().cloned() else { return };
-        let sync_dir = store.sync_local_dir();
-        let root = store.root();
+        // The first open root's library; until one is open there is nothing to sync.
+        let (Some(sync_dir), Some(root)) = (store.sync_local_dir(), store.sync_root()) else { return };
         let configured = sync_dir.join("credentials.json").exists() || sync_dir.join("state.db").exists();
         cx.set_global(SyncManager {
             handle: None,
@@ -354,6 +354,15 @@ mod imp {
         }
         init(cx);
         refresh_all_workspaces(cx);
+    }
+
+    /// A root came or went (工作区, deferred out of any window update): the sync
+    /// follows the first open root, so it starts over when that is another one.
+    pub fn roots_changed(cx: &mut App) {
+        let Some(store) = cx.try_global::<SharedStore>().cloned() else { return };
+        let root = store.sync_root();
+        let same = cx.try_global::<SyncManager>().is_some_and(|m| root.as_ref() == Some(&m.root));
+        if !same { reinit_for_library(cx); }
     }
 
     pub fn flush_before_quit(cx: &mut App) {
@@ -544,7 +553,9 @@ mod imp {
         let Some(mut store) = cx.try_global::<SharedStore>().cloned() else { return };
         match req {
             AdapterReq::GetStoreSnapshot(reply) => {
-                let _ = reply.send(store.tree_writer());
+                if let Some(writer) = store.sync_with(|s| s.tree_writer()) {
+                    let _ = reply.send(writer);
+                }
             }
             AdapterReq::AdoptId(old_id, new_id, reply) => {
                 let res = store.adopt_entity_id(&old_id, &new_id);
@@ -615,7 +626,7 @@ mod imp {
                     )?;
                 }
                 other => {
-                    let sub = store.with(|s| apply_remote_sync(s, &[other]))?;
+                    let sub = store.sync_with(|s| apply_remote_sync(s, &[other])).ok_or_else(crate::shared_store::no_root)??;
                     report.tree_changed |= sub.tree_changed;
                     report.trash_changed |= sub.trash_changed;
                     for r in sub.skipped_raced_ids {
@@ -713,7 +724,7 @@ mod imp {
 
             if preserved.is_none()
                 && let Some(exp) = expected_local_hash.as_ref()
-                && !store.with(|s| check_expected_local_hash(s, EntityKind::Document, &id, exp.as_deref()))?
+                && !store.sync_with(|s| check_expected_local_hash(s, EntityKind::Document, &id, exp.as_deref())).ok_or_else(crate::shared_store::no_root)??
             {
                 report.skipped_raced_ids.push((EntityKind::Document, id));
                 return Ok(());
@@ -920,7 +931,7 @@ mod imp {
         }
 
         if let Some(exp) = expected_local_hash.as_ref()
-            && !store.with(|s| check_expected_local_hash(s, EntityKind::Document, &id, exp.as_deref()))?
+            && !store.sync_with(|s| check_expected_local_hash(s, EntityKind::Document, &id, exp.as_deref())).ok_or_else(crate::shared_store::no_root)??
         {
             report.skipped_raced_ids.push((EntityKind::Document, id));
             return Ok(());

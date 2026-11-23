@@ -49,9 +49,10 @@ Write one command per line. Lines beginning with `#` are comments. See the top o
 | `mods shift cmd` / `mods none` | Hold these modifier keys (shift, cmd, alt, ctrl) for the mouse steps that follow; `none` lets go. |
 | `mdown x y` / `mdragto x y` / `mup x y` | Press, drag or release the middle (wheel) button. |
 | `wheel x y dy [dx]` | Send one wheel event. Optional horizontal delta simulates a trackpad. Positive values reveal content to the right. |
+| `pinch x y delta` | Send one trackpad pinch event at (x, y). A delta of 0.1 zooms in by 10%; negative values zoom out. |
 | `shot <name>` / `burst <name> n` | Take one screenshot or n shots about 8 ms apart. |
 | `mark <text>` / `commit <text>` | Set or commit IME composition text. |
-| `clip html\|text\|image <file>` / `clip clear` | Set the simulated clipboard for a subsequent `key cmd-v`. Append multiple images or combine text and HTML. Use clear to empty it. |
+| `clip html\|text\|image <file>` / `clip clear` / `clip save <file>` | Set the simulated clipboard for a subsequent `key cmd-v`. Append multiple images or combine text and HTML. Use clear to empty it. `save` writes the text a copy put there to a file. |
 | `pick <path>[\|<path>…]` | Supply the next open/save dialog response without opening a system panel. |
 | `resize w h` | Resize the window. |
 | `place x y` | Move the top-left corner to (x, y) on the main display above other windows. Use with `FDL_NOPARK` for desktop captures. |
@@ -70,6 +71,8 @@ Write one command per line. Lines beginning with `#` are comments. See the top o
 - `FDL_WINDOW_CAPTURE` uses the window server to capture system-drawn window controls.
 - `FDL_NOBLINK` disables caret blinking (set by `compare.py`).
 - `FDL_RECORD_FPS` sets the recording frame rate (default 30).
+- `QUIET_MD_FONT_URL`, `QUIET_MD_FONT_DIR` and `QUIET_MD_TRIAL_FONTS` are passed through: downloadable fonts (the board's Xiaolai, document fonts) are fetched from that folder into that cache, a compiled-in Xiaolai is ignored, and the trial fonts are listed (docs/FONTS.md). `python3 tools/harness/board_font.py` checks the board's font and its download note, `python3 tools/harness/doc_fonts.py` the document font list (`--compare` shoots an article in every font).
+- `QUIET_MD_UPDATE_URL` is passed through: the updater reads that folder instead of download.quiet.md. To test forced updates see docs/UPDATES.md. Downloads land in `~/Library/Caches/com.s1dashu.quietmd` of the `HOME` the app sees.
 
 ## Rules for running scripts
 
@@ -81,3 +84,22 @@ The harness runs on a computer someone may be using.
 - Do not click links, Web Search or link-opening buttons that launch a browser. Avoid Print (system print panel), Quick Look and `qlmanage -p`.
 - Do not use the `open` command. Use `pick a|b` when a script needs to select files.
 - Never use the real user library as `lib_dir`. If its contents are essential, make a read-only copy and keep user content out of committed artifacts.
+
+## Release self-test
+
+Shipped builds have no script driver, so a release is checked by scenarios compiled into the app (`src/selftest.rs`). `quiet_md --self-test <empty dir> [report.json]` takes no script and accepts no other input. It creates a library in `<dir>/文档库 Library` and starts the app twice from the same executable, with `QUIET_MD_HOME` set to that library. It never opens `~/Documents/Quiet.md`. Each launch goes through normal startup, including the GPU, window, fonts and assets, but skips onboarding, the global shortcut and focus stealing, as scripted runs do. It runs its scenarios in-process, then quits through the app's own quit path. Scenarios check library files and app state, not pixels, and between steps they wait on a condition instead of a fixed delay.
+
+- **Launch 1:** seeding the Getting Started guides into an empty library (the window must render something other than a blank frame), a new document that is typed into and saved automatically, Copy as Markdown through the clipboard (the clipboard is restored afterwards), search in Latin and CJK, importing a Markdown file and a folder, moving to the trash and restoring, opening a new board, and checking for updates against a local server (`127.0.0.1`, never the internet). The update manifest must validate and the package must download. The release key must reject the package because it is signed with a throwaway key, which does verify it.
+- **Launch 2:** the document from launch 1 reopens with its text, and the library has not been seeded again.
+
+The report records each scenario's result and time in milliseconds. A failed scenario's entry gives the error and the path to `failed-<scenario>.png`, an offscreen render of the window. A crash or hang fails the scenario that was running. Its entry includes the panic from `<dir>/logs/quiet-md.log`. A launch counts as hung after `QUIET_MD_SELF_TEST_TIMEOUT` seconds (default 180). The command exits with 0 when every scenario passes, 1 when one fails, and 2 for usage errors. A full run takes about 2 seconds.
+
+```sh
+cargo build --release && target/release/quiet_md --self-test "$(mktemp -d)/run"   # Development build
+scripts/self-test-macos.sh dist-release.*/quiet-md-<version>-macos-arm64.zip       # A package: unzipped into a path with spaces and CJK
+scripts/self-test-windows.ps1 -Installer quiet-md-<version>-windows-x64-setup.exe  # Installs silently, runs, uninstalls
+```
+
+CI runs the macOS script on both packages, with Intel under Rosetta. It runs the Windows script on the installer, installing into a temporary folder whose path contains spaces and CJK. Both jobs upload `self-test/` (reports, logs and screenshots, without the library) as `self-test-macos` / `self-test-windows`. For a release, run the macOS script on each signed, notarized zip from `scripts/release.sh` before uploading it. A package signed with a team identity must also pass `spctl` (Gatekeeper).
+
+To add a scenario, write an `async fn` on `Run` in `src/selftest.rs` that drives the app through `Workspace`/`Editor` methods or `type_text`/`key`, then waits with `until(what, secs, condition)` and returns `Err` with a message on failure. List it with `scenario!` in `phase1` or `phase2`. Pass anything launch 2 needs through `Carry`. Keep each scenario to a few seconds and its fixtures inside the run directory.

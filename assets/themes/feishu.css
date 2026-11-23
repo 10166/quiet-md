@@ -159,6 +159,7 @@ h1 {
   font-size: 26px;
   line-height: 36.4px;
   font-weight: 500;
+  color: inherit;
   margin-top: 26px;
   margin-bottom: 10px;
 }
@@ -167,6 +168,7 @@ h2 {
   font-size: 22px;
   line-height: 30.8px;
   font-weight: 500;
+  color: inherit;
   margin-top: 22px;
   margin-bottom: 8px;
 }
@@ -175,6 +177,7 @@ h3 {
   font-size: 20px;
   line-height: 28px;
   font-weight: 500;
+  color: inherit;
   margin-top: 20px;
   margin-bottom: 8px;
 }
@@ -183,6 +186,7 @@ h4 {
   font-size: 18px;
   line-height: 25.2px;
   font-weight: 500;
+  color: inherit;
   margin-top: 18px;
   margin-bottom: 8px;
 }
@@ -191,6 +195,7 @@ h5 {
   font-size: 16px;
   line-height: 26px;
   font-weight: 500;
+  color: inherit;
   margin-top: 18px;
   margin-bottom: 8px;
 }
@@ -199,6 +204,7 @@ h6 {
   font-size: 16px;
   line-height: 26px;
   font-weight: 500;
+  color: inherit;
   margin-top: 16px;
   margin-bottom: 8px;
 }
@@ -207,6 +213,7 @@ h7 {
   font-size: 16px;
   line-height: 26px;
   font-weight: 500;
+  color: inherit;
   margin-top: 16px;
   margin-bottom: 8px;
 }
@@ -215,6 +222,7 @@ h8 {
   font-size: 16px;
   line-height: 26px;
   font-weight: 500;
+  color: inherit;
   margin-top: 16px;
   margin-bottom: 8px;
 }
@@ -223,8 +231,17 @@ h9 {
   font-size: 16px;
   line-height: 26px;
   font-weight: 500;
+  color: inherit;
   margin-top: 16px;
   margin-bottom: 8px;
+}
+
+strong {
+  color: inherit;
+}
+
+em {
+  color: inherit;
 }
 
 a {
@@ -233,6 +250,12 @@ a {
 
 a:hover {
   color: #245bdb;
+}
+
+code {
+  color: inherit;
+  border-radius: 4px;
+  padding-left: 2px;
 }
 
 pre {

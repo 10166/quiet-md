@@ -32,8 +32,9 @@ shader_args = ["--features", "gpui_platform/runtime_shaders"] if runtime_shaders
 devtools_features = "devtools,gpui_platform/runtime_shaders" if runtime_shaders else "devtools"
 
 cargo("test", "--release", "--workspace", "--locked", *shader_args)
-cargo("test", "--release", "--locked", "-p", "fdl_core", "library_round_trips", "--", "--ignored",
-      env={**os.environ, "FDL_ROUNDTRIP_DIR": str(Path("shared-mock/library").resolve())})
+for library in ["shared-mock/library", "shared-mock/library-zh"]:
+    cargo("test", "--release", "--locked", "-p", "fdl_core", "library_round_trips", "--", "--ignored",
+          env={**os.environ, "FDL_ROUNDTRIP_DIR": str(Path(library).resolve())})
 source = Path("shared-mock/guides/assets")
 bundled = Path("shared-mock/library/.assets/guides")
 for image in source.rglob("*"):
@@ -44,3 +45,5 @@ print("Bundled guide assets match their sources")
 cargo("clippy", "--release", "--workspace", "--locked", "--all-targets", *shader_args, "--", "-D", "warnings")
 # The harness build (script driver compiled in) must stay clean too.
 cargo("clippy", "--release", "--workspace", "--locked", "--all-targets", "--features", devtools_features, "--", "-D", "warnings")
+# 数据表 is off by default (Cargo feature `datatable`); the build with it on must stay clean too.
+cargo("clippy", "--release", "--workspace", "--locked", "--all-targets", "--features", f"{devtools_features},datatable", "--", "-D", "warnings")

@@ -200,7 +200,8 @@ fn parse_block(e: &Element, out: &mut Vec<Block>) {
     if name == "datatable" && let Some(src) = e.attr("src").filter(|s| !s.is_empty()) {
         let height = e.attr("height").and_then(|v| v.parse::<f32>().ok()).filter(|h| h.is_finite() && *h > 0.).unwrap_or(crate::table::DEFAULT_HEIGHT);
         let named = |k: &str| e.attr(k).filter(|v| !v.is_empty()).map(str::to_string);
-        let mut b = Block::new(BlockKind::DataTable(crate::table::TableRef { src: src.to_string(), table: named("table"), view: named("view"), height }), RichText::default());
+        let width = e.attr("width").and_then(|v| v.parse::<f32>().ok()).filter(|w| w.is_finite() && *w > 0.);
+        let mut b = Block::new(BlockKind::DataTable(crate::table::TableRef { src: src.to_string(), table: named("table"), view: named("view"), height, width }), RichText::default());
         b.comment_ids = parse_comment_ids(e);
         out.push(b);
         return;
@@ -270,6 +271,7 @@ fn parse_block(e: &Element, out: &mut Vec<Block>) {
                     lang: crate::lang::from_token(e.attr("lang").unwrap_or("")),
                     caption: e.attr("caption").map(str::to_string),
                     wrap: e.attr("wrap") == Some("true"),
+                    show_code: e.attr("view") == Some("code"),
                 },
                 RichText::plain(text),
             )
@@ -928,7 +930,7 @@ fn write_blocks(blocks: &[Block], s: &mut String, depth: usize) {
     }
 }
 
-/// Text, heading, list and todo blocks remember being folded.
+/// Text, heading, list, todo and code blocks remember being folded.
 fn folded_attr(folded: bool) -> &'static str {
     if folded { " folded=\"true\"" } else { "" }
 }
@@ -971,7 +973,7 @@ fn write_block(b: &Block, s: &mut String, depth: usize) {
             s.push_str("</checkbox>\n");
         }
         BlockKind::Bullet | BlockKind::Ordered { .. } => unreachable!("handled by write_blocks"),
-        BlockKind::Code { lang, caption, wrap } => {
+        BlockKind::Code { lang, caption, wrap, show_code } => {
             s.push_str(&format!("<pre lang=\"{}\"", esc_attr(&crate::lang::to_token(lang))));
             if let Some(c) = caption {
                 s.push_str(&format!(" caption=\"{}\"", esc_attr(c)));
@@ -979,6 +981,10 @@ fn write_block(b: &Block, s: &mut String, depth: usize) {
             if *wrap {
                 s.push_str(" wrap=\"true\"");
             }
+            if *show_code {
+                s.push_str(" view=\"code\"");
+            }
+            s.push_str(fo);
             s.push_str(&cm);
             s.push_str("><code>");
             s.push_str(&esc(&b.text.text));
@@ -1085,7 +1091,9 @@ fn write_block(b: &Block, s: &mut String, depth: usize) {
             s.push_str(&format!("<datatable src=\"{}\"", esc_attr(&t.src)));
             if let Some(n) = &t.table { s.push_str(&format!(" table=\"{}\"", esc_attr(n))); }
             if let Some(n) = &t.view { s.push_str(&format!(" view=\"{}\"", esc_attr(n))); }
-            s.push_str(&format!(" height=\"{}\"{cm}/>\n", fmt_num(t.height)));
+            s.push_str(&format!(" height=\"{}\"", fmt_num(t.height)));
+            if let Some(w) = t.width { s.push_str(&format!(" width=\"{}\"", fmt_num(w))); }
+            s.push_str(&format!("{cm}/>\n"));
         }
         BlockKind::Raw { xml, .. } => {
             if IN_CELL.get() {
@@ -1547,6 +1555,9 @@ mod tests {
         assert_eq!(serialize(&doc), x);
         assert!(doc.blocks.iter().any(|b| matches!(&b.kind, BlockKind::Board(bd) if bd.elements.len() == 3 && bd.height == 360.)));
         assert!(doc.blocks.iter().any(|b| matches!(&b.kind, BlockKind::Raw { tag, .. } if tag == "whiteboard")), "a 飞书 board stays as it came");
+        assert!(doc.blocks.iter().any(|b| matches!(&b.kind, BlockKind::Code { .. }) && b.folded && b.text.text == "被折叠的代码"));
+        let mermaid: Vec<bool> = doc.blocks.iter().filter_map(|b| match &b.kind { BlockKind::Code { lang, show_code, .. } if lang == "Mermaid" => Some(*show_code), _ => None }).collect();
+        assert_eq!(mermaid, [false, true], "Mermaid blocks: the diagram by default, `view=\"code\"` for the source");
         let text = doc.plain_text();
         for s in ["被折叠的段落", "尾随空格 \n", "\n \n", "fn main() {\n    println!(\"<hi> & 'q'\");\n\n}", "a = 1\nb = 2", "\\frac{1}{2}", "空项下的段落", "画板 <&>"] {
             assert!(text.contains(s), "{s:?} missing from {text:?}");

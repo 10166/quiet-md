@@ -80,14 +80,6 @@ pub struct RemoteDocApplied {
 }
 
 impl Store {
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
-    pub fn library_id(&self) -> String {
-        library_key(&self.root)
-    }
-
     /// Directory outside the library where sync state DB & credentials live.
     pub fn sync_local_dir(&self) -> PathBuf {
         let tmp = crate::vfs::temp_dir();
@@ -793,9 +785,9 @@ mod tests {
         assert!(res1.changed);
         assert_eq!(res1.rel, "Projects/Spec.xml");
 
-        // Second doc with same name gets ` 2` suffix instead of overwriting d1.
+        // Second doc with same name gets the store's clash name (` (2)`) instead of overwriting d1.
         let res2 = s.apply_remote_document(&d2_id, "Spec.xml", Some(&f_id), "xml", &meta, &d2_bytes, false).unwrap();
-        assert_eq!(res2.rel, "Projects/Spec 2.xml");
+        assert_eq!(res2.rel, "Projects/Spec (2).xml");
 
         // Rename folder remotely and verify children follow cleanly.
         assert!(s.apply_remote_folder(&f_id, "Specs", None, &meta, false).unwrap());

@@ -2,9 +2,11 @@ use super::*;
 
 impl Store {
     /// Independent handle for background tree writes; begin_write reloads under the library lock.
+    /// It takes the parsed documents along, so its `list` reads only files that changed.
     pub fn tree_writer(&self) -> Self {
         Self { file_changes: vec![], root: self.root.clone(), index: self.index.clone(), foreign: self.foreign.clone(), trash: self.trash.clone(), flat: self.flat,
-            loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), warnings: vec![], migrated: None, batch: Default::default() }
+            loaded: Default::default(), copied: Default::default(), parsed: self.parsed.clone(), warnings: vec![], migrated: None, batch: Default::default(), view: Default::default(),
+            v5: self.v5, me: self.me.clone(), clock: self.clock.clone(), seen: self.seen.clone(), merged: self.merged.clone(), key: self.key.clone() }
     }
 
     pub fn take_warnings(&mut self) -> Vec<String> { std::mem::take(&mut self.warnings) }
@@ -15,7 +17,9 @@ impl Store {
         let dir = parent.and_then(|p| self.index.get(p)).map(|p| p.rel.clone()).unwrap_or_default();
         let name = base_name(&m.rel);
         let ext = m.folder.is_none().then(|| ext_of(m));
-        let base = if ext.is_some() { layout::unnumbered(stem_of(name)) } else { layout::unnumbered(name) };
+        let stem = if ext.is_some() { stem_of(name) } else { name };
+        // A folder's or Markdown file's name is its title: 「报告 (2).md」 stays that.
+        let base = if m.folder.is_some() || m.named_by_file() { stem } else { layout::unnumbered(stem) };
         join_rel(&dir, &self.free_name(&dir, base, ext, None))
     }
 
@@ -31,7 +35,6 @@ impl Store {
     }
 
     pub fn create_folder(&mut self, title: &str, parent: Option<&str>) -> Result<String> {
-        if let Some(p) = parent.filter(|p| self.is_mounted(p)) { return self.create_folder_in_mount(p, title); }
         let _lock = self.begin_write()?;
         self.validate_folder(None, parent)?;
         let id = uuid::Uuid::new_v4().to_string();
@@ -82,12 +85,6 @@ impl Store {
 
     /// Persist one drop atomically; neither document content nor timestamps change.
     pub fn move_in_tree(&mut self, id: &str, parent: Option<&str>, before: Option<&str>) -> Result<()> {
-        // 本机文件夹: moves stay among them, on disk.
-        match (self.is_mounted(id), parent.is_some_and(|p| self.is_mounted(p))) {
-            (true, true) => return self.move_in_mount(id, parent.unwrap()),
-            (false, false) => {}
-            _ => anyhow::bail!("本机文件夹和文档库之间只能复制，不能移动"),
-        }
         let _lock = self.begin_write()?;
         anyhow::ensure!(self.index_has(id), "文档或文件夹不存在");
         self.validate_folder(Some(id), parent)?;

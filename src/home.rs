@@ -56,8 +56,30 @@ const STARRED_COLS: [Col; 4] = [Col::Modified, Col::Created, Col::Visited, Col::
 
 /// Bounded document trees retain formatting without retaining a whole long document.
 type EquationNumbers = HashMap<crate::model::BlockId, u32>;
-struct ThumbContent { blocks: Vec<crate::model::Block>, eqnos: EquationNumbers, has_subpages: bool }
+/// `tables`: the 数据表 files the page shows (their rows drawn in the card), saved apart from the page.
+struct ThumbContent { blocks: Vec<crate::model::Block>, eqnos: EquationNumbers, has_subpages: bool, tables: Vec<String> }
 type Thumb = Rc<ThumbContent>;
+
+/// The files of the 数据表 blocks in `blocks`, at any depth.
+fn table_srcs(blocks: &[crate::model::Block], out: &mut Vec<String>) {
+    for b in blocks {
+        match &b.kind {
+            BlockKind::DataTable(t) => out.push(t.src.clone()),
+            BlockKind::Table(t) => for cell in t.rows.iter().flatten() { table_srcs(&cell.blocks, out) },
+            _ => {}
+        }
+        table_srcs(&b.children, out);
+    }
+}
+
+/// When the files in `srcs` (relative to the library) last changed, as one number.
+fn tables_time(srcs: &[String]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = rustc_hash::FxHasher::default();
+    let root = crate::store::Store::root_dir();
+    for s in srcs { std::fs::metadata(root.join(s)).and_then(|m| m.modified()).ok().hash(&mut h); }
+    h.finish()
+}
 
 fn has_subpage_list(blocks: &[crate::model::Block]) -> bool {
     blocks.iter().any(|b| match &b.kind {
@@ -199,9 +221,9 @@ fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote:
             return node.relative().p(px(bs::INSET * s)).rounded(px(bs::CALLOUT_RADIUS * s)).border(px(s)).border_color(bs::border(border.as_ref().map(|c| c.0.as_str()))).bg(bs::fill(bg.as_ref().map(|c| c.0.as_str())))
                 .child(div().flex().gap(px(bs::ICON_GAP * s)).child(div().size(px(bs::ICON * s)).mt(px((first_line - bs::ICON) / 2. * s)).text_size(px(20. * s)).line_height(px(22. * s)).flex_none().child(emoji.clone())).child(body)).into_any_element();
         }
-        BlockKind::Code { lang, caption, wrap } => {
+        BlockKind::Code { lang, caption, wrap, .. } => {
             node = node.rounded(px(bs::RADIUS * s)).border(px(s)).border_color(Theme::line_border()).bg(bs::code_surface()).font_family(theme::MONO_FONT)
-                .child(div().h(px(bs::CODE_HEADER * s)).pl(px(28. * s)).pr(px(8. * s)).rounded_t(px((bs::RADIUS - 1.) * s)).bg(bs::code_header()).flex().items_center().font_family(theme::UI_FONT).text_size(px(13. * s)).text_color(Theme::text_caption()).child(caption.clone().unwrap_or_else(|| crate::settings::text("代码块").into())));
+                .child(div().h(px(bs::CODE_HEADER * s)).pl(px(28. * s)).pr(px(8. * s)).rounded_t(px((bs::RADIUS - 1.) * s)).bg(bs::code_header()).flex().items_center().font_family(theme::ui_family()).text_size(px(13. * s)).text_color(Theme::text_caption()).child(caption.clone().unwrap_or_else(|| crate::settings::text("代码块").into())));
             let spans = crate::highlight::spans(lang, &b.text.text);
             let mut body = div().pt(px(14. * s)).pb(px(18. * s)).pr(px(20. * s)).flex().flex_col();
             let mut off = 0;
@@ -273,7 +295,7 @@ fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote:
     }
     if b.kind.has_text() {
         let runs = b.text.runs.iter().map(|r| {
-            let mut f = font(if r.marks.code { theme::MONO_FONT } else { theme::UI_FONT });
+            let mut f = font(if r.marks.code { theme::MONO_FONT } else { theme::ui_family() });
             f.weight = if r.marks.bold { FontWeight::BOLD } else { bs::weight(&b.kind) };
             if r.marks.italic || quote { f.style = FontStyle::Italic; }
             let mut ink = if r.marks.link.is_some() { Theme::link() } else { r.marks.text_color.as_ref().and_then(|c| theme::text_color(&c.0)).map(bs::display_ink).unwrap_or(color) };
@@ -426,7 +448,7 @@ fn weight3(mut d: Div) -> Div {
 
 /// A document's icon: its emoji, or the monochrome page glyph.
 fn entry_icon(e: &Entry) -> AnyElement {
-    if e.meta.folder.is_some() { return icon("folder", 22., Theme::icon()).mr(px(13.)).into_any_element(); }
+    if e.meta.folder.is_some() && e.note.is_none() { return icon("folder", 22., Theme::icon()).mr(px(13.)).into_any_element(); }
     match &e.icon {
         _ if e.meta.named_by_file() => crate::search::doc_icon_named(crate::search::file_glyph(&e.meta)).mr(px(12.)).into_any_element(),
         Some(em) => div().size(px(24.)).mr(px(12.)).flex_none().flex().items_center().justify_center().text_size(px(18.)).child(em.clone()).into_any_element(),
@@ -462,8 +484,9 @@ impl Workspace {
 
     /// One level of the tree as 主页 shows it (a folder's page uses it too).
     pub(crate) fn level_entries(&self, parent: Option<&str>) -> Vec<Entry> {
-        // Folders under 本机文件 aren't the library's: not on its top level.
-        self.sorted_entries(self.entries.iter().filter(|e| e.meta.parent.as_deref() == parent && !(parent.is_none() && e.meta.mounted())).cloned().collect())
+        // A folder's 正文 is the folder's own card, not one inside it.
+        let notes: std::collections::HashSet<&str> = self.entries.iter().filter_map(|e| e.note.as_deref()).collect();
+        self.sorted_entries(self.entries.iter().filter(|e| e.meta.parent.as_deref() == parent && !notes.contains(e.id.as_str())).cloned().collect())
     }
 
     pub(crate) fn prepare_manual_order(&mut self, cx: &mut Context<Self>) -> bool {
@@ -501,6 +524,10 @@ impl Workspace {
         // a 数据表's rows live in its file, saved apart from the index: its time is the card's too
         let file_time = (e.meta.kind == crate::store::DocKind::Table).then(|| self.store.file_path(&e.id).and_then(|p| std::fs::metadata(p).ok()?.modified().ok())).flatten();
         file_time.hash(&mut stamp);
+        // and a page's embedded tables: a row changed there redraws the card
+        let cached_tables = self.home.thumbs.borrow().get(&e.id).map(|(_, t, _)| tables_time(&t.tables)).unwrap_or(0);
+        let mut page_stamp = stamp.clone();
+        cached_tables.hash(&mut stamp);
         let base_stamp = stamp.finish();
         // If the preview contains no sibling subpages, modified + settings uniquely
         // identifies it without rebuilding the whole tree on every frame.
@@ -509,12 +536,16 @@ impl Workspace {
         // A child-page list shows the other pages in the document's folder, as in
         // the open document (`sync_sub_pages`).
         let tree = crate::tree::Tree::new(&self.entries);
-        let children: Vec<&Entry> = tree.children(e.meta.parent.as_deref()).iter().copied().filter(|p| p.id != e.id).collect();
+        // A document with children (a folder's 正文) lists them.
+        let level = if e.note.is_some() { Some(e.id.as_str()) } else { e.meta.parent.as_deref() };
+        let children: Vec<&Entry> = tree.children(level).iter().copied().filter(|p| p.id != e.id).collect();
         let mut full_stamp = rustc_hash::FxHasher::default();
         e.meta.modified.hash(&mut full_stamp);
         file_time.hash(&mut full_stamp);
         crate::settings::feishu().hash(&mut full_stamp);
         for child in &children { (&child.id, &child.title, &child.icon).hash(&mut full_stamp); }
+        let mut children_stamp = full_stamp.clone();
+        cached_tables.hash(&mut full_stamp);
         let full_stamp = full_stamp.finish();
         if let Some((m, t, used)) = self.home.thumbs.borrow_mut().get_mut(&e.id)
             && *m == full_stamp { *used = web_time::Instant::now(); return t.clone(); }
@@ -532,16 +563,21 @@ impl Workspace {
         }
         let mut budget = 32;
         let mut eqnos = HashMap::new();
-        let loaded = self.store.load(&e.id).map(|doc| {
-            let numbers = crate::editor::equation_numbers(&doc);
+        let doc = self.store.load(e.note.as_deref().unwrap_or(&e.id));
+        let loaded = doc.as_ref().map(|doc| {
+            let numbers = crate::editor::equation_numbers(doc);
             thumb_blocks(&doc.blocks, &mut budget, 0, &numbers, &mut eqnos)
         });
         let read = loaded.is_ok();
         let mut blocks = loaded.unwrap_or_default();
         let has_subpages = has_subpage_list(&blocks);
         if has_subpages { subpages(&mut blocks, &children, &mut budget); }
-        let stamp = if has_subpages { full_stamp } else { base_stamp };
-        let t: Thumb = Rc::new(ThumbContent { blocks, eqnos, has_subpages });
+        let mut tables = vec![];
+        if let Ok(doc) = &doc { table_srcs(&doc.blocks, &mut tables); }
+        // stamped with the tables just found, so the next frame finds it
+        let tt = tables_time(&tables);
+        let stamp = if has_subpages { tt.hash(&mut children_stamp); children_stamp.finish() } else { tt.hash(&mut page_stamp); page_stamp.finish() };
+        let t: Thumb = Rc::new(ThumbContent { blocks, eqnos, has_subpages, tables });
         // A failed read (mid-write by another process, still in iCloud) is not
         // remembered: the card would stay blank until the document changes.
         if !read { return t; }
@@ -742,6 +778,10 @@ impl Workspace {
             .child(self.view_switch(cx).ml(px(16.))
             ) };
 
+        // No root folder open (2.8): nothing to list or sort, a way to open one.
+        if self.store.roots().is_empty() {
+            return div().flex_1().min_w_0().h_full().flex().flex_col().child(header).child(self.empty_main(cx)).into_any_element();
+        }
         let entries = self.home_entries();
         let body = if entries.is_empty() && (self.home.grid || self.home.tab == HomeTab::Recent) {
             empty_state("illus/empty-list.svg", crate::settings::text("当前列表暂无内容")).into_any_element()
@@ -868,7 +908,7 @@ impl Workspace {
         let main_w = f32::from(window.viewport_size().width) - if self.sidebar_open { self.sidebar_w(window) } else { 0. };
         let avail = (main_w - 48.).max(1.);
         let entries = entries.to_vec();
-        let mixed = entries.iter().any(|e| e.meta.folder.is_some());
+        let mixed = entries.iter().any(|e| e.meta.folder.is_some() && e.note.is_none());
         // Folders spill past their cell (shadow, tab, the front flaring open), so
         // a level holding them gets more air between cells.
         let gap = if mixed { 24. } else { 16. };
@@ -887,7 +927,8 @@ impl Workspace {
                 div().w_full().h(px(card_h + gap)).px(px(24.)).pb(px(gap))
                     .grid().grid_cols(n as u16).gap(px(gap))
                     .children(entries[start..end].iter().map(|e| {
-                        if e.meta.folder.is_some() { workspace.render_folder_card(e, col_w, card_h, window, cx) }
+                        // A folder with a 正文 is a document with child pages: a document's card (#357).
+                        if e.meta.folder.is_some() && e.note.is_none() { workspace.render_folder_card(e, col_w, card_h, window, cx) }
                         else if mixed { div().w_full().min_w_0().h(px(card_h)).flex().flex_col().justify_end()
                             .child(workspace.render_home_card(e, doc_h, cx)).into_any_element() }
                         else { workspace.render_home_card(e, card_h, cx) }

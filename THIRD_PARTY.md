@@ -4,7 +4,7 @@ Quiet.md is distributed under the [MIT license](LICENSE). The following third-pa
 
 ## Rust dependencies
 
-This table lists 803 packages from `cargo metadata` and their declared licenses, including MPL-2.0. Consult each component's license text for its terms.
+This table lists 800 packages from `cargo metadata` and their declared licenses, including MPL-2.0. Consult each component's license text for its terms.
 
 Run `scripts/licences.sh` to regenerate the table from the full dependency list.
 
@@ -229,6 +229,7 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | gpu-allocator | 0.28.0 | MIT OR Apache-2.0 |
 | gpui | 0.2.2 | Apache-2.0 |
 | gpui_apple | 0.1.0 | Apache-2.0 |
+| gpui_ios | 0.1.0 | Apache-2.0 |
 | gpui_linux | 0.1.0 | Apache-2.0 |
 | gpui_macos | 0.1.0 | Apache-2.0 |
 | gpui_macros | 0.1.0 | Apache-2.0 |
@@ -296,9 +297,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | is_terminal_polyfill | 1.70.2 | MIT OR Apache-2.0 |
 | itertools | 0.14.0 | MIT OR Apache-2.0 |
 | itoa | 1.0.18 | MIT OR Apache-2.0 |
-| jiff | 1.0.1 | Unlicense OR MIT |
-| jiff-core | 1.0.1 | Unlicense OR MIT |
-| jiff-static | 1.0.1 | Unlicense OR MIT |
 | jni-sys | 0.3.1 | MIT OR Apache-2.0 |
 | jni-sys | 0.4.1 | MIT OR Apache-2.0 |
 | jni-sys-macros | 0.4.1 | MIT OR Apache-2.0 |
@@ -393,6 +391,7 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | objc2-quartz-core | 0.2.2 | MIT |
 | objc2-quartz-core | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | objc2-security | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
+| objc2-ui-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | objc2-uniform-type-identifiers | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | objc2-user-notifications | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | objc_exception | 0.1.2 | MIT |
@@ -632,7 +631,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | tracing-core | 0.1.36 | MIT |
 | tracing-log | 0.2.0 | MIT |
 | tracing-subscriber | 0.3.23 | MIT |
-| trash | 5.4.0 | MIT |
 | try-lock | 0.2.5 | MIT |
 | ttf-parser | 0.25.1 | MIT OR Apache-2.0 |
 | tungstenite | 0.26.2 | MIT OR Apache-2.0 |
@@ -653,7 +651,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | universal-hash | 0.5.1 | MIT OR Apache-2.0 |
 | untrusted | 0.9.0 | ISC |
 | url | 2.5.8 | MIT OR Apache-2.0 |
-| urlencoding | 2.1.3 | MIT |
 | usvg | 0.45.1 | Apache-2.0 OR MIT |
 | usvg | 0.46.0 | Apache-2.0 OR MIT |
 | utf-8 | 0.7.6 | MIT OR Apache-2.0 |
@@ -860,6 +857,12 @@ SOFTWARE.
 
 rough.js, hachure-fill, points-on-curve, points-on-path, path-data-parser, perfect-freehand and nanoid use the same MIT terms. Copyright holders are listed in the table.
 
+## Bundled JavaScript
+
+| Asset | License |
+|---|---|
+| `assets/mermaid/mermaid.min.js.zlib` (Mermaid 11.17.2, `dist/mermaid.min.js` from the npm package, zlib-compressed; macOS and Windows builds only) | MIT (2014-2022 Knut Sveidqvist). See the adjacent `LICENSE`. Unmodified. The bundle includes its npm dependencies (among them d3, dagre-d3-es, cytoscape, KaTeX, marked, roughjs, langium and chevrotain, and DOMPurify) under MIT, ISC, BSD-3-Clause and Apache-2.0 terms, DOMPurify under Apache-2.0 or MPL-2.0; their license comments stay in the file. It runs only in an off-screen system web view to draw diagrams (src/mermaid.rs). |
+
 ## Windows runtime
 
 The Windows installer includes an unmodified Microsoft Visual C++ Runtime, `vcruntime140.dll`, copied from the Visual Studio x64 Redistributable directory. Microsoft's redistribution terms govern this DLL separately from Quiet.md's MIT license. The source repository does not contain the binary. See [Visual Studio 2022 Redistribution](https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution).
@@ -872,8 +875,10 @@ The Windows installer includes an unmodified Microsoft Visual C++ Runtime, `vcru
 | `assets/fonts/excalidraw/` (board fonts from Excalidraw `3a317b5`, `packages/excalidraw/fonts/`) | SIL Open Font License 1.1, full text and copyright notices in the adjacent `OFL.txt`. Excalifont (2024 Excalidraw, Ján Filípek / DizajnDesign), Virgil (2011 Your Own Font Foundry), Nunito Medium (Nunito Project Authors), Lilita One (2011 Juan Montoreano), Cascadia Code (2020 Microsoft), four Assistant weights (Assistant Project Authors / Source Sans Pro Authors), and Xiaolai SC (2020 LXGW, Seto Nozomi). Excalidraw removed non-CJK characters from Xiaolai and adjusted the positioning of Hangul and some CJK glyphs. |
 | `assets/fonts/emoji/NotoColorEmoji.ttf` (Noto Color Emoji 2.057, CBDT bitmap, from googlefonts/noto-emoji `v2026-09-24-unicode18_0`, `2D/fonts/`, embedded on Linux only) | SIL Open Font License 1.1 (2022 Google Inc.). Unmodified. See adjacent `OFL.txt`. |
 | `assets/fonts/excalidraw/ComicShanns-Regular.ttf` (Comic Shanns Mono 1.3.0) | MIT (Shannon Miwa et al.). See adjacent `LICENSE-ComicShanns.txt`. |
+| 霞鹜文楷 LXGW WenKai 1.530 (Regular, Medium; github.com/lxgw/LxgwWenKai release `v1.530`), downloadable document font, not in the packages | SIL Open Font License 1.1 (2021-2026 LXGW). Unmodified. Served from download.quiet.md with its license as `fonts/lxgw-wenkai-LICENSE.txt`. |
+| 朱雀仿宋 Zhuque Fangsong 0.212 (Regular; github.com/TrionesType/zhuque release `v0.212`, a technical-preview release), downloadable document font, not in the packages | SIL Open Font License 1.1 (2023 Zhejiang JadeFoci Technology Co., Ltd., TrionesType). Unmodified. Served from download.quiet.md with its license as `fonts/zhuque-fangsong-LICENSE.txt`. |
 
-Upstream distributes the Excalidraw board fonts as WOFF2 subsets by Unicode range. The project uses fontTools to convert and merge each family's subsets into one TrueType file. Coverage and outlines were compared glyph by glyph. Outlines, advance widths, kerning and OpenType features are preserved. The name tables for Nunito, Comic Shanns, Cascadia and Xiaolai match the family names in Excalidraw CSS. Xiaolai is stored as `Xiaolai-Regular.ttf.zlib` (14 MB, 21 MB uncompressed) and inflated on first CJK use. Upstream's Liberation Sans 1.05 (GPL with font exception) is omitted. System Arial supplies compatible widths.
+Upstream distributes the Excalidraw board fonts as WOFF2 subsets by Unicode range. The project uses fontTools to convert and merge each family's subsets into one TrueType file. Coverage and outlines were compared glyph by glyph. Outlines, advance widths, kerning and OpenType features are preserved. The name tables for Nunito, Comic Shanns, Cascadia and Xiaolai match the family names in Excalidraw CSS. Xiaolai is stored as `Xiaolai-Regular.ttf.zlib` (14 MB, 21 MB uncompressed). Shipped packages leave it out and download it from download.quiet.md on first CJK use (docs/FONTS.md), with its license as `fonts/xiaolai-LICENSE.txt`; it is inflated then. Upstream's Liberation Sans 1.05 (GPL with font exception) is omitted. System Arial supplies compatible widths.
 
 ## Icons
 

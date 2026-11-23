@@ -398,6 +398,80 @@ fn wiki_walk(blocks: &mut [Block], find: &mut dyn FnMut(&str) -> Option<PathBuf>
     }
 }
 
+/// A `quiet-wiki:` link (`[[page#heading|alias]]` as read) split into the
+/// page and the heading: the last of nested `#a#b`, none for a `#^block`.
+pub fn wiki_parts(raw: &str) -> (&str, &str) {
+    let target = raw.split('|').next().unwrap_or(raw);
+    let (name, anchor) = target.split_once('#').unwrap_or((target, ""));
+    let heading = anchor.rsplit('#').next().unwrap_or("").trim();
+    (name.trim(), if heading.starts_with('^') { "" } else { heading })
+}
+
+/// The vault `[[page]]` links in the file `from` are looked up in: the nearest
+/// folder holding `.obsidian`, else the mounted folder it is in, else (in the
+/// library) the top folder it is in — where an imported vault lands — else
+/// the folder it is in.
+pub fn wiki_vault(from: &Path, library: Option<&Path>, mounts: &[PathBuf]) -> PathBuf {
+    let dir = from.parent().unwrap_or(from);
+    if let Some(v) = dir.ancestors().find(|d| d.join(".obsidian").fs_is_dir()) { return v.to_path_buf(); }
+    if let Some(m) = mounts.iter().filter(|m| from.starts_with(m)).max_by_key(|m| m.components().count()) { return m.clone(); }
+    if let Some(lib) = library && let Ok(rel) = from.strip_prefix(lib) {
+        let mut parts = rel.components();
+        return match (parts.next(), parts.next()) { (Some(top), Some(_)) => lib.join(top), _ => lib.to_path_buf() };
+    }
+    dir.to_path_buf()
+}
+
+/// The file `[[name]]` in `from` means, the way Obsidian resolves it: `name`
+/// or `name.md`, any file in `vault` whose path ends with it, letter case
+/// aside — one in the page's own folder first, then the shortest path; a name
+/// starting `./` or `../` is a path from the page's folder. `#heading` and
+/// `|alias` are already off (`wiki_parts`); an empty name is the page itself.
+/// Only files found in the vault's listing count, so the path has their real
+/// letter case (a case-blind disk would open `top.md` for `Top.md`).
+pub fn resolve_wiki(name: &str, from: &Path, vault: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let name = name.trim().trim_start_matches('/');
+    if name.is_empty() { return Some(from.to_path_buf()); }
+    let dir = from.parent()?;
+    let mut wanted = vec![format!("{name}.md")];
+    if Path::new(name).extension().is_some() { wanted.push(name.to_string()); }
+    let norm = |p: &Path| {
+        let mut out: Vec<String> = vec![];
+        for c in p.components() {
+            match c {
+                Component::CurDir => {}
+                Component::ParentDir => { out.pop(); }
+                c => out.push(c.as_os_str().to_string_lossy().to_lowercase()),
+            }
+        }
+        out
+    };
+    for hidden in [false, true] {
+        let names = walk_names(vault, hidden);
+        for w in &wanted {
+            // A title the library had to rename on import (`:` and the like)
+            // is found by the name it was given.
+            let mut keys = vec![w.clone()];
+            let base = Path::new(w).file_name()?.to_string_lossy().into_owned();
+            let stem = base.strip_suffix(".md").unwrap_or(&base);
+            let safe = format!("{}{}", crate::store::file_name_for(stem), if base.ends_with(".md") { ".md" } else { "" });
+            if safe != base { keys.push(Path::new(w).with_file_name(safe).to_string_lossy().into_owned()); }
+            for key in keys {
+                let relative = key.starts_with("./") || key.starts_with("../");
+                let tail = if relative { norm(&dir.join(&key)) } else { norm(Path::new(&key)) };
+                let Some(last) = tail.last() else { continue };
+                let found = names.get(last).into_iter().flatten().filter(|p| {
+                    let rel = if relative { norm(p) } else { norm(p.strip_prefix(vault).unwrap_or(p)) };
+                    if relative { rel == tail } else { rel.len() >= tail.len() && rel[rel.len() - tail.len()..] == tail[..] }
+                });
+                if let Some(p) = found.min_by_key(|p| (p.parent() != Some(dir), p.components().count(), p.as_os_str().len(), p.as_path())) { return Some(p.clone()); }
+            }
+        }
+    }
+    None
+}
+
 type Names = std::collections::HashMap<String, Vec<PathBuf>>;
 
 /// Every file in `vault` by lower-case name (folders starting with `.` skipped;
@@ -870,7 +944,7 @@ mod tests {
                     .with_children(vec![Block::new(BlockKind::Bullet, RichText::plain("sub"))]),
                 Block::new(BlockKind::Ordered { seq: None }, RichText::plain("two")),
                 Block::new(BlockKind::Todo { done: true }, RichText::plain("done")),
-                Block::new(BlockKind::Code { lang: "Rust".into(), caption: None, wrap: false }, RichText::plain("fn main() {}")),
+                Block::new(BlockKind::Code { lang: "Rust".into(), caption: None, wrap: false, show_code: false }, RichText::plain("fn main() {}")),
                 Block::new(BlockKind::Quote, RichText::default()).with_children(vec![Block::text("q")]),
                 Block::new(BlockKind::Divider, RichText::default()),
             ],
@@ -895,6 +969,54 @@ mod tests {
         let out = write_file(&doc, front_matter(src).0, Some(base));
         assert_eq!(out, src);
         assert_eq!(write_file(&parse_file(&out, "page", Some(base)), front_matter(&out).0, Some(base)), out);
+    }
+
+    /// A ```mermaid fence is a Mermaid code block (drawn as a diagram); either
+    /// view saves back as the same fence.
+    #[test]
+    fn mermaid_fences_round_trip() {
+        let src = "---\ntitle: x\n---\n\n```mermaid\nflowchart LR\n    A[开始] --> B{判断}\n```\n";
+        let mut doc = parse_file(src, "page", None);
+        let [b] = doc.blocks.as_mut_slice() else { panic!("{:?}", doc.blocks) };
+        assert!(matches!(&b.kind, BlockKind::Code { lang, show_code: false, .. } if lang == "Mermaid"), "{:?}", b.kind);
+        assert_eq!(write_file(&doc, front_matter(src).0, None), src);
+        if let BlockKind::Code { show_code, .. } = &mut doc.blocks[0].kind { *show_code = true; }
+        assert_eq!(write_file(&doc, front_matter(src).0, None), src);
+        let doc = crate::docxml::parse(&crate::docxml::serialize(&doc)).unwrap();
+        assert!(matches!(&doc.blocks[0].kind, BlockKind::Code { lang, show_code: true, .. } if lang == "Mermaid"));
+    }
+
+    /// Underline is written `<u>…</u>` and reads back as underline, nested in
+    /// the other marks too; a `<u>` that was text (written `\<u>`) stays text.
+    #[test]
+    fn underline_round_trips() {
+        let base = Path::new(if cfg!(windows) { "C:/notes" } else { "/notes" });
+        let src = "Plain <u>under</u>, **<u>bold</u>**, *<u>it</u>*, ***<u>both</u>***, [<u>link</u>](https://x.y) and <u>a</u> **<u>b</u>** [<u>c</u>](https://x.y).\n\nOld \\<u>text\\</u> and `<u>code</u>`.\n\n```\n<u>fence</u>\n```\n";
+        let doc = parse_file(src, "page", Some(base));
+        let t = &doc.blocks[0].text;
+        let under: String = t.spans().filter(|(_, m)| m.underline).map(|(r, _)| &t.text[r]).collect();
+        assert_eq!(under, "underbolditbothlinkabc");
+        assert!(t.spans().any(|(r, m)| m.underline && m.bold && m.italic && &t.text[r] == "both"));
+        assert!(t.spans().any(|(r, m)| m.underline && m.link.as_deref() == Some("https://x.y") && &t.text[r] == "link"));
+        let t = &doc.blocks[1].text;
+        assert!(t.text.contains("<u>text</u>") && t.text.contains("<u>code</u>") && t.spans().all(|(_, m)| !m.underline), "{t:?}");
+        assert!(doc.blocks[2].text.text.contains("<u>fence</u>"));
+        // Saved as is, then edited (written fresh): the same text either way, and again after reopening.
+        assert_eq!(write_file(&doc, front_matter(src).0, Some(base)), src);
+        let fresh = to_markdown(&Document { blocks: doc.blocks.clone(), ..Default::default() });
+        assert!(fresh.starts_with(src.lines().next().unwrap()) && fresh.contains("Old \\<u>text\\</u>"), "{fresh}");
+        let again = to_markdown(&Document { blocks: parse_file(&fresh, "page", Some(base)).blocks, ..Default::default() });
+        assert_eq!(again, fresh);
+        // Copy as Markdown writes the same.
+        let copied = clipboard(None, &doc.blocks[..1], base);
+        assert_eq!(copied.trim_end(), src.lines().next().unwrap());
+        // DocxXML keeps it.
+        assert!(crate::docxml::serialize(&doc).contains("<u>under</u>"));
+        // Marks inside one `<u>` (Typora, Obsidian) read the same; saving writes them run by run.
+        let doc = parse_file("<u>a **b** [c](https://x.y)</u>\n", "page", None);
+        let t = &doc.blocks[0].text;
+        assert!(t.spans().all(|(_, m)| m.underline) && t.spans().any(|(r, m)| m.bold && &t.text[r] == "b"), "{t:?}");
+        assert_eq!(to_markdown(&Document { blocks: doc.blocks.clone(), ..Default::default() }), "<u>a</u> **<u>b</u>** [<u>c</u>](https://x.y)\n");
     }
 
     #[test]
@@ -1077,5 +1199,104 @@ mod tests {
         let texts: Vec<&str> = doc.blocks.iter().map(|b| b.text.text.as_str()).filter(|t| !t.is_empty()).collect();
         assert_eq!(texts, vec!["![[twice.png]]", "![[quiet.png]]", "![[ignored.png]]", "![[app.png]]"]);
         let _ = crate::vfs::remove_dir_all(&root);
+    }
+
+    /// Obsidian's `[[page]]`, `[[page|alias]]` and `[[page#heading]]` read as
+    /// links showing the alias (or the page), and are written back as they
+    /// were — in paragraphs, lists, quotes and table cells.
+    #[test]
+    fn wiki_links_read_as_links_and_write_back() {
+        let src = "See [[Page]], [[Other Note|the alias]] and [[Deep/Path/Note#Some Heading]].\n\n- [[a#^block]] and `[[code]]`\n\n> [[Quoted]]\n\n| a | b |\n| --- | --- |\n| [[Page\\|alias]] | [[Plain]] |\n\n![[embed]] text\n";
+        let doc = parse_file(src, "page", None);
+        let links: Vec<(String, String)> = doc.blocks.iter().flat_map(|b| {
+            let mut texts = vec![&b.text];
+            texts.extend(b.children.iter().map(|c| &c.text));
+            if let BlockKind::Table(t) = &b.kind { texts.extend(t.rows.iter().flatten().flat_map(|c| c.blocks.iter().map(|b| &b.text))); }
+            texts.into_iter().flat_map(|t| t.spans().filter_map(|(r, m)| Some((t.text[r].to_string(), m.link.clone()?))).collect::<Vec<_>>()).collect::<Vec<_>>()
+        }).collect();
+        assert_eq!(links, [("Page", "Page"), ("the alias", "Other Note|the alias"), ("Deep/Path/Note#Some Heading", "Deep/Path/Note#Some Heading"), ("a#^block", "a#^block"), ("Quoted", "Quoted"), ("alias", "Page|alias"), ("Plain", "Plain")]
+            .map(|(t, l)| (t.to_string(), format!("quiet-wiki:{l}"))));
+        assert_eq!(write_file(&doc, "", None), src);
+        // Re-labelled in the editor: the target stays, the new text is the alias.
+        let mut doc = parse_file("[[Page]] and [[Note|old]]\n", "page", None);
+        let t = &mut doc.blocks[0].text;
+        let text = t.text.replacen("old", "new label", 1);
+        let marks: Vec<_> = t.spans().map(|(r, m)| (r, m.clone())).collect();
+        let mut fresh = RichText::plain("");
+        for (r, m) in marks { let s = &t.text[r]; fresh.push(if s == "old" { "new label" } else { s }, m); }
+        assert_eq!(fresh.text, text);
+        doc.blocks[0].text = fresh;
+        assert_eq!(write_file(&doc, "", None), "[[Page]] and [[Note|new label]]\n");
+        // A DocxXML page keeps the link too.
+        let xml = crate::docxml::serialize(&parse_file("[[Page#H|alias]]\n", "x", None));
+        let back = crate::docxml::parse(&xml).unwrap();
+        assert_eq!(to_markdown(&back), "# x\n\n[[Page#H|alias]]\n");
+    }
+
+    #[test]
+    fn wiki_parts_split_page_heading_and_alias() {
+        assert_eq!(wiki_parts("Page"), ("Page", ""));
+        assert_eq!(wiki_parts("Page|alias"), ("Page", ""));
+        assert_eq!(wiki_parts("Page#Heading|alias"), ("Page", "Heading"));
+        assert_eq!(wiki_parts("Page#Outer#Inner"), ("Page", "Inner"));
+        assert_eq!(wiki_parts("Page#^block1"), ("Page", ""));
+        assert_eq!(wiki_parts("#Here"), ("", "Here"));
+        assert_eq!(wiki_parts("a/b/Page "), ("a/b/Page", ""));
+    }
+
+    /// Obsidian's lookup: letter case aside, the path may be left out, a
+    /// name in the page's own folder wins, then the shortest path; a partial
+    /// path picks among same names; a missing page is nothing.
+    #[test]
+    fn wiki_links_resolve_like_obsidian() {
+        let v = crate::vfs::temp_dir().join(format!("fdl-wiki-{}", uuid::Uuid::new_v4()));
+        for f in ["Top.md", "notes/Page.md", "notes/deep/Page.md", "other/Same.md", "notes/Same.md", "x/y/Same.md", "a/b/Only Here.md",
+            "Note v1.2.md", "files/report.pdf", "Ratio：Odds.md", ".trash/Gone.md", "notes/Here.md", ".attachments/hidden.pdf"] {
+            let p = v.join(f);
+            crate::vfs::create_dir_all(p.parent().unwrap()).unwrap();
+            crate::vfs::write(&p, b"x").unwrap();
+        }
+        let from = v.join("notes/Here.md");
+        let r = |name: &str| resolve_wiki(name, &from, &v).map(|p| p.strip_prefix(&v).unwrap().to_string_lossy().replace('\\', "/"));
+        assert_eq!(r("Top").as_deref(), Some("Top.md"));
+        assert_eq!(r("top").as_deref(), Some("Top.md"));
+        assert_eq!(r("Page").as_deref(), Some("notes/Page.md"));
+        assert_eq!(r("deep/Page").as_deref(), Some("notes/deep/Page.md"));
+        assert_eq!(r("Same").as_deref(), Some("notes/Same.md"));
+        assert_eq!(r("y/same").as_deref(), Some("x/y/Same.md"));
+        assert_eq!(r("only here").as_deref(), Some("a/b/Only Here.md"));
+        assert_eq!(r("/a/b/Only Here").as_deref(), Some("a/b/Only Here.md"));
+        assert_eq!(r("Note v1.2").as_deref(), Some("Note v1.2.md"));
+        assert_eq!(r("report.pdf").as_deref(), Some("files/report.pdf"));
+        assert_eq!(r("Ratio:Odds").as_deref(), Some("Ratio：Odds.md"));
+        assert_eq!(r("").as_deref(), Some("notes/Here.md"));
+        assert_eq!(r("Missing"), None);
+        assert_eq!(r("Gone"), None);
+        assert_eq!(r("z/Same"), None);
+        assert_eq!(r("../Top").as_deref(), Some("Top.md"));
+        assert_eq!(r("./deep/page").as_deref(), Some("notes/deep/Page.md"));
+        assert_eq!(r("../Page"), None);
+        assert_eq!(r("hidden.pdf").as_deref(), Some(".attachments/hidden.pdf"));
+        // From elsewhere the shortest path wins.
+        let from = v.join("a/b/Only Here.md");
+        assert_eq!(resolve_wiki("Same", &from, &v), Some(v.join("notes/Same.md")));
+        assert_eq!(resolve_wiki("Page", &from, &v), Some(v.join("notes/Page.md")));
+        let _ = crate::vfs::remove_dir_all(&v);
+    }
+
+    /// Where links are looked up: the vault, a mounted folder, an imported
+    /// vault's top folder in the library, else the page's folder.
+    #[test]
+    fn wiki_vault_is_the_nearest_sensible_root() {
+        let t = crate::vfs::temp_dir().join(format!("fdl-vault-{}", uuid::Uuid::new_v4()));
+        for d in ["obs/.obsidian", "obs/sub", "lib/Vault/notes", "mnt/a", "loose"] { crate::vfs::create_dir_all(t.join(d)).unwrap(); }
+        let lib = t.join("lib");
+        let mounts = [t.join("mnt")];
+        assert_eq!(wiki_vault(&t.join("obs/sub/x.md"), Some(&lib), &mounts), t.join("obs"));
+        assert_eq!(wiki_vault(&t.join("mnt/a/x.md"), Some(&lib), &mounts), t.join("mnt"));
+        assert_eq!(wiki_vault(&t.join("lib/Vault/notes/x.md"), Some(&lib), &mounts), t.join("lib/Vault"));
+        assert_eq!(wiki_vault(&t.join("lib/x.md"), Some(&lib), &mounts), lib);
+        assert_eq!(wiki_vault(&t.join("loose/x.md"), Some(&lib), &mounts), t.join("loose"));
+        let _ = crate::vfs::remove_dir_all(&t);
     }
 }

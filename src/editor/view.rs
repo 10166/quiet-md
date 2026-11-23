@@ -79,10 +79,38 @@ pub enum BlockSub {
     Add(usize),
 }
 
+/// Where a right-click landed: which menu it opens. A right-click inside the
+/// selection keeps it, anywhere else moves the caret first (see
+/// `Editor::on_right_click`), so the menu always describes what it will act on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CtxKind {
+    /// Text with a selection (or blocks selected as a whole).
+    Selection,
+    /// A caret in text: paste, insert and turn into.
+    Caret,
+    /// A caret in the title: paste and insert; the title is no block to
+    /// turn, align or move.
+    Title,
+    /// A read-only page: copy what is selected (`sel`), or select all.
+    ReadOnly { sel: bool },
+    /// A table cell, by slot. Right-clicking does not select the cell.
+    Cell { block: BlockId, row: usize, col: usize },
+}
+
+/// An open submenu of the right-click menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CtxSub {
+    Insert,
+    Turn,
+    Align,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Menu {
     /// "+" on an empty line: slash items without a trigger.
     Add { block: BlockId, selected: usize },
+    /// Right-click; `pos` is the page-local point the menu hangs from.
+    Ctx { pos: Point<Pixels>, kind: CtxKind, sub: Option<CtxSub> },
     /// Handle click.
     Block { block: BlockId, sub: Option<BlockSub> },
     /// Toolbar dropdowns.
@@ -153,6 +181,8 @@ pub struct Editor {
     pub probes: RefCell<Vec<(super::overlays::Probe, Option<Bounds<Pixels>>)>>,
     pub marked: Option<(BlockId, Range<usize>)>,
     pub dragging: bool,
+    /// A touch long press selected a word and its drag extends the selection (iOS).
+    pub(super) long_press: bool,
     /// Text drag: the pointer's last position and when the page last scrolled
     /// under it (`text_autoscroll`).
     drag_at: Option<Point<Pixels>>,
@@ -249,8 +279,6 @@ pub struct Editor {
     pub(super) btn: super::button::BtnUi,
     pub(super) rm: super::reminder::RmUi,
     pub(super) file: super::file::FileUi,
-    /// Folded code blocks (view state only).
-    pub(super) code_folded: std::collections::HashSet<BlockId>,
     /// SVG code blocks currently showing their source alongside the preview.
     pub(super) svg_code_open: std::collections::HashSet<BlockId>,
     /// Numbers of auto-numbered headings, refreshed each frame.
@@ -427,6 +455,7 @@ impl Editor {
             probes: RefCell::new(vec![]),
             marked: None,
             dragging: false,
+            long_press: false,
             drag_at: None,
             drag_scrolled: None,
             drag_active: None,
@@ -486,7 +515,6 @@ impl Editor {
             captions: HashMap::new(),
             img: super::image::ImageUi::new(cx),
             file: super::file::FileUi::new(),
-            code_folded: Default::default(),
             svg_code_open: Default::default(),
             heading_orders: Default::default(),
             size_pick: (0, 0),
@@ -632,6 +660,9 @@ impl Editor {
         self.core.pending_marks = None;
         self.core.generation = generation.wrapping_add(1);
         self.core.fix_selection();
+        // A caret kept inside code folded meanwhile would open it again.
+        let at = self.core.sel.head.block;
+        if self.core.block(at).is_some_and(|b| b.folded && matches!(b.kind, crate::model::BlockKind::Code { .. })) { self.core.select_block(at); }
         self.core.break_coalescing();
         self.marked = None;
         self.menu = None;
@@ -667,7 +698,13 @@ impl Editor {
 
     fn changed_with_scroll(&mut self, intent: ScrollIntent, window: &mut Window, cx: &mut Context<Self>) {
         let reveal = intent == ScrollIntent::RevealCaret;
+        // `$x$` typed delimiters first turns into an equation once the caret leaves it.
+        self.core.equation_on_leave();
         if reveal { self.core.reveal_caret(); }
+        // A folded code block opens once the caret is inside it.
+        if reveal && !self.core.in_block_mode() && self.core.set_code_folded(self.core.sel.head.block, false) {
+            self.keep_read_only_fold();
+        }
         if self.core.dirty {
             // The rows move under the caret: an old row end no longer applies.
             self.caret_row_end = None;
@@ -676,10 +713,6 @@ impl Editor {
             self.hide_link_card(cx);
             cx.emit(EditorEvent::Changed);
             self.refresh_find(false, cx);
-        }
-        // A folded code block opens once the caret is inside it.
-        if reveal && !self.core.in_block_mode() {
-            self.code_folded.remove(&self.core.sel.head.block);
         }
         self.sync_slash();
         self.sync_mention();
@@ -800,7 +833,8 @@ impl Editor {
         let (grid, with_text) = (self.slash_grid(), self.slash_grid_text());
         let ranked: Vec<usize> =
             ranked.into_iter().filter(|i| menus::SLASH_ITEMS[*i].group != 0 || menus::basic_visible(menus::SLASH_ITEMS[*i].kind, grid, with_text))
-                .filter(|i| !self.markdown || menus::markdown_ok(menus::SLASH_ITEMS[*i].kind)).collect();
+                .filter(|i| !self.markdown || menus::markdown_ok(menus::SLASH_ITEMS[*i].kind))
+                .filter(|i| crate::DATATABLE || menus::SLASH_ITEMS[*i].kind != SlashKind::DataTable).collect();
         let mut groups: Vec<usize> = vec![];
         for i in &ranked {
             let g = menus::SLASH_ITEMS[*i].group;
@@ -1154,6 +1188,17 @@ impl Editor {
 
     // ---- links, languages, colors
 
+    /// The toolbar's 转为公式 (#192): the selected text becomes an inline
+    /// equation and its editor opens; other selections get a hint.
+    pub(super) fn selection_to_equation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.core.clear_block_sel();
+        let Some(p) = self.core.selection_to_equation() else {
+            return self.toast_kind(crate::editor_ui::ToastKind::Info, crate::settings::text("只有同一段里的文字能转为公式"), cx);
+        };
+        self.changed(window, cx);
+        self.open_equation_editor(p, window, cx);
+    }
+
     /// Open the LaTeX editor of the equation at `p` (its source selected).
     pub fn open_equation_editor(&mut self, p: Pos, window: &mut Window, cx: &mut Context<Self>) {
         let Some(src) = self.core.equation_source(p) else { return };
@@ -1387,6 +1432,14 @@ impl Editor {
 
     fn move_h(&mut self, right: bool, word: bool, extend: bool) {
         let s = self.core.sel;
+        // In a line that reads right to left the arrows follow the reading
+        // direction: → goes back towards the line's start, on its right.
+        let rtl = self.core.text_of(s.head.block).is_some_and(|t| {
+            let o = s.head.offset.min(t.text.len());
+            let start = t.text[..o].rfind('\n').map_or(0, |i| i + 1);
+            super::bidi::rtl_line(t.text[start..].split('\n').next().unwrap_or(""))
+        });
+        let right = right != rtl;
         if !extend && !s.is_collapsed() {
             let (a, b) = self.core.ordered();
             self.set_caret(if right { b } else { a }, false);
@@ -1765,6 +1818,7 @@ impl Editor {
         } else if self.core.in_block_mode() {
             self.core.delete_selected_blocks();
         } else {
+            self.core.backspace_to_title = crate::settings::prefs().backspace_to_title;
             self.core.backspace();
         }
         self.toolbar_hidden = true;
@@ -1799,6 +1853,7 @@ impl Editor {
         if self.core.in_block_mode() {
             self.core.delete_selected_blocks();
         } else {
+            self.core.backspace_to_title = crate::settings::prefs().backspace_to_title;
             self.core.delete_word_back();
         }
         self.changed(window, cx);
@@ -1839,6 +1894,7 @@ impl Editor {
         if self.core.in_block_mode() {
             self.core.delete_selected_blocks();
         } else {
+            self.core.backspace_to_title = crate::settings::prefs().backspace_to_title;
             self.core.delete_to_start();
         }
         self.changed(window, cx);
@@ -2007,6 +2063,16 @@ impl Editor {
         if self.guard(window, cx) {
             self.copy_markdown(cx);
         }
+    }
+
+    /// 整理本文空格 (#293): the spaces typing would add, over the whole
+    /// document at once; one 撤销 takes them all back.
+    fn on_space_cjk(&mut self, _: &k::SpaceCjk, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.guard(window, cx) || self.read_only { return; }
+        let n = self.core.space_document();
+        if n == 0 { return self.toast(crate::settings::tr("没有需要加空格的地方", "No spaces to add"), cx); }
+        self.toast(&crate::localized_count!(n, "已加 {} 个空格", "Added {} space", "Added {} spaces", n), cx);
+        self.changed_preserving_viewport(window, cx);
     }
 
     fn on_copy(&mut self, _: &k::Copy, window: &mut Window, cx: &mut Context<Self>) {
@@ -2397,6 +2463,7 @@ impl Editor {
             .on_action(guard(cx, Self::on_select_all))
             .on_action(guard(cx, Self::on_copy))
             .on_action(guard(cx, Self::on_copy_markdown))
+            .on_action(guard(cx, Self::on_space_cjk))
             .on_action(guard(cx, Self::on_cut))
             .on_action(guard(cx, Self::on_paste))
             .on_action(guard(cx, Self::on_paste_plain))
@@ -2554,9 +2621,92 @@ impl Editor {
             self.set_caret(pos, false);
             self.caret_row_end = at_row_end.then_some((pos.block, pos.offset));
         }
+        // A click out of a `$x$` typed delimiters first makes it an equation.
+        if self.core.equation_on_leave() { self.changed_preserving_viewport(window, cx); }
         self.dragging = ev.click_count == 1;
         self.restart_blink(window, cx);
         cx.notify();
+    }
+
+    /// Right-click on the page: the menu for what was hit.
+    ///
+    /// The selection rule is the one browsers keep getting wrong: a click
+    /// *inside* the selection keeps it, anywhere else moves the caret and
+    /// clears it. The menu then matches what its items will act on, and
+    /// copy / cut never act on something the user can't see selected.
+    pub fn on_right_click(&mut self, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // The page's own click handling must not also run.
+        cx.stop_propagation();
+        window.focus(&self.focus, cx);
+        // A context menu replaces whatever was open, like any other click.
+        self.menu = None;
+        self.menu_hovered = false;
+        self.slash = None;
+        self.marked = None;
+        self.hide_link_card(cx);
+        if self.read_only {
+            // Nothing to change, but what is selected can still be copied.
+            let Some((pos, _)) = self.pos_at(ev.position) else { return cx.notify() };
+            let sel = self.core.selection_holds(pos);
+            self.menu = Some(Menu::Ctx { pos: self.rel(ev.position), kind: CtxKind::ReadOnly { sel }, sub: None });
+            return cx.notify();
+        }
+        self.dragging = false;
+        self.gap_press = None;
+        self.tables.danger = false;
+        let Some((pos, at_row_end)) = self.pos_at(ev.position) else { return cx.notify() };
+        // A table cell: 行 / 列 operations act on the slot under the pointer,
+        // so the cell selection is left as it is (a multi-cell selection the
+        // click sits inside stays, for 合并单元格).
+        if let Some((block, row, col)) = self.core.cell_of(pos.block) {
+            self.menu = Some(Menu::Ctx { pos: self.rel(ev.position), kind: CtxKind::Cell { block, row, col }, sub: None });
+            return cx.notify();
+        }
+        // Nothing to put a caret in (image, file, divider, ...): the block menu
+        // already has 剪切 / 复制 / 删除 and 在下方添加 for those.
+        // The title is text too, though no block.
+        if pos.block != TITLE && !self.core.block(pos.block).is_some_and(|b| b.kind.has_text()) {
+            return self.open_block_menu(pos.block, false, window, cx);
+        }
+        let in_sel = self.core.selection_holds(pos);
+        if !in_sel {
+            self.core.clear_block_sel();
+            self.set_caret(pos, false);
+            self.caret_row_end = at_row_end.then_some((pos.block, pos.offset));
+            self.restart_blink(window, cx);
+        }
+        let kind = if in_sel { CtxKind::Selection } else if pos.block == TITLE { CtxKind::Title } else { CtxKind::Caret };
+        self.menu = Some(Menu::Ctx { pos: self.rel(ev.position), kind, sub: None });
+        cx.notify();
+    }
+
+    /// Touch: a long press selects the word under it (as a double click does)
+    /// and moving the finger extends the selection.
+    pub(super) fn on_long_press(&mut self, ev: &LongPressEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match ev.phase {
+            TouchPhase::Started => {
+                let Some((pos, _)) = self.pos_at(ev.position) else { return };
+                let text = self.core.text_of(pos.block).map(|t| t.text.clone()).unwrap_or_default();
+                if text.is_empty() { return; }
+                window.focus(&self.focus, cx);
+                self.core.clear_block_sel();
+                self.goal_x = None;
+                self.slash = None;
+                self.marked = None;
+                let r = core::word_at(&text, pos.offset);
+                self.set_caret(Pos::new(pos.block, r.start), false);
+                self.core.sel.head = Pos::new(pos.block, r.end);
+                self.toolbar_hidden = false;
+                self.long_press = true;
+                window.prevent_default();
+                cx.stop_propagation();
+                self.restart_blink(window, cx);
+                cx.notify();
+            }
+            TouchPhase::Moved if self.long_press => self.drag_to(ev.position, cx),
+            TouchPhase::Ended | TouchPhase::Cancelled => self.long_press = false,
+            _ => {}
+        }
     }
 
     pub fn drag_to(&mut self, p: Point<Pixels>, cx: &mut Context<Self>) {
@@ -2925,6 +3075,7 @@ impl Editor {
             return;
         }
         self.core.insert_text(&s);
+        if crate::settings::prefs().cjk_spacing { self.core.space_typed(s.len()); }
         if s == " " {
             let _ = self.core.markdown_block_shortcut() || self.core.markdown_divider() || self.core.autolink();
         } else if s == "-" {
@@ -3010,6 +3161,12 @@ impl EntityInputHandler for Editor {
         let r = from16(&t, range.start)..from16(&t, range.end);
         actual.replace(to16(&t, r.start)..to16(&t, r.end));
         Some(t[r].to_string())
+    }
+
+    /// The caret block's length: iOS (gpui_ios) brings up the keyboard only
+    /// for a handler that reports one.
+    fn text_length_utf16(&mut self, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
+        Some(self.head_text()?.encode_utf16().count())
     }
 
     fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {
@@ -3148,7 +3305,7 @@ impl Editor { pub(crate) fn refresh_theme(&mut self) { self.items_key = None; se
 fn new_table_file() -> Option<String> {
     let name = format!("{}.sqlite", uuid::Uuid::new_v4());
     let path = crate::store::Store::assets_dir().join(&name);
-    crate::table::sqlite::create(&path, &crate::table::Base::blank(crate::table::field::now())).ok()?;
+    crate::table::sqlite::create(&path, &crate::table::blank_base()).ok()?;
     path.strip_prefix(crate::store::Store::root_dir()).ok().map(|r| r.to_string_lossy().replace('\\', "/"))
 }
 #[cfg(target_family = "wasm")]
