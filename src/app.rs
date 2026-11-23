@@ -1293,6 +1293,7 @@ impl Workspace {
     fn refresh_markdown(&mut self, on_stack: Option<gpui::WindowId>, cx: &mut Context<Self>) {
         if self.preview.is_some() || self.store.file_task_busy() || matches!(self.confirm, Some(Confirm::SaveFailed)) { return }
         let Some(id) = self.current.clone() else { return };
+        if !self.unsaved { self.follow_moved_links(cx); }
         if !self.store.is_markdown(&id) { return }
         if self.unsaved {
             self.flush(cx);
@@ -1305,6 +1306,22 @@ impl Workspace {
         if let Ok(Some(doc)) = self.store.with(Some(&id), |s| s.refresh_markdown(&id)) {
             self.adopt_markdown(&id, doc, cx);
         }
+    }
+
+    /// A move rewrote the open document's links to files on disk
+    /// (`Store::follow_moved_links`): every window showing it follows, so no
+    /// save writes the old paths back. Each link as it was → as it is now.
+    pub(crate) fn follow_moved_links(&mut self, cx: &mut Context<Self>) -> Option<HashMap<String, String>> {
+        let id = self.current.clone().filter(|_| self.preview.is_none())?;
+        let map = self.store.with(Some(&id), |s| Ok(s.follow_moved_links(&id))).ok().flatten()?;
+        let relink = |w: &mut Self, cx: &mut Context<Self>| if let Some(ed) = &w.editor {
+            ed.update(cx, |e, cx| if e.core.relink_files(&|l| map.get(l).cloned()) { cx.notify(); });
+        };
+        relink(self, cx);
+        for peer in Self::other_workspaces(cx) {
+            if peer.read(cx).current.as_deref() == Some(id.as_str()) { peer.update(cx, |w, cx| relink(w, cx)); }
+        }
+        Some(map)
     }
 
     /// All live views share the store's save baseline, so install the accepted
@@ -1352,6 +1369,7 @@ impl Workspace {
             self.unsaved = false;
             return true;
         };
+        self.follow_moved_links(cx);
         let doc = &ed.read(cx).core.doc;
         let (title, icon, body, reminders, links) = (doc.title.text.clone(), doc.icon.clone(), doc.plain_text(), doc.reminders(), doc.doc_links());
         match self.store.with(Some(&id), |s| s.save_editor(&id, doc)) {

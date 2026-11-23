@@ -75,8 +75,14 @@ impl Workspace {
         cx.notify();
     }
 
+    /// A relative link (`[周报](../工作/周报.md)`, `[报告](附件/报告.pdf)`,
+    /// `[[page]]`): a document of the library, or a Markdown file, opens
+    /// here; any other file opens in its app, and a folder, or a file that
+    /// would run a program, shows in the Finder.
     pub(crate) fn open_relative(&mut self, url: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(source) = self.current.as_deref().and_then(|id| self.store.file_path(id)) else { return };
+        // A move may have just rewritten the link on disk.
+        let url = &self.follow_moved_links(cx).and_then(|m| m.get(url).cloned()).unwrap_or_else(|| url.to_string());
         let wiki = url.strip_prefix("quiet-wiki:");
         let (path, anchor) = match wiki {
             // `[[page]]`, looked up across the vault the way Obsidian does.
@@ -92,17 +98,16 @@ impl Workspace {
                 (if name.is_empty() { source.clone() } else { dir.join(&name) }, crate::markdown::percent_decode(anchor))
             }
         };
-        let Some(path) = path.fs_canonicalize().ok().filter(|p| p.fs_is_file()) else {
+        let Some(path) = path.fs_canonicalize().ok().filter(|p| p.fs_exists()) else {
             self.show_toast_kind(ToastKind::Error, tr("文件不存在", "File not found"), cx);
             return;
         };
-        if !is_markdown_path(&path) {
-            if matches!(path.extension().and_then(|s| s.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("pdf" | "html" | "htm" | "ppt" | "pptx" | "docx" | "xlsx" | "txt" | "png" | "jpg" | "jpeg")) {
-                cx.open_with_system(&path);
-            } else { cx.reveal_path(&path); }
+        let existing = self.entries.iter().find(|e| self.store.file_path(&e.id)
+            .is_some_and(|p| p.file_name() == path.file_name() && p.fs_canonicalize().is_ok_and(|p| p == path))).map(|e| e.id.clone());
+        if existing.is_none() && !(is_markdown_path(&path) && path.fs_is_file()) {
+            if path.fs_is_file() && !runs_program(&path) { cx.open_with_system(&path); } else { cx.reveal_path(&path); }
             return;
         }
-        let existing = self.entries.iter().find(|e| self.store.file_path(&e.id).is_some_and(|p| p == path)).map(|e| e.id.clone());
         let id = existing.or_else(|| self.store.open_local(&path).ok());
         let Some(id) = id else { return };
         self.entries = self.store.list();
@@ -165,6 +170,16 @@ impl Workspace {
     }
 }
 
+/// Opening it would run something (an app, a script, an installer): a link
+/// in a note someone sent must not, so it only shows in the Finder.
+fn runs_program(p: &std::path::Path) -> bool {
+    const RUN: &[&str] = &["app", "command", "tool", "terminal", "sh", "bash", "zsh", "csh", "fish", "py", "pyw", "pl", "rb", "php", "js", "jse",
+        "scpt", "applescript", "workflow", "action", "pkg", "mpkg", "dmg", "jar", "exe", "com", "bat", "cmd", "msi", "msix", "ps1", "vbs", "vbe",
+        "wsf", "wsh", "scr", "pif", "hta", "cpl", "reg", "lnk", "desktop", "appimage", "run", "url", "webloc", "inetloc", "fileloc"];
+    // No extension: it may be a program.
+    p.extension().and_then(|e| e.to_str()).is_none_or(|e| RUN.contains(&e.to_ascii_lowercase().as_str()))
+}
+
 /// Files the system asked us to open (Finder's Open With, a double-click,
 /// the command line), waiting for a main window.
 #[derive(Clone, Default)]
@@ -201,5 +216,14 @@ impl Incoming {
             cx.background_executor().timer(std::time::Duration::from_millis(250)).await;
         })
         .detach();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn programs_only_show() {
+        for p in ["a/报告.pdf", "幻灯片.PPTX", "页.html", "表.xlsx"] { assert!(!super::runs_program(std::path::Path::new(p)), "{p}"); }
+        for p in ["安装.pkg", "x.command", "run.SH", "a.app", "setup.exe", "无扩展名"] { assert!(super::runs_program(std::path::Path::new(p)), "{p}"); }
     }
 }
