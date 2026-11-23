@@ -264,6 +264,8 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("~文字~ 空格", "~texto~ Espacio"),
     ("~~文字~~ 空格", "~~texto~~ Espacio"),
     ("$$文字$$", "$$texto$$"),
+    ("转为公式", "Convertir en ecuación"),
+    ("只有同一段里的文字能转为公式", "Solo el texto de un mismo párrafo puede convertirse en ecuación"),
     ("--- 或 ***", "--- o ***"),
     ("已切换为阅读模式", "Modo de lectura activado"),
     ("已切换为编辑模式", "Modo de edición activado"),

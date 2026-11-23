@@ -1975,6 +1975,8 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "~文字~ 空格" => "~text~ Space",
         "~~文字~~ 空格" => "~~text~~ Space",
         "$$文字$$" => "$$text$$",
+        "转为公式" => "Convert to equation",
+        "只有同一段里的文字能转为公式" => "Only text within one paragraph can become an equation",
         "--- 或 ***" => "--- or ***",
         "阅读模式" => "Reading mode",
         "已切换为阅读模式" => "Switched to reading mode",

@@ -301,6 +301,8 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("~文字~ 空格", "~metin~ Boşluk"),
     ("~~文字~~ 空格", "~~metin~~ Boşluk"),
     ("$$文字$$", "$$metin$$"),
+    ("转为公式", "Denkleme dönüştür"),
+    ("只有同一段里的文字能转为公式", "Yalnızca tek bir paragraftaki metin denkleme dönüştürülebilir"),
     ("--- 或 ***", "--- veya ***"),
     ("已切换为阅读模式", "Okuma moduna geçildi"),
     ("已切换为编辑模式", "Düzenleme moduna geçildi"),

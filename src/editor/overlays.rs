@@ -20,7 +20,7 @@ pub(super) const MENU_W: f32 = 247.;
 /// Table handle: 44.5 left of the grid, centred on the column-dot row 16.5 above it.
 const TABLE_HANDLE_DX: f32 = 44.5;
 const TABLE_HANDLE_DY: f32 = 16.5 + 13.;
-const TOOLBAR_W: f32 = 1. + 8. + 44. + 17. + 44. + 17. + 6. * 32. + 44. + 25. + 24. + 8. + 1.;
+const TOOLBAR_W: f32 = 1. + 8. + 44. + 17. + 44. + 17. + 7. * 32. + 44. + 25. + 24. + 8. + 1.;
 /// Callout hover bar: one 24px palette button in 10px padding, 1px border;
 /// it floats 9px above the callout, centred on it.
 const CALLOUT_BAR_W: f32 = 10. + 24. + 10. + 2.;
@@ -1387,7 +1387,7 @@ impl Editor {
         let x_align = x_turn + 44. + 8. + 1. + 8.;
         // The colour panel is wider than the bar's right-hand section, so it is
         // right-aligned inside the bar instead of hanging past its edge (#95).
-        let x_color = f32::min(x_align + 44. + 8. + 1. + 8. + 6. * (24. + 8.), TOOLBAR_W - CALLOUT_PANEL_W - 2.).max(0.);
+        let x_color = f32::min(x_align + 44. + 8. + 1. + 8. + 7. * (24. + 8.), TOOLBAR_W - CALLOUT_PANEL_W - 2.).max(0.);
         let bar = div()
             .h(px(40.))
             .px(px(8.))
@@ -1434,6 +1434,20 @@ impl Editor {
                     ),
             )
             .child(mark_btn("tb-code", "code", crate::settings::text("代码"), crate::shortcuts::hint("editor::InlineCode", "⌘ + Control + C"), Some(crate::settings::text("`代码`")), Mark::Code, |m| m.code))
+            .child(
+                btn("tb-equation")
+                    .w(px(24.))
+                    .tip_md(crate::settings::text("转为公式"), None, Some(crate::settings::text("$$文字$$")))
+                    .child(icon("sigma", 18., Theme::icon()))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|e, _, window, cx| {
+                            cx.stop_propagation();
+                            e.menu = None;
+                            e.selection_to_equation(window, cx);
+                        }),
+                    ),
+            )
             .when(!self.markdown, |d| d.child(color_btn))
             .child(div().mx(px(4.)).w(px(1.)).h(px(40.)).bg(Theme::line_border()))
             .child(
