@@ -34,7 +34,7 @@ b</code></pre></td></tr></tbody></table>
 <p></p>
 "#;
 
-const TEXTS: &[&str] = &["a", "中文", "😀", " ", "ab cd", "é", "👍🏽", "x"];
+const TEXTS: &[&str] = &["a", "中文", "😀", " ", "\u{a0}", "\u{3000}", "ab cd", "www.a.com", "é", "👍🏽", "x"];
 const PASTES: &[&str] = &["一\n二", "a\n\nb\nc", "\n", "😀\n中", "line"];
 
 struct Rng(u64);
@@ -125,6 +125,9 @@ fn step(c: &mut Core, rng: &mut Rng, allow_remote: bool) -> String {
         0..=2 => {
             let s = *rng.pick(TEXTS);
             c.insert_text(s);
+            if s == " " {
+                let _ = c.autolink();
+            }
             format!("insert_text({s:?})")
         }
         3 => {
