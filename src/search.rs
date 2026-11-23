@@ -255,6 +255,9 @@ fn min_width(ascii: &mut Option<(&'static str, [f32; 128])>, s: &str, style: &Te
         .sum()
 }
 
+/// `e` is a result for `q` through its body, not its title (see `SearchCache::rows`).
+fn body_hit(e: &Entry, q: &str) -> bool { !q.is_empty() && !e.title.to_lowercase().contains(q) }
+
 /// The glyph of a file titled by its name: Markdown, a 画板; else a page.
 pub(crate) fn file_glyph(m: &crate::store::Meta) -> &'static str {
     match m.kind {
@@ -402,10 +405,16 @@ impl Workspace {
     }
 
     pub(crate) fn pick_search(&mut self, row: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.search_results(cx).get(row).map(|e| e.id.clone()) else { return };
+        let q = self.query(cx);
+        let Some((id, body_hit)) = self.search_results(cx).get(row).map(|e| (e.id.clone(), body_hit(e, &q))) else { return };
         self.close_search(window, cx);
         self.open(&id, window, cx);
         if let Some(ed) = &self.editor {
+            // Found in the body: open at that hit, selected (#64). A title hit
+            // opens where the document was left, as before.
+            if body_hit && self.current.as_deref() == Some(id.as_str()) {
+                ed.update(cx, |e, cx| e.reveal_body_hit(&q, window, cx));
+            }
             { let f = ed.read(cx).focus.clone(); window.focus(&f, cx); }
         }
     }
@@ -667,7 +676,7 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{SearchCache, snippet};
+    use super::{SearchCache, body_hit, snippet};
     use crate::store::Entry;
 
     fn entry(id: &str, title: &str, body: &str) -> Entry {
@@ -730,6 +739,14 @@ mod tests {
         entries.reverse();
         assert_eq!(cache.rows(&entries, "gamma").rows, [1]);
         assert_eq!(cache.rows(&[], "gamma").rows, Vec::<usize>::new());
+    }
+
+    #[test]
+    fn body_hits_open_at_the_hit() {
+        // `rows` puts a document whose title holds the query with the title hits.
+        assert!(!body_hit(&entry("a", "APPLE harvest", "apple"), "apple"));
+        assert!(body_hit(&entry("b", "Notes", "the Apple pie"), "apple"));
+        assert!(!body_hit(&entry("c", "Notes", "x"), ""));
     }
 
     #[test]
