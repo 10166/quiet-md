@@ -1650,7 +1650,7 @@ impl Store {
         let own_rel = own.and_then(|id| self.index.get(id)).map(|m| m.rel.to_lowercase());
         let taken: HashSet<String> = self.index.values().filter(|m| !m.local() && parent_rel(&m.rel) == dir).map(|m| m.rel.to_lowercase()).collect();
         for n in 1.. {
-            let stem = if n == 1 { base.to_string() } else { format!("{base} {n}") };
+            let stem = if n == 1 { base.to_string() } else { layout::numbered(base, n) };
             let name = match ext { Some(e) => format!("{stem}.{e}"), None => stem };
             let rel = join_rel(dir, &name);
             let low = rel.to_lowercase();
@@ -2581,7 +2581,8 @@ impl Store {
             if src.fs_is_dir() { crate::vfs::rename(&src, self.abs(&rel))?; } else { crate::vfs::create_dir_all(self.abs(&rel))?; }
             rel
         } else {
-            let base = if !t.meta.rel.is_empty() { layout::unnumbered(stem_of(base_name(&t.meta.rel))).to_string() }
+            let stem = stem_of(base_name(&t.meta.rel));
+            let base = if !t.meta.rel.is_empty() { if meta.named_by_file() { stem } else { layout::unnumbered(stem) }.to_string() }
                 else if meta.named_by_file() { file_name_for(meta.name.as_deref().unwrap_or("")) }
                 else { file_name_for(&text.as_deref().and_then(|x| docxml::parse(x).ok()).map(|d| d.title.text).unwrap_or_default()) };
             let rel = join_rel(&dir, &self.free_name(&dir, &base, Some(ext_of(&meta)), None));
@@ -4025,12 +4026,12 @@ mod tests {
         assert_eq!(folders_of(&list, &back), ["工作", "子", "深"]);
         assert_eq!(folders_of(&list, &empty), ["a／b"]);
         assert_eq!(folders_of(&list, &dot), ["孤儿"]);
-        assert_eq!(folders_of(&list, &pic), ["同名 2"]);
+        assert_eq!(folders_of(&list, &pic), ["同名 (2)"]);
         assert!(folders_of(&list, &top).is_empty() && folders_of(&list, &con).is_empty());
         assert_eq!(by[same1.as_str()].title, "同名");
         // Files named by title.
-        for (id, rel) in [(&w1, "工作/周报.xml"), (&w2, "工作/周报 2.xml"), (&top, "周报.xml"), (&odd, "工作/子/x：y？＜z＞.xml"), (&empty, "a／b/未命名文档.xml"),
-            (&con, "CON_.xml"), (&dot, "孤儿/hidden.xml"), (&md, "工作/子/深/随手记.md"), (&index_doc, "索引.xml"), (&back, "工作/子/深/回链.xml"), (&pic, "同名 2/图.xml")] {
+        for (id, rel) in [(&w1, "工作/周报.xml"), (&w2, "工作/周报 (2).xml"), (&top, "周报.xml"), (&odd, "工作/子/x：y？＜z＞.xml"), (&empty, "a／b/未命名文档.xml"),
+            (&con, "CON_.xml"), (&dot, "孤儿/hidden.xml"), (&md, "工作/子/深/随手记.md"), (&index_doc, "索引.xml"), (&back, "工作/子/深/回链.xml"), (&pic, "同名 (2)/图.xml")] {
             assert_eq!(s.file_path(id).unwrap(), s.abs(rel), "{rel}");
             assert!(s.abs(rel).fs_is_file(), "{rel}");
         }
@@ -4040,12 +4041,12 @@ mod tests {
         let text = crate::vfs::read_to_string(s.abs("索引.xml")).unwrap();
         assert!(text.contains("href=\"工作/周报.xml\"") && text.contains("href=\"工作/子/深/随手记.md\"") && text.contains("doc-id=\"gone-id\""), "{text}");
         let text = crate::vfs::read_to_string(s.abs("工作/子/深/回链.xml")).unwrap();
-        assert!(text.contains("href=\"../../../索引.xml\"") && text.contains("href=\"../../周报 2.xml\""), "{text}");
+        assert!(text.contains("href=\"../../../索引.xml\"") && text.contains("href=\"../../周报 (2).xml\""), "{text}");
         // No id is written in any document.
         for id in before.keys() { for e in &list { if let Some(p) = s.file_path(&e.id) && !e.meta.local() { assert!(!crate::vfs::read_to_string(p).unwrap().contains(id.as_str())); } } }
         // Images: `.assets/`, the sources with them.
         assert!(lib.0.join(".assets/p.png").fs_is_file() && !lib.0.join("assets").fs_exists());
-        assert_eq!(crate::vfs::read_to_string(s.abs("同名 2/图.xml")).unwrap(), "<title>图</title>\n<img src=\".assets/p.png\"/>\n<p>=\"assets/x\"</p>\n");
+        assert_eq!(crate::vfs::read_to_string(s.abs("同名 (2)/图.xml")).unwrap(), "<title>图</title>\n<img src=\".assets/p.png\"/>\n<p>=\"assets/x\"</p>\n");
         assert_eq!(crate::vfs::read_to_string(s.abs("工作/子/深/随手记.md")).unwrap(), "看图 ![](.assets/p.png)\n");
         // Attached and local information.
         assert!(by[w1.as_str()].meta.pinned);
@@ -4061,7 +4062,7 @@ mod tests {
         // What the user sees: their folders and notes only.
         let mut top_names: Vec<String> = crate::vfs::read_dir(&lib.0).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         top_names.sort();
-        assert_eq!(top_names, [".assets", ".quiet", "CON_.xml", "a／b", "同名", "同名 2", "周报.xml", "孤儿", "工作", "索引.xml"]);
+        assert_eq!(top_names, [".assets", ".quiet", "CON_.xml", "a／b", "同名", "同名 (2)", "周报.xml", "孤儿", "工作", "索引.xml"]);
         // The old layout, whole, as a backup.
         let backup = lib.0.join(".quiet").join(migrate::BACKUP);
         for id in before.keys() { assert!(backup.join("docs").join(format!("{id}.xml")).fs_is_file() || backup.join("docs").join(format!("{id}.md")).fs_is_file()); }
@@ -4166,9 +4167,9 @@ mod tests {
         assert!(s.abs("丙.xml").fs_is_file() && !s.abs("甲.xml").fs_exists());
         assert!(crate::vfs::read_to_string(s.abs("新夹/乙.xml")).unwrap().contains("href=\"../丙.xml\""));
         let c = s.create_from(&doc("丙")).unwrap();
-        assert_eq!(s.file_path(&c).unwrap(), s.abs("丙 2.xml"));
+        assert_eq!(s.file_path(&c).unwrap(), s.abs("丙 (2).xml"));
         s.save(&c, &doc("丙")).unwrap();
-        assert_eq!(s.file_path(&c).unwrap(), s.abs("丙 2.xml"), "a numbered name fits its title");
+        assert_eq!(s.file_path(&c).unwrap(), s.abs("丙 (2).xml"), "a numbered name fits its title");
         let list = s.list();
         assert_eq!(targets(list.iter().find(|e| e.id == b).unwrap()), std::slice::from_ref(&a));
         // Undo of the move puts the file back, links too.
@@ -4181,8 +4182,9 @@ mod tests {
         assert!(crate::vfs::read_to_string(s.abs("丙.xml")).unwrap().contains("href=\"新夹/乙.xml\""));
     }
 
-    /// #358: renaming 「AAA 2」 back to 「AAA」 once 「AAA」 is gone takes the
-    /// name; while it is taken the number stays as it is.
+    /// #358: renaming 「AAA (2)」 back to 「AAA」 once 「AAA」 is gone takes the
+    /// name; while it is taken the number stays as it is. 「AAA 2」 from older
+    /// versions counts as numbered too (D8).
     #[test]
     fn renaming_back_to_a_freed_name_takes_it() {
         let lib = Lib::new("rename-freed");
@@ -4197,11 +4199,11 @@ mod tests {
         // Folders.
         let a = s.create_folder("AAA", None).unwrap();
         let b = s.create_folder("AAA", None).unwrap();
-        assert_eq!(file(&s, &b), "AAA 2");
+        assert_eq!(file(&s, &b), "AAA (2)");
         s.rename(&b, "AAA").unwrap();
-        assert_eq!(file(&s, &b), "AAA 2", "taken: the number stays, not 「AAA 3」");
-        s.rename(&b, "AAA 2").unwrap();
-        assert_eq!(file(&s, &b), "AAA 2", "unchanged");
+        assert_eq!(file(&s, &b), "AAA (2)", "taken: the number stays, not 「AAA (3)」");
+        s.rename(&b, "AAA (2)").unwrap();
+        assert_eq!(file(&s, &b), "AAA (2)", "unchanged");
         s.delete(&a, None).unwrap();
         s.rename(&b, "AAA").unwrap();
         assert_eq!(file(&s, &b), "AAA");
@@ -4209,16 +4211,16 @@ mod tests {
         s.rename(&b, "aaa").unwrap();
         assert_eq!(file(&s, &b), "aaa");
         assert_eq!(names(&s), ["aaa"], "a change of case renames the folder");
-        // 「AAA 3」 next to a taken 「AAA」 and a free 「AAA 2」 is not renumbered.
+        // 「AAA 3」 next to a taken 「AAA」 and a free 「AAA (2)」 is not renumbered.
         let c = s.create_folder("AAA", None).unwrap();
         let d = s.create_folder("AAA 3", None).unwrap();
-        assert_eq!(file(&s, &c), "AAA 2");
+        assert_eq!(file(&s, &c), "AAA (2)");
         s.delete(&c, None).unwrap();
         s.rename(&d, "AAA").unwrap();
         assert_eq!(file(&s, &d), "AAA 3");
         s.delete(&b, None).unwrap();
         s.delete(&d, None).unwrap();
-        // Documents, renamed from the list.
+        // Documents, renamed from the list; 「BBB 2」 is numbered the old way.
         let e = s.create_from(&doc("BBB")).unwrap();
         let f = s.create_from(&doc("BBB 2")).unwrap();
         s.rename(&f, "BBB").unwrap();
@@ -4233,16 +4235,54 @@ mod tests {
         // …and typed in the editor; a save of the same title leaves the number alone.
         let g = s.create_from(&doc("CCC")).unwrap();
         let h = s.create_from(&doc("CCC")).unwrap();
-        assert_eq!(file(&s, &h), "CCC 2.xml");
+        assert_eq!(file(&s, &h), "CCC (2).xml");
         s.list();
         s.delete(&g, None).unwrap();
         s.save(&h, &doc("CCC")).unwrap();
-        assert_eq!(file(&s, &h), "CCC 2.xml", "the title did not change");
+        assert_eq!(file(&s, &h), "CCC (2).xml", "the title did not change");
         s.save(&h, &doc("CCC 2")).unwrap();
         s.list();
         s.save(&h, &doc("CCC")).unwrap();
         assert_eq!(file(&s, &h), "CCC.xml");
-        assert!(s.abs("CCC.xml").fs_is_file() && !s.abs("CCC 2.xml").fs_exists());
+        assert!(s.abs("CCC.xml").fs_is_file() && !s.abs("CCC 2.xml").fs_exists() && !s.abs("CCC (2).xml").fs_exists());
+    }
+
+    /// A name that is its title (Markdown, folders) keeps its number when moved
+    /// or restored: 「报告 (2).md」 is often just what the file is called.
+    #[test]
+    fn titles_that_look_numbered_survive_moves() {
+        let lib = Lib::new("move-numbered");
+        let mut s = lib.open();
+        crate::vfs::write(lib.0.join("报告 (2).md"), "x\n").unwrap();
+        crate::vfs::write(lib.0.join("第 2.md"), "x\n").unwrap();
+        crate::vfs::create_dir_all(lib.0.join("照片 (2)")).unwrap();
+        let f = s.create_folder("夹", None).unwrap();
+        let list = s.list();
+        let ids: Vec<String> = list.iter().filter(|e| e.meta.markdown || e.title == "照片 (2)").map(|e| e.id.clone()).collect();
+        for id in &ids { s.move_in_tree(id, Some(&f), None).unwrap(); }
+        let rels = |s: &mut Store| { let mut r: Vec<String> = s.list().into_iter().filter(|e| ids.contains(&e.id)).map(|e| e.meta.rel).collect(); r.sort(); r };
+        assert_eq!(rels(&mut s), ["夹/报告 (2).md", "夹/照片 (2)", "夹/第 2.md"]);
+        let md = ids.iter().find(|id| s.index[*id].rel == "夹/报告 (2).md").unwrap().clone();
+        s.delete(&md, None).unwrap();
+        s.restore(&md).unwrap();
+        assert_eq!(s.index[&md].rel, "夹/报告 (2).md");
+    }
+
+    /// D8: a 「 2」 an older version gave a clash keeps its name; new clashes get 「 (2)」.
+    #[test]
+    fn old_numbered_names_stay() {
+        let lib = Lib::new("old-numbered");
+        let mut s = lib.open();
+        crate::vfs::write(lib.0.join("周报.xml"), "<title>周报</title>\n").unwrap();
+        crate::vfs::write(lib.0.join("周报 2.xml"), "<title>周报</title>\n").unwrap();
+        let old = s.list().into_iter().find(|e| e.meta.rel == "周报 2.xml").unwrap().id;
+        s.save(&old, &doc("周报")).unwrap();
+        s.list();
+        assert_eq!(s.index[&old].rel, "周报 2.xml", "fits its title, not renamed");
+        let new = s.create_from(&doc("周报")).unwrap();
+        assert_eq!(s.index[&new].rel, "周报 (2).xml");
+        let third = s.create_from(&doc("周报")).unwrap();
+        assert_eq!(s.index[&third].rel, "周报 (3).xml");
     }
 
     /// 新建子文档 (#357): the page goes into a folder of its name, as its 正文,
@@ -4372,7 +4412,7 @@ mod tests {
         // A taken name is numbered, and comes back when it is free again.
         let clash = s.create_folder("甲", None).unwrap();
         s.rename(&plan, "甲").unwrap();
-        assert!(s.abs("甲 2/甲 2.xml").fs_is_file());
+        assert!(s.abs("甲 (2)/甲 (2).xml").fs_is_file());
         s.delete(&clash, None).unwrap();
         s.rename(&plan, "乙").unwrap();
         s.rename(&plan, "甲").unwrap();
@@ -4380,7 +4420,7 @@ mod tests {
         // A child page holding the new name inside makes way.
         let _kid = s.create_child(&plan, &doc("丙")).unwrap();
         s.rename(&plan, "丙").unwrap();
-        assert!(s.abs("丙/丙.xml").fs_is_file() && s.abs("丙/丙 2.xml").fs_is_file());
+        assert!(s.abs("丙/丙.xml").fs_is_file() && s.abs("丙/丙 (2).xml").fs_is_file());
         assert_eq!(s.note_of(&folder).as_deref(), Some(plan.as_str()));
     }
 

@@ -342,7 +342,7 @@ impl Names {
             crate::vfs::read_dir(path).map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().to_lowercase()).collect()).unwrap_or_default()
         });
         for n in 1.. {
-            let stem = if n == 1 { base.to_string() } else { format!("{base} {n}") };
+            let stem = if n == 1 { base.to_string() } else { layout::numbered(base, n) };
             let name = match ext { Some(e) => format!("{stem}.{e}"), None => stem };
             if used.insert(name.to_lowercase()) { return name; }
         }

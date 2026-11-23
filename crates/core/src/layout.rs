@@ -6,7 +6,7 @@ use super::*;
 
 /// Characters no file name may hold on macOS or Windows, and what stands in for them.
 const ILLEGAL: [(char, char); 9] = [('/', '／'), ('\\', '＼'), (':', '：'), ('*', '＊'), ('?', '？'), ('"', '＂'), ('<', '＜'), ('>', '＞'), ('|', '｜')];
-/// Longest name kept, in bytes, before the ` 2` suffix and the extension.
+/// Longest name kept, in bytes, before the ` (2)` suffix and the extension.
 const NAME_BYTES: usize = 120;
 
 /// A title as a file or folder name (no extension): illegal characters become
@@ -35,12 +35,18 @@ pub fn file_name_for(title: &str) -> String {
     s
 }
 
-/// Whether `stem` is `base`, or `base` numbered (`base 2`, `base 3` …) because the name was taken.
+/// Whether `stem` is `base`, or `base` numbered because the name was taken:
+/// `base (2)`, `base (3)` … as made now, or `base 2` as older versions did.
 pub(super) fn name_fits(stem: &str, base: &str) -> bool {
-    stem == base || stem.strip_prefix(base).and_then(|r| r.strip_prefix(' ')).is_some_and(|n| !n.starts_with('0') && n.parse::<u32>().is_ok_and(|n| n >= 2))
+    let number = |n: &str| !n.starts_with('0') && n.parse::<u32>().is_ok_and(|n| n >= 2);
+    stem == base || stem.strip_prefix(base).and_then(|r| r.strip_prefix(' '))
+        .is_some_and(|r| number(r) || r.strip_prefix('(').and_then(|r| r.strip_suffix(')')).is_some_and(number))
 }
 
-/// `stem` without the ` 2` a clash gave it.
+/// `base` numbered for the `n`th clash (`n` ≥ 2).
+pub(super) fn numbered(base: &str, n: u32) -> String { format!("{base} ({n})") }
+
+/// `stem` without the ` (2)` (or older ` 2`) a clash gave it.
 pub(super) fn unnumbered(stem: &str) -> &str {
     match stem.rsplit_once(' ') {
         Some((head, n)) if !head.is_empty() && name_fits(stem, head) && !n.is_empty() => head,
@@ -196,6 +202,9 @@ mod tests {
     #[test]
     fn numbered_names() {
         assert!(name_fits("周报", "周报") && name_fits("周报 2", "周报") && name_fits("周报 12", "周报"));
+        assert!(name_fits("周报 (2)", "周报") && name_fits("周报 (12)", "周报"));
+        assert!(!name_fits("周报 (1)", "周报") && !name_fits("周报 (02)", "周报") && !name_fits("周报 (2", "周报") && !name_fits("周报 2)", "周报") && !name_fits("周报(2)", "周报"));
+        assert_eq!((unnumbered("周报 (2)"), unnumbered("周报 2"), unnumbered("周报 (x)"), unnumbered("(2)")), ("周报", "周报", "周报 (x)", "(2)"));
         assert!(!name_fits("周报 1", "周报") && !name_fits("周报 02", "周报") && !name_fits("周报2", "周报") && !name_fits("周", "周报"));
         assert_eq!(unnumbered("周报 3"), "周报");
         assert_eq!(unnumbered("周报"), "周报");

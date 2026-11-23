@@ -17,7 +17,9 @@ impl Store {
         let dir = parent.and_then(|p| self.index.get(p)).map(|p| p.rel.clone()).unwrap_or_default();
         let name = base_name(&m.rel);
         let ext = m.folder.is_none().then(|| ext_of(m));
-        let base = if ext.is_some() { layout::unnumbered(stem_of(name)) } else { layout::unnumbered(name) };
+        let stem = if ext.is_some() { stem_of(name) } else { name };
+        // A folder's or Markdown file's name is its title: 「报告 (2).md」 stays that.
+        let base = if m.folder.is_some() || m.named_by_file() { stem } else { layout::unnumbered(stem) };
         join_rel(&dir, &self.free_name(&dir, base, ext, None))
     }
 
