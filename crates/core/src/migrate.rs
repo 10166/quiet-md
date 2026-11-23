@@ -186,7 +186,7 @@ pub(super) fn restore(root: &Path) -> Result<RestoreReport> {
     }
     let inner = kept.join(INTERNAL);
     crate::vfs::create_dir_all(&inner)?;
-    for name in ["format.json", "index.json", "index.json.bak", "trash", "settings.json"] {
+    for name in ["format.json", "index.json", "index.json.bak", "index.json.v4", "meta", "trash", "settings.json"] {
         let p = internal.join(name);
         if p.fs_symlink_metadata().is_ok() { crate::vfs::rename(&p, inner.join(name))?; }
     }
@@ -483,7 +483,7 @@ fn migrate(root: &Path, format: u32, plan: &mut Plan, warnings: &mut Vec<String>
     crate::vfs::create_dir_all(local_path.parent().unwrap())?;
     write_atomic(&local_path, &serde_json::to_vec_pretty(&local)?)?;
     if plan.assets { crate::vfs::rename(&assets, root.join(ASSETS))?; }
-    write_atomic(&internal.join("format.json"), &serde_json::to_vec_pretty(&FormatMarker { format: FORMAT, id: uuid::Uuid::new_v4().to_string() })?)?;
+    write_atomic(&internal.join("format.json"), &serde_json::to_vec_pretty(&FormatMarker { format: 4, id: uuid::Uuid::new_v4().to_string() })?)?;
     Ok((written.len(), folders.len()))
 }
 

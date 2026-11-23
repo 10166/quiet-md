@@ -13,7 +13,8 @@ Dependencies flow from the application to core. Within the workspace, core may r
 main.rs — window
   ├─ onboarding.rs — first launch, replaced by Workspace in the same window after library selection
   └─ app.rs — Workspace (window root view)
-       ├─ store.rs — library directories and .quiet/index.json (see FORMAT.md) [core]
+       ├─ store.rs — library directories and .quiet/meta/ (see FORMAT.md) [core]
+       ├─ meta.rs — FORMAT 5: metadata split by device, merged field by field [core]
        ├─ sidebar / home / search / trash / tree / docmenu / docinfo / modes
        └─ editor::Editor (view.rs) — open document
             └─ editor::Core (core.rs) — document, selection and undo stack [core]

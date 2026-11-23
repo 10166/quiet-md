@@ -310,8 +310,9 @@ mod tests {
         drop(s);
         let b = dir("copy");
         crate::vfs::copy(a.join("one.xml"), b.join("one.xml")).unwrap();
-        crate::vfs::create_dir_all(b.join(".quiet")).unwrap();
-        for name in ["format.json", "index.json"] { crate::vfs::copy(a.join(".quiet").join(name), b.join(".quiet").join(name)).unwrap(); }
+        crate::vfs::create_dir_all(b.join(".quiet/meta")).unwrap();
+        let own = format!("meta/{}.json", crate::store::device().id);
+        for name in ["format.json", own.as_str()] { crate::vfs::copy(a.join(".quiet").join(name), b.join(".quiet").join(name)).unwrap(); }
         let mut ws = Workspace { fixed: true, ..Default::default() };
         ws.add(&a).unwrap();
         ws.add(&b).unwrap();
