@@ -44,11 +44,12 @@ Themes with `--theme-base: feishu` use Feishu block rendering. The last column l
 | `::selection` | `background-color` | Selected text background | ✓ |
 | `p` | `margin-bottom` | Space between blocks | ✓ |
 | `.title` | `font-family` `font-size` `line-height` `font-weight` `color` | Document title | ✓ |
-| `h1`–`h9` | `font-family` `font-size` `line-height` `font-weight` `color` `margin-top` `margin-bottom` | Heading levels | Size, line height, weight and margins |
-| `strong` (`b`) | `font-weight` `color` | Bold text | |
+| `h1`–`h9` | `font-family` `font-size` `line-height` `font-weight` `color` `margin-top` `margin-bottom` | Heading levels | Size, line height, weight, color and margins |
+| `strong` (`b`) | `font-weight` `color` | Bold text | Color only |
+| `em` (`i`) | `color` | Italic text. Inside bold text, the `strong` color applies. | ✓ |
 | `a` | `color` `text-decoration` (`underline` / `none`) `text-decoration-color` | Links. With `underline`, the line is always visible. | Color only |
 | `a:hover` | `color` | Hovered link | ✓ |
-| `code` | `color` `background-color` `border-color` `border-radius` `padding-left` | Inline code | |
+| `code` | `color` `background-color` `border-color` `border-radius` `padding-left` | Inline code. `padding-left` widens the background on both sides without moving the text. | Color, radius and padding |
 | `pre` | `font-family` `font-size` `line-height` `color` `background-color` `border-color` `border-radius` | Code blocks | Colors and font |
 | `.line-numbers` | `display` (`block` / `none`) `color` `background-color` | Code block line numbers | Colors |
 | `.token.comment` `.token.keyword` `.token.tag` `.token.string` `.token.number` `.token.boolean` `.token.class-name` `.token.attr-name` `.token.function` | `color` | Syntax highlighting using Prism class names | ✓ |
