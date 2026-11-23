@@ -1109,8 +1109,12 @@ impl Store {
     /// The folder this library is.
     pub fn root(&self) -> &Path { &self.root }
 
-    /// Whether `id` is in this library's 回收站.
-    pub fn trashed(&self, id: &str) -> bool { self.trash.contains_key(id) }
+    /// Whether `id` is in this library's 回收站, as the disk has it: a
+    /// writer of its own (`tree_writer`) may have put it there meanwhile.
+    pub fn trashed(&mut self, id: &str) -> bool {
+        if !self.trash.contains_key(id) && let Some(t) = reread(&self.trash_index_file()) { self.trash = t; }
+        self.trash.contains_key(id)
+    }
 
     /// Whether `id` is one of this library's documents or folders.
     pub fn has(&self, id: &str) -> bool { self.index.contains_key(id) }
@@ -3460,6 +3464,22 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_eq!(list.iter().find(|e| e.id == b).unwrap().meta.parent.as_deref(), Some(a.as_str()));
         assert!(s.list_trash().is_empty());
+    }
+
+    /// A page a tree writer deleted is in this copy's 回收站 too, and comes back.
+    #[test]
+    fn trashed_by_a_tree_writer() {
+        let lib = Lib::new("writertrash");
+        let mut s = lib.open();
+        let id = s.create_from(&doc("页")).unwrap();
+        let _ = (s.list(), s.list_trash());
+        let mut w = s.tree_writer();
+        w.delete(&id, None).unwrap();
+        assert_eq!(w.list_trash().len(), 1);
+        assert!(s.trashed(&id));
+        assert!(!s.restore(&id).unwrap());
+        assert_eq!(s.list().len(), 1);
+        assert!(!s.trashed(&id));
     }
 
     /// Deleting many pages (a folder and a selection) writes each index
