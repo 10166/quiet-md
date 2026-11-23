@@ -1733,11 +1733,16 @@ impl Workspace {
             .child(div().text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).text_color(Theme::text_caption()).child(if cfg!(target_os = "macos") { tr("本地优先的笔记应用：无需账号，文档就是你电脑上的文件。", "Local-first notes: no account, your documents are files on your Mac.") }
                 else { tr("本地优先的笔记应用：无需账号，文档就是你电脑上的文件。", "Local-first notes: no account, your documents are files on your computer.") })))
             .child(group(None, vec![update_row(cx).into_any_element()]))
+            .child(group(None, vec![row(tr("项目主页", "Project page"), Some(REPO.trim_start_matches("https://").into()),
+                button("open-repo", tr("打开", "Open")).on_click(|_, _, cx| crate::editor::open_link(cx, REPO))).into_any_element()]))
             .child(group(None, vec![row("Onboarding", Some(tr("在这个窗口上再走一遍首次启动的欢迎页（⌘⌥⇧O）；只会应用快捷键，不改动文档库", "Go through the first-launch pages again over this window (⌘⌥⇧O); only the shortcut is applied, the library stays as it is").into()),
                 button("replay-onboarding", tr("打开", "Open")).on_click(cx.listener(|w, _, window, cx| w.replay_onboarding(window, cx)))).into_any_element()]))
             .into_any_element()
     }
 }
+
+/// 关于 › 项目主页: the source repository, opened in the 打开链接 browser.
+const REPO: &str = "https://github.com/s1dashu/quiet-md";
 
 /// The sidebar bar's 更新 pill, only while a new version is on offer:
 /// 更新 downloads it (the pill then fills with its progress), 重启更新
