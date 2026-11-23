@@ -1738,6 +1738,7 @@ impl Editor {
                     .font_family(theme::DOC_UI_FONT)
                     .cursor(CursorStyle::IBeam)
                     .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+                    .on_mouse_down(MouseButton::Right, cx.listener(Self::on_right_click))
                     .on_drag_move(cx.listener(Self::file_drag_move))
                     .on_drop(cx.listener(Self::drop_files))
                     .child(list(self.list.clone(), cx.processor(Self::render_item)).size_full()),

@@ -28,10 +28,24 @@ actions!(workspace, [NewDoc, OpenFile, OpenFolder, ImportDoc, ImportFolder, Togg
 // A confirmation dialog's keys, in its own key context: ↩ is the action button, Esc 取消.
 actions!(confirm, [ConfirmOk, ConfirmCancel]);
 
+thread_local! {
+    /// The menu bar is for a Markdown file: 插入 / 格式 leave out what it can't hold.
+    static MENU_MARKDOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The menu bar follows the document in the window in front; rebuilt only
+/// when that changes between a Markdown file and anything else.
+pub fn menus_follow(markdown: bool, cx: &mut App) {
+    if MENU_MARKDOWN.replace(markdown) != markdown { set_menus(cx); }
+}
+
 /// The menu bar, in the interface language.
-pub fn set_menus(cx: &mut App) {
+pub fn set_menus(cx: &mut App) { cx.set_menus(menu_bar(MENU_MARKDOWN.get())); }
+
+/// The menus; for a Markdown file without 提醒, 下划线 and 对齐, which it can't keep.
+fn menu_bar(markdown: bool) -> Vec<Menu> {
     use crate::settings::tr;
-    cx.set_menus(vec![
+    vec![
         Menu {
             name: "Quiet.md".into(),
             items: vec![
@@ -85,6 +99,63 @@ pub fn set_menus(cx: &mut App) {
             },
             disabled: false,
         },
+        // 插入 and 格式: the menu-bar home of everything the page's
+        // right-click menu offers, so no action is reachable only by shortcut.
+        Menu {
+            name: tr("插入", "Insert").into(),
+            items: {
+                use crate::editor::keymap as k;
+                let mut items = vec![
+                    MenuItem::action(tr("链接", "Link"), k::Link),
+                    MenuItem::action(tr("表格", "Table"), k::InsertTable),
+                    MenuItem::action(tr("分隔线", "Divider"), k::InsertDivider),
+                ];
+                if !markdown { items.push(MenuItem::action(tr("提醒", "Reminder"), k::InsertReminder)); }
+                items
+            },
+            disabled: false,
+        },
+        Menu {
+            name: tr("格式", "Format").into(),
+            items: {
+                use crate::editor::keymap as k;
+                let mut items = vec![MenuItem::action(tr("粗体", "Bold"), k::Bold), MenuItem::action(tr("斜体", "Italic"), k::Italic)];
+                if !markdown { items.push(MenuItem::action(tr("下划线", "Underline"), k::Underline)); }
+                items.extend([
+                    MenuItem::action(tr("删除线", "Strikethrough"), k::Strike),
+                    MenuItem::action(tr("行内代码", "Inline code"), k::InlineCode),
+                    MenuItem::separator(),
+                    MenuItem::submenu(Menu {
+                        name: tr("转换为", "Turn into").into(),
+                        items: vec![
+                            MenuItem::action(tr("正文", "Text"), k::TurnText),
+                            MenuItem::action(tr("一级标题", "Heading 1"), k::TurnH1),
+                            MenuItem::action(tr("二级标题", "Heading 2"), k::TurnH2),
+                            MenuItem::action(tr("三级标题", "Heading 3"), k::TurnH3),
+                            MenuItem::action(tr("无序列表", "Bulleted list"), k::TurnBullet),
+                            MenuItem::action(tr("有序列表", "Numbered list"), k::TurnOrdered),
+                            MenuItem::action(tr("任务", "Task"), k::TurnTodo),
+                            MenuItem::action(tr("引用", "Quote"), k::TurnQuote),
+                            MenuItem::action(tr("代码块", "Code block"), k::TurnCode),
+                        ],
+                        disabled: false,
+                    }),
+                ]);
+                if !markdown {
+                    items.push(MenuItem::submenu(Menu {
+                        name: tr("对齐", "Align").into(),
+                        items: vec![
+                            MenuItem::action(tr("左对齐", "Align left"), k::AlignLeft),
+                            MenuItem::action(tr("居中对齐", "Align center"), k::AlignCenter),
+                            MenuItem::action(tr("右对齐", "Align right"), k::AlignRight),
+                        ],
+                        disabled: false,
+                    }));
+                }
+                items
+            },
+            disabled: false,
+        },
         Menu {
             name: tr("窗口", "Window").into(),
             items: vec![
@@ -95,7 +166,7 @@ pub fn set_menus(cx: &mut App) {
             ],
             disabled: false,
         },
-    ]);
+    ]
 }
 
 pub fn bind_keys(cx: &mut App) {
@@ -1774,6 +1845,11 @@ pub(crate) const HEADER_ACTIONS_H: f32 = 32.;
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_note_rows();
+        // The menu bar is the front window's: a Markdown file's 插入 / 格式 leave out what it can't hold.
+        if window.is_window_active() {
+            let markdown = self.view == View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).markdown);
+            cx.defer(move |cx| menus_follow(markdown, cx));
+        }
         // Clicks no longer take focus from the editor (see the root's mouse
         // down), so leaving the document hands it back to the window's keys.
         if self.view != View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).focus.is_focused(window)) { window.focus(&self.focus, cx); }
@@ -2114,5 +2190,35 @@ pub(crate) fn check_save_safety(phase: &str, cx: &mut App) {
         }).unwrap();
         eprintln!("save-safety: PASS; remaining conflict blocked quit; copy preserved; edit after reload saved cleanly");
         for (handle, _) in windows { handle.update(cx, |_, window, _| window.remove_window()).unwrap(); }
+    }
+}
+
+#[cfg(test)]
+mod menu_tests {
+    use super::{Menu, MenuItem, menu_bar};
+    use crate::settings::tr;
+
+    fn names(menus: &[Menu]) -> Vec<String> {
+        fn walk(items: &[MenuItem], out: &mut Vec<String>) {
+            for i in items {
+                match i {
+                    MenuItem::Action { name, .. } => out.push(name.to_string()),
+                    MenuItem::Submenu(m) => { out.push(m.name.to_string()); walk(&m.items, out); }
+                    _ => {}
+                }
+            }
+        }
+        let mut out = vec![];
+        for m in menus { out.push(m.name.to_string()); walk(&m.items, &mut out); }
+        out
+    }
+
+    #[test]
+    fn markdown_menus_leave_out_what_markdown_cannot_keep() {
+        let (doc, md) = (names(&menu_bar(false)), names(&menu_bar(true)));
+        let gone = [tr("提醒", "Reminder"), tr("下划线", "Underline"), tr("对齐", "Align"), tr("左对齐", "Align left"), tr("居中对齐", "Align center"), tr("右对齐", "Align right")];
+        for n in gone { assert!(doc.iter().any(|d| d == n) && !md.iter().any(|d| d == n), "{n}"); }
+        // Everything else stays, in the same order.
+        assert_eq!(doc.into_iter().filter(|d| !gone.contains(&d.as_str())).collect::<Vec<_>>(), md);
     }
 }
