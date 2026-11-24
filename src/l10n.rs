@@ -203,7 +203,8 @@ mod tests {
             for entry in fdl_core::vfs::read_dir(dir).unwrap() {
                 let path = entry.unwrap().path();
                 if path.fs_is_dir() { if path.file_name().is_some_and(|n| n != "l10n") { walk(&path, out); } }
-                else if path.extension().is_some_and(|e| e == "rs") { out.push_str(&fdl_core::vfs::read_to_string(path).unwrap()); }
+                // `._x.rs`: the companion macOS keeps for `x.rs` on some disks, not source.
+                else if path.extension().is_some_and(|e| e == "rs") && !path.file_name().is_some_and(|n| n.as_encoded_bytes().starts_with(b"._")) { out.push_str(&fdl_core::vfs::read_to_string(path).unwrap()); }
             }
         }
         let mut source = String::new();

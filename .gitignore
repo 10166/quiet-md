@@ -2,6 +2,7 @@
 /dist
 /dist-preview
 .DS_Store
+._*
 /archive/
 /shared-mock/*
 !/shared-mock/library/

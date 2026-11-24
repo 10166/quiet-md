@@ -2647,7 +2647,8 @@ mod localization_tests {
             for entry in fdl_core::vfs::read_dir(dir).unwrap() {
                 let path = entry.unwrap().path();
                 if path.fs_is_dir() { walk(&path, pattern); }
-                else if path.extension().is_some_and(|ext| ext == "rs") {
+                // `._x.rs`: the companion macOS keeps for `x.rs` on some disks, not source.
+                else if path.extension().is_some_and(|ext| ext == "rs") && !path.file_name().is_some_and(|n| n.as_encoded_bytes().starts_with(b"._")) {
                     let source = fdl_core::vfs::read_to_string(path).unwrap();
                     for hit in pattern.captures_iter(source.split("#[cfg(test)]").next().unwrap()) { check(&hit[1]); }
                 }
