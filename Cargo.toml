@@ -1,6 +1,6 @@
 [package]
 name = "quiet_md"
-version = "0.1.17"
+version = "0.1.18"
 edition = "2024"
 description = "A fast, local-first rich text notes app for macOS and Windows, drawn with GPUI and compatible with Feishu DocxXML"
 license = "MIT"
@@ -12,10 +12,12 @@ categories = ["text-editors"]
 
 # `devtools`: the FDL_SCRIPT driver for tools/harness (`cargo build --release
 # --features devtools`). Off in release builds: shipped apps cannot be scripted.
-# `datatable`: 数据表 (`.sqlite` tables, `BlockKind::DataTable`) while it is
-# still being polished. Off: no way to make one; existing ones show a read-only
+# `datatable`: 数据表 (`.sqlite` tables, `BlockKind::DataTable`). Upstream keeps
+# it off until it is polished; this fork has shipped it on since 0.1.14, so it
+# stays a default. Off: no way to make one; existing ones show a read-only
 # placeholder and are left as they are (`crate::DATATABLE`).
 [features]
+default = ["datatable"]
 devtools = ["embed-xiaolai"]
 # `embed-xiaolai`: the board's CJK font (14 MB) compiled in instead of fetched
 # when first needed (src/font_downloads.rs). On with `devtools`, so harness

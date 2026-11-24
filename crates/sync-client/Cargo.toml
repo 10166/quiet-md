@@ -1,6 +1,6 @@
 [package]
 name = "quiet_sync_client"
-version = "0.1.17"
+version = "0.1.18"
 edition = "2024"
 description = "Async local-first sync client engine for Quiet.md"
 license = "MIT"

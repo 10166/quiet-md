@@ -44,6 +44,9 @@ const NOTES: &[(&str, &[(&str, &str)])] = &[
         ("搜索结果直接打开到正文命中的位置", "A search result found in the body opens the note at the match"),
         ("新增正文字号设置；主题可以设置标题、粗体和斜体的颜色；文件夹树有了缩进参考线", "A text size setting for the note; themes can set the heading, bold and italic colors; indent guides in the folder tree"),
         ("新增繁体中文界面", "Traditional Chinese interface"),
+        ("数据表有了版本历史，可以从 CSV 新建；选中单元格后直接输入即可替换内容，并修复了 Windows 上点击单元格后无法输入的问题", "Data tables get version history and can be made from CSV files; typing on a selected cell replaces it, and a cell opened by a click takes keys on Windows again"),
+        ("偏好设置和快捷键改为保存在本机，不再随云同步在设备间同步；自定义主题照常同步", "Preferences and shortcuts are now kept on this computer and no longer sync between devices; custom themes still do"),
+        ("修复在全角或不换行空格后输入空格触发自动链接时可能崩溃的问题", "Fixed a crash when a space typed after a multi-byte whitespace character triggered an autolink"),
     ]),
     ("0.1.17", &[
         ("评论与多行输入框修复：超长评论、回复与公式输入支持内部滚动、自动跟随光标并严格裁剪边界，不再溢出遮挡底部按钮；宽屏浮动卡片长回复列表支持独立滚动", "Comments and multiline inputs: long comments, replies, and formula editors now scroll smoothly inside their bounds, keep the caret in view, and clip cleanly without overlapping buttons; long reply lists in floating margin cards scroll independently"),

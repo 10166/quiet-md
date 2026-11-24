@@ -1,6 +1,6 @@
 [package]
 name = "quiet_sync_server"
-version = "0.1.17"
+version = "0.1.18"
 edition = "2024"
 description = "Self-hostable real-time sync server for Quiet.md"
 license = "MIT"
