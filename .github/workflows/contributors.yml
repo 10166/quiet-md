@@ -1,12 +1,8 @@
 name: Update contributors
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - docs/images/contributors.svg
-  schedule:
-    - cron: '23 */6 * * *'
+  # By hand only (Actions › Update contributors › Run workflow): a fork has no use
+  # for a run on every push to main or every six hours.
   workflow_dispatch:
 
 permissions:

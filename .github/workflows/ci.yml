@@ -1,14 +1,14 @@
 name: CI
 
 on:
+  # Once per release, on its tag, or by hand (Actions › CI › Run workflow): a push
+  # to main runs nothing, since three runners for about half an hour each on every
+  # push is more than this fork needs.
+  # Pull requests run all required check jobs, but skip expensive compilation
+  # and packaging if only docs/site files changed.
   push:
-    branches: [main]
-    # Docs-only pushes skip CI. Pull requests run all required check jobs,
-    # but skip expensive compilation and packaging if only docs/site files changed.
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'site/**'
+    tags:
+      - 'v*'
   pull_request:
   workflow_dispatch:
 
