@@ -33,6 +33,17 @@ const NOTES: &[(&str, &[(&str, &str)])] = &[
         ("「…」菜单直接列出全部选项，阅读模式和显示引用列表改为开关", "The … menu lists every item directly; Reading mode and Show references are switches"),
         ("画板支持触控板双指缩放；窗口变窄时收起的侧栏，放宽后自动展开", "Pinch to zoom boards on a trackpad; a sidebar hidden by a narrow window comes back when it widens"),
         ("修复切换文档卡顿、代码块折叠不保存、画板选背景色时崩溃和深色模式下按钮看不清", "Fix lag when switching documents, code block folds not saving, a crash in the board's background picker, and hard-to-read buttons in dark mode"),
+        // What upstream merged after it wrote the notes above. Chinese and English, like this fork's own notes.
+        ("侧栏可以同时打开多个文件夹，每个文件夹有自己的回收站、历史版本和文档主题", "Several folders open side by side in the sidebar, each with its own Trash, version history and document theme"),
+        ("文档下面可以新建子文档，移动或重命名时一起走", "A document can have child pages; they move and are renamed with it"),
+        ("正文、光标和表格单元格有了右键菜单", "Right-click menus for text, the caret and table cells"),
+        ("Mermaid 代码块直接显示为图表（macOS 和 Windows），可以切回代码", "Mermaid code blocks show their diagram (macOS and Windows), with a switch back to the code"),
+        ("指向文件的相对链接可以点击打开，文件移动后自动更新", "Relative links to files open, and follow files that move"),
+        ("选中的文字可以转为行内公式", "Selected text turns into an inline equation"),
+        ("中文输入法打出的全角标记同样能触发 Markdown；设置 › 通用可以开启中英文之间自动加空格", "Full-width Markdown markers typed with a Chinese input method work; Settings › General can add spaces between Chinese and English"),
+        ("搜索结果直接打开到正文命中的位置", "A search result found in the body opens the note at the match"),
+        ("新增正文字号设置；主题可以设置标题、粗体和斜体的颜色；文件夹树有了缩进参考线", "A text size setting for the note; themes can set the heading, bold and italic colors; indent guides in the folder tree"),
+        ("新增繁体中文界面", "Traditional Chinese interface"),
     ]),
     ("0.1.17", &[
         ("评论与多行输入框修复：超长评论、回复与公式输入支持内部滚动、自动跟随光标并严格裁剪边界，不再溢出遮挡底部按钮；宽屏浮动卡片长回复列表支持独立滚动", "Comments and multiline inputs: long comments, replies, and formula editors now scroll smoothly inside their bounds, keep the caret in view, and clip cleanly without overlapping buttons; long reply lists in floating margin cards scroll independently"),
