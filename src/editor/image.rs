@@ -2651,7 +2651,7 @@ pub(crate) fn localize_pasted_images(blocks: &mut Vec<Block>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{cap, clipboard_image_data, decode, decode_png, decode_rgba_bytes, decode_rotated, dimensions_from_path, is_svg_bytes, local_image_path, pasted_remote, render_svg, svg_dimensions, BAD_DIMS, FULL};
+    use super::{cap, clipboard_image_data, decode, decode_png, decode_rgba_bytes, decode_rotated, dimensions_from_path, is_svg_bytes, local_image_path, pasted_remote, render_svg, svg_dimensions, svg_fontdb, BAD_DIMS, FULL};
     use crate::model::{Block, BlockKind, RichText};
     use gpui::ImageFormat;
 
@@ -2831,10 +2831,17 @@ mod tests {
         let (huge_im, _, _) = render_svg(huge, 0).unwrap();
         assert_eq!((huge_im.width(), huge_im.height()), (4096, 2048));
 
-        // CJK text renders visible glyphs via system fonts.
-        let cjk = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"80\"><text x=\"20\" y=\"52\" font-size=\"32\" fill=\"#111111\">架构图</text></svg>".as_bytes();
-        let cjk_im = decode_rgba_bytes(cjk, 400).unwrap();
-        assert!(cjk_im.pixels().any(|p| p.0[3] > 200), "expected CJK text pixels in rendered SVG");
+        // CJK text renders visible glyphs via system fonts. A text takes the one font family it
+        // names, and a system without that family draws nothing (CI's Linux has no Times New
+        // Roman, the default), so it names a CJK font this system has; with none, nothing to check.
+        let db = svg_fontdb();
+        let has = |family: &str| db.query(&resvg::usvg::fontdb::Query { families: &[resvg::usvg::fontdb::Family::Name(family)], ..Default::default() }).is_some();
+        let cjk_font = ["PingFang SC", "Hiragino Sans GB", "Songti SC", "Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Zen Hei"].into_iter().find(|f| has(f));
+        if let Some(family) = cjk_font {
+            let cjk = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"80\"><text x=\"20\" y=\"52\" font-size=\"32\" fill=\"#111111\" font-family=\"{family}\">架构图</text></svg>");
+            let cjk_im = decode_rgba_bytes(cjk.as_bytes(), 400).unwrap();
+            assert!(cjk_im.pixels().any(|p| p.0[3] > 200), "expected CJK text pixels in rendered SVG with {family}");
+        }
 
         // External file href is ignored safely; non-SVG bytes are rejected.
         let ext_ref = br#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><image href="/etc/hosts" width="40" height="40"/></svg>"#;
