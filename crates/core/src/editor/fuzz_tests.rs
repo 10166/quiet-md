@@ -34,7 +34,7 @@ b</code></pre></td></tr></tbody></table>
 <p></p>
 "#;
 
-const TEXTS: &[&str] = &["a", "中文", "😀", " ", "ab cd", "é", "👍🏽", "x", "汉a字1", "かな"];
+const TEXTS: &[&str] = &["a", "中文", "😀", " ", "\u{a0}", "\u{3000}", "ab cd", "www.a.com", "é", "👍🏽", "x", "汉a字1", "かな"];
 const MARKERS: &[&str] = &["# ", "＃＃ ", "- ", "—— ", "1. ", "2． ", "> ", "＞ ", "| ", "[] ", "``` ", "```rust", "···py", "*** "];
 const PASTES: &[&str] = &["一\n二", "a\n\nb\nc", "\n", "😀\n中", "line"];
 
@@ -128,6 +128,9 @@ fn step(c: &mut Core, rng: &mut Rng, allow_remote: bool) -> String {
             c.insert_text(s);
             // 中英文之间自动加空格, as typing does with it on.
             if rng.chance(30) && c.space_typed(s.len()) { return format!("insert_text({s:?})+space_typed"); }
+            if s == " " {
+                let _ = c.autolink();
+            }
             format!("insert_text({s:?})")
         }
         3 => {

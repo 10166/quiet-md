@@ -488,7 +488,7 @@ impl TextField {
 
     // utf16 helpers
     fn to16(&self, o: usize) -> usize {
-        self.text[..o.min(self.text.len())].encode_utf16().count()
+        self.text[..self.text.floor_char_boundary(o.min(self.text.len()))].encode_utf16().count()
     }
 
     fn from16(&self, o16: usize) -> usize {
@@ -507,7 +507,9 @@ impl TextField {
     }
 
     fn range8(&self, r: &Range<usize>) -> Range<usize> {
-        self.from16(r.start)..self.from16(r.end)
+        let a = self.from16(r.start);
+        let b = self.from16(r.end);
+        a.min(b)..a.max(b)
     }
 }
 

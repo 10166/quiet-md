@@ -1151,15 +1151,22 @@ impl Core {
     /// Replace `range` in the caret block (IME / input handler path).
     pub fn replace_in_block(&mut self, id: BlockId, range: Range<usize>, s: &str) {
         self.checkpoint(EditKind::Typing);
-        let marks = self.text_of(id).map(|t| t.marks_at(range.start)).unwrap_or_default();
+        let Some((a, b)) = self.text_of(id).map(|t| {
+            let a = t.text.floor_char_boundary(range.start.min(t.len()));
+            let b = t.text.floor_char_boundary(range.end.min(t.len()));
+            (a.min(b), a.max(b))
+        }) else {
+            return;
+        };
+        let marks = self.text_of(id).map(|t| t.marks_at(a)).unwrap_or_default();
         let marks = self.pending_marks.take().unwrap_or(marks);
         let marks = if self.is_code(id) || id == TITLE { Marks::default() } else { marks };
         if let Some(t) = self.text_mut(id) {
             let mut ins = RichText::default();
             ins.push(s, marks);
-            t.replace(range.start..range.end.min(t.len()), &ins);
+            t.replace(a..b, &ins);
         }
-        self.sel = Selection::caret(Pos::new(id, range.start + s.len()));
+        self.sel = Selection::caret(Pos::new(id, a + s.len()));
     }
 
     /// Insert an equation at the caret; returns its position.
@@ -3156,7 +3163,7 @@ impl Core {
         }
         let Some(t) = self.text_of(p.block) else { return false };
         let Some(before) = t.text[..p.offset].strip_suffix(' ') else { return false };
-        let start = before.rfind(char::is_whitespace).map_or(0, |i| i + 1);
+        let start = before.char_indices().rev().find(|(_, c)| c.is_whitespace()).map_or(0, |(i, c)| i + c.len_utf8());
         let word = before[start..].trim_end_matches(|c: char| ".,;:!?)]}'\"。，；：！？）】、".contains(c));
         let lower = word.to_ascii_lowercase();
         let rest = ["https://", "http://", "www."].iter().find_map(|s| lower.strip_prefix(s));
@@ -4870,6 +4877,40 @@ mod tests {
         assert_eq!(c.space_document(), 0);
         c.undo();
         assert_eq!(xml(&c), before);
+    }
+
+    #[test]
+    fn autolink_after_multibyte_whitespace() {
+        // Non-breaking space (\u{a0}, 2 bytes) and ideographic space (\u{3000}, 3 bytes)
+        // must not panic on char-boundary slicing when typing space in a word or after a URL.
+        for ws in ["\u{a0}", "\u{3000}"] {
+            let mut c = doc(&format!("<title>T</title><p>prefix{ws}pipelinebubble</p>"));
+            let b = id(&c, 1);
+            let split = "prefix".len() + ws.len() + "pipeline".len();
+            c.sel = Selection::caret(Pos::new(b, split));
+            c.insert_text(" ");
+            assert!(!c.autolink());
+            assert_eq!(c.text_of(b).unwrap().text, format!("prefix{ws}pipeline bubble"));
+
+            let mut c = doc(&format!("<title>T</title><p>见{ws}www.a.com/x</p>"));
+            let b = id(&c, 1);
+            let end = c.text_of(b).unwrap().len();
+            c.sel = Selection::caret(Pos::new(b, end));
+            c.insert_text(" ");
+            assert!(c.autolink());
+            assert!(xml(&c).contains(&format!("<p>见{ws}<a href=\"https://www.a.com/x\">www.a.com/x</a> </p>")), "{}", xml(&c));
+        }
+    }
+
+    #[test]
+    fn replace_in_block_clamps_bad_ranges() {
+        let mut c = doc("<title>T</title><p>中文</p>");
+        let b = id(&c, 1);
+        // Mid-character byte offset and reversed/out-of-bounds range must not panic.
+        let (start, end) = (99, 1);
+        c.replace_in_block(b, start..end, "a");
+        assert!(c.text_of(b).unwrap().text.ends_with('a'));
+        assert!(c.sel.head.offset <= c.text_of(b).unwrap().len());
     }
 
     #[test]

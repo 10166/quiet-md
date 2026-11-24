@@ -327,7 +327,7 @@ impl Focusable for Editor {
 }
 
 fn to16(s: &str, o: usize) -> usize {
-    s[..o.min(s.len())].encode_utf16().count()
+    s[..s.floor_char_boundary(o.min(s.len()))].encode_utf16().count()
 }
 
 fn from16(s: &str, o16: usize) -> usize {
@@ -3158,7 +3158,9 @@ impl EntityInputHandler for Editor {
         _: &mut Context<Self>,
     ) -> Option<String> {
         let t = self.head_text()?;
-        let r = from16(&t, range.start)..from16(&t, range.end);
+        let a = from16(&t, range.start);
+        let b = from16(&t, range.end);
+        let r = a.min(b)..a.max(b);
         actual.replace(to16(&t, r.start)..to16(&t, r.end));
         Some(t[r].to_string())
     }
@@ -3198,12 +3200,18 @@ impl EntityInputHandler for Editor {
         let head = self.core.sel.head.block;
         let had_marked = self.marked.is_some();
         if let Some((b, r)) = self.marked.take() {
-            self.core.sel = Selection { anchor: Pos::new(b, r.start), head: Pos::new(b, r.end) };
+            if let Some(t) = self.core.text_of(b) {
+                let a = t.text.floor_char_boundary(r.start.min(t.len()));
+                let e = t.text.floor_char_boundary(r.end.min(t.len()));
+                self.core.sel = Selection { anchor: Pos::new(b, a.min(e)), head: Pos::new(b, a.max(e)) };
+            }
         } else if let Some(r16) = range
             && let Some(t) = self.head_text()
         {
             let (rep, _) = self.reported_range(&t);
-            let r = from16(&t, r16.start)..from16(&t, r16.end);
+            let a = from16(&t, r16.start);
+            let b = from16(&t, r16.end);
+            let r = a.min(b)..a.max(b);
             if r != rep {
                 self.core.sel = Selection { anchor: Pos::new(head, r.start), head: Pos::new(head, r.end) };
             }
@@ -3237,11 +3245,14 @@ impl EntityInputHandler for Editor {
         }
         let head = self.core.sel.head.block;
         let t = self.core.text_of(head).map(|t| t.text.clone()).unwrap_or_default();
-        let r = match (&self.marked, range) {
+        let raw = match (&self.marked, range) {
             (Some((b, r)), _) if *b == head => r.clone(),
             (_, Some(r16)) => from16(&t, r16.start)..from16(&t, r16.end),
             _ => self.reported_range(&t).0,
         };
+        let a = t.floor_char_boundary(raw.start.min(t.len()));
+        let b = t.floor_char_boundary(raw.end.min(t.len()));
+        let r = a.min(b)..a.max(b);
         self.core.replace_in_block(head, r.clone(), text);
         let had_marked = self.marked.is_some();
         self.marked = (!text.is_empty()).then(|| (head, r.start..r.start + text.len()));
