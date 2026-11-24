@@ -262,9 +262,10 @@ impl Workspace {
     /// run's one root (`QUIET_MD_HOME`), and not a folder the system names
     /// (home, Desktop, Documents, Downloads …).
     pub fn can_rename(&self, key: &str) -> bool {
-        // A test run's one root stays where the run put it.
-        let pinned = cfg!(target_family = "wasm") || (std::env::var_os("QUIET_MD_HOME").is_some() && std::env::var_os("QUIET_MD_ROOTS").is_none());
-        let Some(r) = self.root(key).filter(|r| r.store.is_some() && !pinned) else { return false };
+        // A test run's one root stays where the run put it: the folder `QUIET_MD_HOME` names, not one opened beside it.
+        let home = std::env::var_os("QUIET_MD_HOME").filter(|_| std::env::var_os("QUIET_MD_ROOTS").is_none());
+        let Some(r) = self.root(key).filter(|r| r.store.is_some()) else { return false };
+        if cfg!(target_family = "wasm") || home.is_some_and(|h| canonical(Path::new(h.as_os_str())) == canonical(&r.path)) { return false; }
         let system = [dirs::home_dir(), dirs::desktop_dir(), dirs::document_dir(), dirs::download_dir(), dirs::picture_dir(), dirs::audio_dir(), dirs::video_dir(), dirs::public_dir()];
         r.path.parent().is_some() && !system.into_iter().flatten().any(|d| canonical(&d) == canonical(&r.path))
     }
